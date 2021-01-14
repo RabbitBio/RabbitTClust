@@ -1,3 +1,6 @@
 [submodule "RabbitIO"]
 	path = RabbitIO
 	url = git@github.com:RabbitBio/RabbitIO.git
+[submodule "RabbitSketch"]
+	path = RabbitSketch
+	url = git@github.com:ZekunYin/RabbitSketch.git
