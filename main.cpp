@@ -6,6 +6,7 @@
 #include "kseq.h"
 #include <stdio.h>
 #include "MST.h"
+#include <omp.h>
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -97,22 +98,31 @@ int main(int argc, char * argv[]){
 
 	//create the graphs.
 	vector<Graph> graphs;
+	int threads = 32;
 
-	//#pragma omp parallel for num_threads(32)
+	Graph tmpG[threads];
+
+	#pragma omp parallel for num_threads(threads)
 	for(int i = 0; i < minHashes.size(); i++){
-		Graph tmpG;
-		tmpG.node = i;
+		//Graph tmpG;
+		int thread_id = omp_get_thread_num();
+		#pragma omp critical
+		{
+		cerr << "the thread id is: " << thread_id << endl;
+		}
+		tmpG[thread_id].node = i;
 		for(int j = i+1; j < minHashes.size(); j++){
 			double tmpDist = 1.0 - minHashes[i]->jaccard(minHashes[j]);
-			printf("<%d, %d, %lf>\n", i, j, tmpDist);
-			tmpG.neighbor.push_back(NeighborNode(j, tmpDist));
+			//printf("<%d, %d, %lf>\n", i, j, tmpDist);
+			tmpG[thread_id].neighbor.push_back(NeighborNode(j, tmpDist));
 		}
 		//sort the suffixNodes by weight of the edge in an ascending order.
-		std::sort(tmpG.neighbor.begin(), tmpG.neighbor.end(), cmpNeighbor);
+		std::sort(tmpG[thread_id].neighbor.begin(), tmpG[thread_id].neighbor.end(), cmpNeighbor);
 
-		//#pragma omp critical
+		#pragma omp critical
 		{
-		graphs.push_back(tmpG);
+		graphs.push_back(tmpG[thread_id]);
+		tmpG[thread_id].neighbor.clear();
 		//cerr << "end the sequence: " << i << endl;
 		}
 
