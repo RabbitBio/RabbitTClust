@@ -9,7 +9,11 @@ bool cmpNeighbor(NeighborNode n1, NeighborNode n2){
 	return n1.distance < n2.distance;
 }
 
-void creatMST(MST &mst, vector<Graph> graphs, int numberNode){
+void creatMST(MST &mst, vector <Graph> &graphs, int numberNode){
+	if(graphs.capacity() == 0){
+		cerr << "the graphs is NULL " << endl;
+		exit(1);
+	}
 	mst.nodes.insert(graphs[0].node);
 	int numMSTNode = 1;
 	while(numMSTNode < numberNode){
@@ -20,7 +24,8 @@ void creatMST(MST &mst, vector<Graph> graphs, int numberNode){
 		int tmpSufNode = graphs[0].node;
 
 		//when the loop ends, the shortest edge combining the two vertex sets(MST and G-MST) is added into MST.
-		for(int i = 0; i < graphs.size(); i++){
+		//for(int i = 0; i < graphs.size(); i++){
+		for(int i = 0; i < graphs.capacity(); i++){
 			//the edge to add into the MST in prime algorithm
 			//get the minimum edge from the edge of all the preNode in the MST.
 			
@@ -128,9 +133,9 @@ void creatClust(vector<Graph> graphs, vector< unordered_set<int> > & clusters){
 
 	int index = 0;
 	while(traversedNode.size() != graphs.size()){
-		cerr << traversedNode.size() << endl;
+		//cerr << traversedNode.size() << endl;
 		if(q.empty()){
-			cerr << "the q is empty!" << endl;
+			//cerr << "the q is empty!" << endl;
 			clusters.push_back(tmpCluster);
 			tmpCluster.clear();
 			for(int i = 0; i < graphs.size(); i++){
@@ -143,7 +148,7 @@ void creatClust(vector<Graph> graphs, vector< unordered_set<int> > & clusters){
 		}
 		else{
 			int curNode = q.front();
-			cerr << "the curNode is: " << curNode << endl;
+			//cerr << "the curNode is: " << curNode << endl;
 			traversedNode.insert(curNode);
 			tmpCluster.insert(curNode);
 			//tmpCluster.push_back(curNode);

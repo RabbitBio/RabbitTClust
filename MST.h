@@ -45,7 +45,7 @@ struct MST{
 bool cmpNeighbor(NeighborNode n1, NeighborNode n2);
 
 
-void creatMST(MST &mst, std::vector<Graph> graphs, int numberNode);
+void creatMST(MST &mst, std::vector<Graph> & graphs, int numberNode);
 	
 
 void mst2Graph(MST &mst, std::vector<Graph> &graphs);

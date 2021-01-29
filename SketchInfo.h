@@ -23,6 +23,7 @@ struct SimilarityInfo{
 	std::string name;
 	std::string comment;
 	std::string strand;
+	std::string seq;
 	uint64_t length;
 	int size;
 
