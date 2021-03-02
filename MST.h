@@ -29,6 +29,7 @@ struct EdgeInfo{
 
 struct Graph{
 	int node;
+	int curNeighbor;
 	std::vector<NeighborNode> neighbor;
 
 };
@@ -61,6 +62,7 @@ void creatForest(MST srcMST, MST & resForest, double threshhold);
 void creatClust(std::vector<Graph> graphs, std::vector< std::unordered_set<int> > & clusters);
 
 
+void mergeGraph(std::vector<Graph> & resGraph, std::vector<Graph> tmpGraph);
 
 
 

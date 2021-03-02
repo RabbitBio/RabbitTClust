@@ -10,7 +10,7 @@ bool cmpNeighbor(NeighborNode n1, NeighborNode n2){
 }
 
 void creatMST(MST &mst, vector <Graph> &graphs, int numberNode){
-	if(graphs.capacity() == 0){
+	if(graphs.size() == 0){
 		cerr << "the graphs is NULL " << endl;
 		exit(1);
 	}
@@ -24,13 +24,15 @@ void creatMST(MST &mst, vector <Graph> &graphs, int numberNode){
 		int tmpSufNode = graphs[0].node;
 
 		//when the loop ends, the shortest edge combining the two vertex sets(MST and G-MST) is added into MST.
-		//for(int i = 0; i < graphs.size(); i++){
-		for(int i = 0; i < graphs.capacity(); i++){
+		for(int i = 0; i < graphs.size(); i++){
+		//for(int i = 0; i < graphs.capacity(); i++){
 			//the edge to add into the MST in prime algorithm
 			//get the minimum edge from the edge of all the preNode in the MST.
 			
 			if(mst.nodes.count(graphs[i].node) > 0){//the preNode is in the MST.
 				for(int j = 0; j < graphs[i].neighbor.size(); j++){
+				//for(int j = graphs[i].curNeighbor; j < graphs[i].neighbor.size(); j++){
+					//graphs[i].curNeighbor++;
 					if(mst.nodes.count(graphs[i].neighbor[j].id) == 0 && tmpMinDist > graphs[i].neighbor[j].distance){
 						tmpPreNode = graphs[i].node;
 						tmpSufNode = graphs[i].neighbor[j].id;
@@ -51,6 +53,7 @@ void creatMST(MST &mst, vector <Graph> &graphs, int numberNode){
 
 		//add the shortest edge into the MST.
 		mst.nodes.insert(tmpSufNode);
+		//cout << tmpSufNode << endl;
 		mst.edges.push_back(EdgeInfo(tmpPreNode, tmpSufNode, tmpMinDist));
 		numMSTNode++;
 
@@ -118,8 +121,8 @@ void creatForest(MST srcMST, MST & resForest, double threshold){
 
 }
 
-void creatClust(vector<Graph> graphs, vector< unordered_set<int> > & clusters){
 //void creatClust(vector<Graph> graphs, vector< vector<int> > & clusters){
+void creatClust(vector<Graph> graphs, vector< unordered_set<int> > & clusters){
 	queue<int> q;
 	unordered_set<int> traversedNode;//the head node.
 	unordered_set<int> tmpCluster;
@@ -154,7 +157,7 @@ void creatClust(vector<Graph> graphs, vector< unordered_set<int> > & clusters){
 			//tmpCluster.push_back(curNode);
 			q.pop();
 			for(int i = 0; i < graphs.size(); i++){
-				//if(traversedNode.count(graphs[i].node) == 0 && graphs[i].node == curNode){
+				//if(traversedNode.count(graphs[i].node) == 0 && graphs[i].node == curNode)
 				if(graphs[i].node == curNode){
 					//tmpCluster.insert(curNode);
 					for(int j = 0; j < graphs[i].neighbor.size(); j++){
@@ -180,18 +183,29 @@ void creatClust(vector<Graph> graphs, vector< unordered_set<int> > & clusters){
 }
 
 
+void mergeGraph(vector<Graph> & resGraph, vector<Graph> tmpGraph){
+	for(int i = 0; i < tmpGraph.size(); i++){
+		for(int j = 0; j < resGraph.size(); j++){
+			if(tmpGraph[i].node == resGraph[j].node){
+				for(int k = 0; k < tmpGraph[i].neighbor.size(); k++){
+					for(int l = 0; l < resGraph[j].neighbor.size(); l++){
+						if(tmpGraph[i].neighbor[k].id == resGraph[j].neighbor[l].id){
+							resGraph[j].neighbor[l].distance = tmpGraph[i].neighbor[k].distance < resGraph[j].neighbor[l].distance ? tmpGraph[i].neighbor[k].distance : resGraph[j].neighbor[l].distance;
+							break;//end the tmpGraph[i].neighbor[k];
+							
+						}
+						if(l == resGraph[j].neighbor.size()-1){
+							resGraph[j].neighbor.push_back(tmpGraph[i].neighbor[k]);
+						}
+					}
+				}//end the tmpGraph[i].neighbor[k];
+			}//end if
+		}
+		
+	}
 
 
-
-
-
-
-
-
-
-
-
-
+}
 
 
 
