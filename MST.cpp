@@ -2,11 +2,152 @@
 #include "MST.h"
 #include <stdio.h>
 #include <queue>
+#include "UnionFind.h"
 
 using namespace std;
 
+bool cmpEdge(EdgeInfo e1, EdgeInfo e2){
+	return e1.dist < e2.dist;
+}
+
 bool cmpNeighbor(NeighborNode n1, NeighborNode n2){
 	return n1.distance < n2.distance;
+}
+
+
+vector<EdgeInfo> kruskalAlgorithm(vector<EdgeInfo>graph, int vertices){
+    UnionFind uf(vertices);
+    vector<EdgeInfo>spanningTree;
+    //sort(graph.begin(),graph.end(),comparator);
+    spanningTree.push_back(graph[0]);
+    uf.merge(graph[0].preNode,graph[0].sufNode);
+    for(int i=1;i<graph.size();i++){
+        if(!uf.connected(graph[i].preNode,graph[i].sufNode)){
+            uf.merge(graph[i].preNode,graph[i].sufNode);
+            spanningTree.push_back(graph[i]);
+        }
+		//if(spanningTree.size() == vertices - 1) break;
+    }
+    return spanningTree;
+}
+
+
+
+
+void updateForest(vector<MST> &forest, MST mst, int curSufNode){//update forest with the result MST;
+	for(int i = 0; i < forest.size(); i++){
+		if(forest[i].nodes.count(curSufNode) > 0){
+			mst.nodes.insert(forest[i].nodes.begin(), forest[i].nodes.end());
+			mst.edges.insert(mst.edges.end(), forest[i].edges.begin(), forest[i].edges.end());
+			forest.erase(forest.begin() + i);
+			break;
+		}
+	}
+
+}
+
+void updateForest(vector<MST> &forest, int curIndex, int curSufNode){//inner update of the forest.
+	if(curIndex >= forest.size()){
+		cerr << "error index of forest update" << endl;
+		exit(1);
+	}
+	for(int i = 0; i < forest.size(); i++){
+		if(i == curIndex){
+			//current MST in the forest, continue;
+			continue;
+		}
+		if(forest[i].nodes.count(curSufNode) > 0){
+			//the MST can be merged into the curMST
+			forest[curIndex].nodes.insert(forest[i].nodes.begin(), forest[i].nodes.end());
+			forest[curIndex].edges.insert(forest[curIndex].edges.end(), forest[i].edges.begin(), forest[i].edges.end());
+			forest.erase(forest.begin()+i);//remove the MST which has been merged.
+			break;	//only one MST has the intesection node with the current MST on curSufNode.
+					//if more than one MST have the intsection on curSufNode, they should have been merged before.	
+		}
+	}
+	
+
+}
+
+void kruskalMST(MST &mst, vector<EdgeInfo> graph, int numberNode){
+	mst.nodes.insert(graph[0].preNode);
+	mst.nodes.insert(graph[0].sufNode);
+	mst.edges.push_back(graph[0]);
+
+	vector<MST> forest;
+
+	for(int i = 1; i < graph.size(); i++){
+		if(mst.nodes.count(graph[i].preNode) > 0 && mst.nodes.count(graph[i].sufNode) > 0){
+			//both nodes of the edge have been added into the tree, which can cause circle.
+			continue;
+		}
+		else if(mst.nodes.count(graph[i].preNode) == 0 && mst.nodes.count(graph[i].sufNode) == 0){
+			//both nodes of the edge are not in the MST.
+			//they should be in another MST;
+			bool inForest = false;
+			bool causeCircle = false;
+			for(int i = 0; i < forest.size(); i++){
+				if(forest[i].nodes.count(graph[i].preNode) > 0 && forest[i].nodes.count(graph[i].sufNode) > 0){
+					//it can cause circle in this MST.
+					//so it can cause circle in the final MST, this edge is omited.
+					causeCircle = true;
+					break;
+				}
+				else if(forest[i].nodes.count(graph[i].preNode) == 0 && forest[i].nodes.count(graph[i].sufNode) > 0){
+					//the edge can be insert into this MST.
+					forest[i].nodes.insert(graph[i].preNode);
+					forest[i].edges.push_back(graph[i]);
+					inForest = true;
+					//update the forest to merged the connected MST.
+					updateForest(forest, i, graph[i].preNode);
+					break;
+				}
+				else if(forest[i].nodes.count(graph[i].preNode) > 0 && forest[i].nodes.count(graph[i].sufNode) == 0){
+					forest[i].nodes.insert(graph[i].sufNode);
+					forest[i].edges.push_back(graph[i]);
+					inForest = true;
+					updateForest(forest, i, graph[i].sufNode);
+					break;
+				}
+				else{
+					//the edge cannot add into this MST,find next MST.
+					continue;
+				}
+
+			}//end for lookup forest.
+			if(!inForest && !causeCircle){
+				//the edge cannot cause circle and is not in the forest.
+				MST newMST;
+				newMST.nodes.insert(graph[i].preNode);
+				newMST.nodes.insert(graph[i].sufNode);
+				newMST.edges.push_back(graph[i]);
+				forest.push_back(newMST);
+			}
+
+		}
+		else if(mst.nodes.count(graph[i].preNode) == 0 && mst.nodes.count(graph[i].sufNode) > 0){
+			//the edge can be insert in final MST.
+			mst.nodes.insert(graph[i].preNode);
+			mst.edges.push_back(graph[i]);
+			//update the forest to merged the connected MST into final MST.
+			updateForest(forest, mst, graph[i].preNode);
+		}
+		else{ //mst.node.count(graph[i].preNode > 0 && mst.nodes.count(graph[i].sufNode) == 0)
+			mst.nodes.insert(graph[i].sufNode);
+			mst.edges.push_back(graph[i]);
+			updateForest(forest, mst, graph[i].sufNode);
+
+		}
+		if(mst.nodes.size()== numberNode){
+			cerr << "the finished edge index is: " << i << endl;
+			break;
+		}
+		
+	}
+	cerr << "the graph.size() is: " << graph.size() << endl;
+	cerr << "the mst.node.size() is: " << mst.nodes.size() << endl;
+	cerr << "the mst.edges.size() is: " << mst.edges.size() << endl;
+
 }
 
 void primMST(MST &mst, vector <Graph> &graphs, int numberNode){
@@ -107,9 +248,16 @@ void mst2Graph(MST &mst, std::vector<Graph> &graphs){
 	}
 }
 
+void printMST(vector<EdgeInfo> mst){
+	for(int i = 0; i < mst.size(); i++){
+		printf("<%d, %d, %lf>\n", mst[i].preNode, mst[i].sufNode, mst[i].dist);
+	}
+}
+
 void printMST(MST mst){
 	for(int i = 0; i < mst.edges.size(); i++){
 		printf("<%d, %d, %lf>\n", mst.edges[i].preNode, mst.edges[i].sufNode, mst.edges[i].dist);
+		//printf("<%d, %d, %d>\n", mst.edges[i].preNode, mst.edges[i].sufNode, (int)mst.edges[i].dist);
 	}
 
 }
@@ -125,6 +273,11 @@ void printGraph(vector<Graph> graphs){
 
 }
 
+void printGraph(vector<EdgeInfo> graph){
+	for(int i = 0; i < graph.size(); i++){
+		printf("<%d, %d, %lf> \n", graph[i].preNode, graph[i].sufNode, graph[i].dist);
+	}
+}
 
 void creatForest(MST srcMST, MST & resForest, double threshold){	
 	resForest.nodes = srcMST.nodes;

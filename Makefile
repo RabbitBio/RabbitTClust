@@ -5,8 +5,9 @@ CXXFLAGS=-g -O3 -std=c++14 -fopenmp
 
 INCLUDE=./RabbitSketch/build/include
 LIBS=./RabbitSketch/build/lib
-#OBJECTS=main.o MST.o
-OBJECTS=test.o MST.o
+OBJECTS=main.o MST.o
+#OBJECTS=demo.o MST.o
+#OBJECTS=test.o MST.o
 
 $(TARGET):$(OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ -I$(INCLUDE) -lz -lrabbitsketch -L$(LIBS)
