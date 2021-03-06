@@ -48,6 +48,10 @@ bool cmpNeighbor(NeighborNode n1, NeighborNode n2);
 
 std::vector<EdgeInfo> kruskalAlgorithm(std::vector<EdgeInfo>graph, int vertices);
 
+std::vector<EdgeInfo> generateForest(std::vector <EdgeInfo> mst, double threshhold);
+
+std::vector <std::vector<int> > generateCluster(std::vector<EdgeInfo> forest, int vertices);
+
 void kruskalMST(MST &mst, std::vector<EdgeInfo> graph, int numberNode);
 
 void primMST(MST &mst, std::vector<Graph> & graphs, int numberNode);

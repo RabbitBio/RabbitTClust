@@ -9,6 +9,7 @@
 #include <omp.h>
 #include <fstream>
 #include <string>
+#include "UnionFind.h"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -26,6 +27,7 @@ void printUsage(void){
 	fprintf(stdout, "	-h		: this help message\n");
 	fprintf(stdout, "	-l		: genome clustering, inputFile is the path list of the genome files\n");
 	fprintf(stdout, "	-t		: genome clustering, set the thread number\n");
+	fprintf(stdout, "	-d		: set the threshold of the clusters from the Minimum Spanning Tree\n");
 	
 }
 /*
@@ -41,7 +43,7 @@ void printUsage(void){
  * section 2: read genome files and create the sketches.
  * section 3: compute the distance matrix and create the Complete Distance Graph(CDG).
  * section 4: generate the Minimum Spanning Tree(MST) with the CDG by kruskal algrithm.
- * section 5: generate the clusters with the MST using different distance threshhold.
+ * section 5: generate the clusters with the MST using different distance threshold.
  *
  * Author: Xiaoming Xu
  * Mar 5, 2021
@@ -55,6 +57,7 @@ int main(int argc, char * argv[]){
 	string inputFile = "genome.fna";
 	int threads = 1;
 	bool sketchByFile = false;
+	double threshold = 1.0;
 	while(argIndex < argc){
 		if(argIndex + 1 == argc){
 			inputFile = argv[argIndex];
@@ -74,6 +77,10 @@ int main(int argc, char * argv[]){
 				case 'l':
 					sketchByFile = true;
 					fprintf(stderr, "sketch by file: \n");
+					break;
+				case 'd':
+					threshold = stod(argv[++argIndex]);
+					fprintf(stderr, "set the threshold is: %lf \n", threshold);
 					break;
 				default:
 					fprintf(stderr, "Invalid option %s\n", argv[argIndex]);
@@ -226,7 +233,25 @@ int main(int argc, char * argv[]){
 	cerr << "the time of createMST is: " << t4-t3 << endl;
 	printMST(mst);
 
-	//double t5 = get_sec();
+	double t5 = get_sec();
+
+	//section 5; generate the clustering 
+	
+	vector<EdgeInfo> forest;
+	forest = generateForest(mst, threshold);
+
+	vector<vector<int> >cluster = generateCluster(forest, minHashes.size());
+
+	double t6 = get_sec();
+	cerr << "the time of generating forest and cluster is: " << t6 - t5 << endl;
+
+	for(int i = 0; i < cluster.size(); i++){
+		printf("the cluster %d is: \n", i);
+		for(int j = 0; j < cluster[i].size(); j++){
+			cout << cluster[i][j] << '\t';
+		}
+		cout << endl;
+	}
 
 
 	return 0;

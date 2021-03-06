@@ -32,6 +32,59 @@ vector<EdgeInfo> kruskalAlgorithm(vector<EdgeInfo>graph, int vertices){
 }
 
 
+vector<EdgeInfo> generateForest(vector <EdgeInfo> mst, double threshhold){
+	vector<EdgeInfo> forest;
+	for(int i = 0; i < mst.size(); i++){
+		if(mst[i].dist < threshhold){
+			forest.push_back(mst[i]);
+		}
+	}
+	return forest;
+}
+
+vector < vector<int> > generateCluster(vector<EdgeInfo> forest, int vertices){
+	UnionFind uf(vertices);
+	vector< vector<int> > cluster;
+	for(int i = 0; i < forest.size(); i++){
+		uf.merge(forest[i].preNode, forest[i].sufNode);
+	}
+
+	
+	vector<int> elements;
+	vector<int> remainElements;
+	vector<int> tmpCluster;
+	for(int i = 0; i < vertices; i++){
+		elements.push_back(i);
+	}
+	
+	while(!elements.empty()){
+		tmpCluster.push_back(elements[0]);
+		for(int i = 1; i < elements.size(); i++){
+			if(uf.connected(elements[0], elements[i])){
+				tmpCluster.push_back(elements[i]);
+			}
+			else{
+				remainElements.push_back(elements[i]);
+			}
+
+		}
+		if(elements.size() == 1){//the last element which has not been clustered.
+			cluster.push_back(elements);
+			elements.clear();
+			break;
+		}
+		cluster.push_back(tmpCluster);
+		tmpCluster.clear();
+		elements = remainElements;
+		remainElements.clear();
+	}
+
+	return cluster;
+
+
+}
+
+
 
 
 void updateForest(vector<MST> &forest, MST mst, int curSufNode){//update forest with the result MST;
