@@ -9,6 +9,7 @@
 #include <omp.h>
 #include <fstream>
 #include <string>
+#include "UnionFind.h"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -22,21 +23,41 @@ double get_sec(){
 }
 
 void printUsage(void){
-	fprintf(stdout, "usage clust [-h] [-l] [-t] inputFile\n");
+	fprintf(stdout, "usage clust [-h] [-l] [-t] <int> [-d] <double> inputFile\n");
 	fprintf(stdout, "	-h		: this help message\n");
 	fprintf(stdout, "	-l		: genome clustering, inputFile is the path list of the genome files\n");
 	fprintf(stdout, "	-t		: genome clustering, set the thread number\n");
+	fprintf(stdout, "	-d		: set the threshold of the clusters from the Minimum Spanning Tree\n");
 	
 }
-
+/*
+ * This version is for result checking using single thread.
+ * The input parameter and the final output is the same with the final version.
+ *
+ * The input can be a single file with numbers of sequences to create sketches by sequences.
+ * And it can alse be a single file with list of genome files to create sketches by files(genomes).
+ * This is strategy of clustering based distance computing by sequences or by genomes.
+ *
+ * The program includes several sections:
+ * section 1: read the input arguments and init the parameters.
+ * section 2: read genome files and create the sketches.
+ * section 3: compute the distance matrix and create the Complete Distance Graph(CDG).
+ * section 4: generate the Minimum Spanning Tree(MST) with the CDG by kruskal algrithm.
+ * section 5: generate the clusters with the MST using different distance threshold.
+ *
+ * Author: Xiaoming Xu
+ * Mar 5, 2021
+ *
+ */
 
 int main(int argc, char * argv[]){
 
-
+	//section 1: init parameters
 	int argIndex = 1;
 	string inputFile = "genome.fna";
 	int threads = 1;
 	bool sketchByFile = false;
+	double threshold = 1.0;
 	while(argIndex < argc){
 		if(argIndex + 1 == argc){
 			inputFile = argv[argIndex];
@@ -57,6 +78,10 @@ int main(int argc, char * argv[]){
 					sketchByFile = true;
 					fprintf(stderr, "sketch by file: \n");
 					break;
+				case 'd':
+					threshold = stod(argv[++argIndex]);
+					fprintf(stderr, "set the threshold is: %lf \n", threshold);
+					break;
 				default:
 					fprintf(stderr, "Invalid option %s\n", argv[argIndex]);
 					printUsage();
@@ -67,7 +92,8 @@ int main(int argc, char * argv[]){
 	}//end while file;
 
 
-	//vector<SketchInfo> sketchInfos;
+
+	//section 2: read the files and create sketches.
 	vector<Sketch::MinHash*> minHashes;
 	vector<SimilarityInfo> similarityInfos;
 
@@ -82,6 +108,7 @@ int main(int argc, char * argv[]){
 		fp1 = gzopen(inputFile.c_str(), "r");
 		if(fp1 == NULL){
 			fprintf(stderr, "cannot open the genome file\n");
+			printUsage();
 			return 1;
 		}
 	
@@ -107,7 +134,8 @@ int main(int argc, char * argv[]){
 			similarityInfos.push_back(tmpSimilarityInfo); 
 
 
-			Sketch::MinHash *mh1 = new Sketch::MinHash();//the sketchSize(number of hashes) need to be passed properly.
+			//Sketch::MinHash *mh1 = new Sketch::MinHash();//the sketchSize(number of hashes) need to be passed properly.
+			Sketch::MinHash *mh1 = new Sketch::MinHash(21, 10000);
 			//mh1->update((char *)similarityInfos[i].seq.c_str());
 			mh1->update(ks1->seq.s);
 			minHashes.push_back(mh1);
@@ -119,11 +147,12 @@ int main(int argc, char * argv[]){
 		cerr << "the number of the sequence is: " << index << endl;
 	
 	}
-	else{
+	else{//sketch by file
 		fprintf(stderr, "input fileList, sketch by file\n");
 		fstream fs(inputFile);
 		if(!fs){
 			fprintf(stderr, "error open the inputFile of fileList\n");
+			printUsage();
 			return 1;
 		}
 		vector<string> fileList;
@@ -159,9 +188,6 @@ int main(int argc, char * argv[]){
 
 				mh1->update(ks1->seq.s);
 
-
-
-
 			}
 			//cerr << "finish the file: 	" << fileList[i] << endl;
 			minHashes.push_back(mh1);
@@ -173,172 +199,61 @@ int main(int argc, char * argv[]){
 			similarityInfos.push_back(tmpSimilarityInfo);
 		}
 
-
-
-
-
-
-
-	}
+	}//end sketch by file
 	double t1 = get_sec();
-	cerr << "the time of format the sequence is: " << t1-t0 << endl;
-
-	//minHashes.reserve(similarityInfos.size());
-	//#pragma omp parallel for num_threads(threads) schedule(dynamic)
-	//for(int i = 0; i < similarityInfos.size(); i++){
-	//	Sketch::MinHash *mh1 = new Sketch::MinHash();//the sketchSize(number of hashes) need to be passed properly.
-	//	//Sketch::MinHash *mh1 = new Sketch::MinHash(21, 100000, 42, true);//the sketchSize(number of hashes) need to be passed properly.
-	//	//the memcopy from Sketch::MinHash::reference to SketchInfo needs optimizing.
-	//	//mh1->update(ks1->seq.s);
-	//	//cout << similarityInfos[i].seq << endl;
-	//	mh1->update((char *)similarityInfos[i].seq.c_str());
-	//	
-	//	//#pragma omp critical
-	//	{
-	//	//minHashes.push_back(mh1);
-	//	minHashes[similarityInfos[i].id] = mh1;
-	//	}
-	//}
+	cerr << "the time of format the sequence and create sketch is: " << t1-t0 << endl;
 		
-	double t2 = get_sec();
 
-	cerr << "the time of create minHash sketches MultiThread is: " << t2-t1 << endl;
+	//section 3: compute the distance matrix and create the graph.
 
-//	for(int i = 0; i < sketchInfo.size(); i++){
-//		cout << sketchInfo[i].name << endl;
-//		cout << sketchInfo[i].comment << endl;
-//		cout << sketchInfo[i].length << endl;
-//		for(int j = 0; j < sketchInfo[i].size; j++){
-//			cout << sketchInfo[i].hashes[j] << endl;
-//		}
-//
-//	}
-
-
-	//create the graphs.
-	vector<Graph> graphs;
-	//graphs.reserve(minHashes.capacity());
-	//graphs.reserve(similarityInfos.size());
-
-	//Graph tmpG[threads];
+	vector<EdgeInfo> graph;
 	cerr << "the size of minHashes is: " << minHashes.size() << endl;
 	cerr << "the capacity of minHashes is: " << minHashes.capacity() << endl;
-	//return 0;
 
-	//#pragma omp parallel for num_threads(threads) schedule(dynamic)
 	for(int i = 0; i < minHashes.size(); i++){
-	//for(int i = 0; i < minHashes.capacity(); i++){
-		Graph tmpG;
-		//int thread_id = omp_get_thread_num();
-		//#pragma omp critical
-		//{
-		//cerr << "the thread id is: " << thread_id << endl;
-		//}
-		tmpG.node = i;
-		tmpG.curNeighbor = 0;
-		//printf("print the minHashes of the sequence %d\n", i);
-		//minHashes[i]->printMinHashes();
+		//EdgeInfo tmpEdge;
 		for(int j = i+1; j < minHashes.size(); j++){
-		//for(int j = i+1; j < minHashes.capacity(); j++){
-			//printf("print the minHashes of the sequence %d\n", j);
-			//minHashes[j]->printMinHashes();
 			double tmpDist = 1.0 - minHashes[i]->jaccard(minHashes[j]);
-			//printf("<%d, %d, %lf>\n", i, j, tmpDist);
-			tmpG.neighbor.push_back(NeighborNode(j, tmpDist));
+			graph.push_back(EdgeInfo(i, j, tmpDist));
 		}
-		//sort the suffixNodes by weight of the edge in an ascending order.
-		std::sort(tmpG.neighbor.begin(), tmpG.neighbor.end(), cmpNeighbor);
-		//cerr << "end the sort : " << endl;
-
-		//#pragma omp critical
-		//{
-		graphs.push_back(tmpG);
-		//graphs[i] = tmpG[thread_id];
-		tmpG.neighbor.clear();
-		//cerr << "end the sequence: " << i << endl;
-		//exit(0);
-		//}
 
 	}
+	double t2 = get_sec();
+	std::sort(graph.begin(), graph.end(), cmpEdge);
 
 	double t3 = get_sec();
 
-	cerr << "the size of the graphs is: " << graphs.size() << endl;
-	cerr << "the capacity of the graphs is: " << graphs.capacity() << endl;
-	cerr << "the time of create the graph is: " << t3-t2<< endl;
+	cerr << "the size of the graphs is: " << graph.size() << endl;
+	cerr << "the time of computing distance and creating graph is: " << t2-t1<< endl;
+	cerr << "the time of sort graph is: " << t3-t2<< endl;
 
-	MST mst;
-	//creatMST(mst, graphs, index);
-	creatMST(mst, graphs,minHashes.size());
-	cout << endl;
-	cout << endl;
-	cout << endl;
+	//section 4: generate the MST
+	//MST mst;
+	vector<EdgeInfo> mst = kruskalAlgorithm(graph, minHashes.size());
 
 	double t4 = get_sec();
-	cout << "print the srcMST ================================================" << endl;
 	cerr << "the time of createMST is: " << t4-t3 << endl;
 	printMST(mst);
 
 	double t5 = get_sec();
-	cerr << "the time of printMST is: " << t5-t4 << endl;
 
-	MST resForest;
-	cout << "the size of mst.node is: " << mst.nodes.size() << endl;
-	creatForest(mst, resForest, 1.0);
+	//section 5; generate the clustering 
+	
+	vector<EdgeInfo> forest;
+	forest = generateForest(mst, threshold);
+
+	vector<vector<int> >cluster = generateCluster(forest, minHashes.size());
+
 	double t6 = get_sec();
-	cerr << "the time of creatForest is: " << t6-t5 << endl;
-	cout << "the size of resForest.node is: " << resForest.nodes.size() << endl;
-	cout << "print the resForest =============================================" << endl;
-	printMST(resForest);
-	double t7 = get_sec();
-	cerr << "the time of printMST is: " << t7-t6 << endl;
+	cerr << "the time of generating forest and cluster is: " << t6 - t5 << endl;
 
-
-	vector<Graph> resGraph;
-	mst2Graph(resForest, resGraph);
-	double t8 = get_sec();
-	cerr << "the time of mst2Graph is: " << t8-t7 << endl;
-
-	cout << "print the resGraph =============================================" << endl;
-	printGraph(resGraph);
-	
-	double t9 = get_sec();
-	cerr << "the time of printGraph is: " << t9-t8 << endl;
-
-	//vector< vector<int> > clusters;
-	vector< unordered_set<int> > clusters;
-	creatClust(resGraph, clusters);
-	
-	double t10 = get_sec();
-	cerr << "the time of creatClust is: " << t10-t9 << endl;
-
-	cout << "print the result Cluster ========================================" << endl;
-	for(int i = 0; i < clusters.size(); i++){
+	for(int i = 0; i < cluster.size(); i++){
 		printf("the cluster %d is: \n", i);
-		//for(int j = 0; j < clusters[i].size(); j++){
-		for(const int &x : clusters[i]){
-			//printf("%d\t", clusters[i][j]);
-			printf("%d\t", x);
+		for(int j = 0; j < cluster[i].size(); j++){
+			cout << cluster[i][j] << '\t';
 		}
-		printf("\n");
+		cout << endl;
 	}
-	double t11 = get_sec();
-	cerr << "the time of print the resultClust is: " << t11-t10 << endl;
-
-
-
-	
-
-
-	
-
-	
-
-
-
-	
-		
-
 
 
 	return 0;
