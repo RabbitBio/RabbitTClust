@@ -18,6 +18,7 @@ bool cmpNeighbor(NeighborNode n1, NeighborNode n2){
 vector<EdgeInfo> kruskalAlgorithm(vector<EdgeInfo>graph, int vertices){
     UnionFind uf(vertices);
     vector<EdgeInfo>spanningTree;
+	if(graph.size() <= 0) return spanningTree;
     //sort(graph.begin(),graph.end(),comparator);
     spanningTree.push_back(graph[0]);
     uf.merge(graph[0].preNode,graph[0].sufNode);
@@ -252,7 +253,11 @@ void primMST(MST &mst, vector <Graph> &graphs, int numberNode){
 		graphs[tmpParent].curNeighbor++;
 		//cout << tmpSufNode << endl;
 		cerr << "numMSTNode is: " << numMSTNode << " add SufNode: " << tmpSufNode << endl;
-		mst.edges.push_back(EdgeInfo(tmpPreNode, tmpSufNode, tmpMinDist));
+		EdgeInfo tmpE;
+		tmpE.preNode = tmpPreNode;
+		tmpE.sufNode = tmpSufNode;
+		tmpE.dist = tmpMinDist;
+		mst.edges.push_back(tmpE);
 		numMSTNode++;
 
 	}//end while

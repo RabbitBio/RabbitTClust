@@ -206,33 +206,91 @@ int main(int argc, char * argv[]){
 
 	//section 3: compute the distance matrix and create the graph.
 
-	vector<EdgeInfo> graph;
+	vector< vector<EdgeInfo> > graphArr;
+	int subSize = 4;
+	//int subE = minHashes.size() * subSize;
+	//graph.resize(subE);
 	cerr << "the size of minHashes is: " << minHashes.size() << endl;
 	cerr << "the capacity of minHashes is: " << minHashes.capacity() << endl;
+	
+	//int index = 0;
+	int id = 0;
+	int tailNum = minHashes.size() % subSize;
+	#pragma omp parallel for num_threads(threads) schedule (dynamic)
+	for(id = 0; id < minHashes.size(); id+=subSize){
+		vector<EdgeInfo> graph;
+		for(int i = id; i < id+subSize; i++){
+			//EdgeInfo tmpEdge;
+			for(int j = i+1; j < minHashes.size(); j++){
+				double tmpDist = 1.0 - minHashes[i]->jaccard(minHashes[j]);
+				EdgeInfo tmpE;
+				tmpE.preNode = i;
+				tmpE.sufNode = j;
+				tmpE.dist = tmpDist;
+				graph.push_back(tmpE);
+			}
 
-	for(int i = 0; i < minHashes.size(); i++){
-		//EdgeInfo tmpEdge;
-		for(int j = i+1; j < minHashes.size(); j++){
-			double tmpDist = 1.0 - minHashes[i]->jaccard(minHashes[j]);
-			graph.push_back(EdgeInfo(i, j, tmpDist));
 		}
+		sort(graph.begin(), graph.end(), cmpEdge);
+		#pragma omp critical
+		{
+		graphArr.push_back(graph);
+		}
+	}
+	if(tailNum != 0){
+		vector<EdgeInfo> graph;
+		for(int i = minHashes.size()-tailNum; i < minHashes.size(); i++){
+			for(int j = i+1; j < minHashes.size(); j++){
+				double tmpDist = 1.0 - minHashes[i]->jaccard(minHashes[j]);
+				EdgeInfo tmpE;
+				tmpE.preNode = i;
+				tmpE.sufNode = j;
+				tmpE.dist = tmpDist;
+				graph.push_back(tmpE);
+			}
+		}
+		if(graph.size() != 0){
+			cerr << "the graph size is not 0" << endl;
+			sort(graph.begin(), graph.end(), cmpEdge);
+			graphArr.push_back(graph);
+		}
+
+				
 
 	}
 	double t2 = get_sec();
-	std::sort(graph.begin(), graph.end(), cmpEdge);
+	cerr << "finish the graph creation " << endl;
+	//std::sort(graph.begin(), graph.end(), cmpEdge);
 
 	double t3 = get_sec();
 
-	cerr << "the size of the graphs is: " << graph.size() << endl;
-	cerr << "the time of computing distance and creating graph is: " << t2-t1<< endl;
-	cerr << "the time of sort graph is: " << t3-t2<< endl;
+	cerr << "the size of the graphsArr is: " << graphArr.size() << endl;
+	cerr << "the time of computing distance and creating graph including sort the graph is: " << t2-t1<< endl;
+	//cerr << "the time of sort graph is: " << t3-t2<< endl;
 
 	//section 4: generate the MST
 	//MST mst;
-	vector<EdgeInfo> mst = kruskalAlgorithm(graph, minHashes.size());
+	vector <vector<EdgeInfo> > mstArr;
+	cerr << "the sizeof graphArr is: " << graphArr.size() << endl;
+	//exit(0);
+	for(int i = 0; i < graphArr.size(); i++){
+		vector<EdgeInfo> tmpMst = kruskalAlgorithm(graphArr[i], minHashes.size());
+		mstArr.push_back(tmpMst);
+		//cerr << "finish the tmpMst " << i << endl;
+	}
+	cerr << "finish the tmpMst generation " << endl;
+
+	vector<EdgeInfo> finalGraph;
+	for(int i = 0; i < mstArr.size(); i++){
+		finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
+	}
+	sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
+
+	vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, minHashes.size());
 
 	double t4 = get_sec();
 	cerr << "the time of createMST is: " << t4-t3 << endl;
+	//printMST(finalGraph);
 	printMST(mst);
 
 	double t5 = get_sec();

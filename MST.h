@@ -18,11 +18,11 @@ struct EdgeInfo{
 	int preNode;
 	int sufNode;
 	double dist;
-	EdgeInfo(int n1, int n2, double d){
-		preNode = n1;
-		sufNode = n2;
-		dist = d;
-	}
+	//EdgeInfo(int n1, int n2, double d){
+	//	preNode = n1;
+	//	sufNode = n2;
+	//	dist = d;
+	//}
 
 };
 
