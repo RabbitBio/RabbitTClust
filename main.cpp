@@ -23,7 +23,7 @@ double get_sec(){
 }
 
 void printUsage(void){
-	fprintf(stdout, "usage clust [-h] [-l] [-t] inputFile\n");
+	fprintf(stdout, "usage clust [-h] [-l] [-t] <int> [-d] <double> inputFile\n");
 	fprintf(stdout, "	-h		: this help message\n");
 	fprintf(stdout, "	-l		: genome clustering, inputFile is the path list of the genome files\n");
 	fprintf(stdout, "	-t		: genome clustering, set the thread number\n");
@@ -108,6 +108,7 @@ int main(int argc, char * argv[]){
 		fp1 = gzopen(inputFile.c_str(), "r");
 		if(fp1 == NULL){
 			fprintf(stderr, "cannot open the genome file\n");
+			printUsage();
 			return 1;
 		}
 	
@@ -151,6 +152,7 @@ int main(int argc, char * argv[]){
 		fstream fs(inputFile);
 		if(!fs){
 			fprintf(stderr, "error open the inputFile of fileList\n");
+			printUsage();
 			return 1;
 		}
 		vector<string> fileList;
