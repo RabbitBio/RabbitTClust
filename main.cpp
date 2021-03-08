@@ -145,6 +145,8 @@ int main(int argc, char * argv[]){
 	
 		}//end while
 		cerr << "the number of the sequence is: " << index << endl;
+		gzclose(fp1);
+		kseq_destroy(ks1);
 	
 	}
 	else{//sketch by file
@@ -197,6 +199,9 @@ int main(int argc, char * argv[]){
 			tmpSimilarityInfo.name = fileList[i];
 			tmpSimilarityInfo.length = totalLength;
 			similarityInfos.push_back(tmpSimilarityInfo);
+
+			gzclose(fp1);
+			kseq_destroy(ks1);
 		}
 
 	}//end sketch by file
@@ -291,7 +296,11 @@ int main(int argc, char * argv[]){
 	double t4 = get_sec();
 	cerr << "the time of createMST is: " << t4-t3 << endl;
 	//printMST(finalGraph);
-	printMST(mst);
+	//printMST(mst);
+	for(int i = 0; i < mst.size(); i++){
+		printf("<%d, %d, %lf>\t%s\t%s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, similarityInfos[mst[i].preNode].name.c_str(), similarityInfos[mst[i].sufNode].name.c_str());
+	}
+	cout << endl;
 
 	double t5 = get_sec();
 
@@ -308,7 +317,8 @@ int main(int argc, char * argv[]){
 	for(int i = 0; i < cluster.size(); i++){
 		printf("the cluster %d is: \n", i);
 		for(int j = 0; j < cluster[i].size(); j++){
-			cout << cluster[i][j] << '\t';
+			//if(cluster[i][j] > similarityInfos.size()) continue;
+			cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].name << endl;;
 		}
 		cout << endl;
 	}
