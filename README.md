@@ -15,7 +15,7 @@ export LD_LIBRARY_PATH=`pwd`/lib:$LD_LIBRARY_PATH
 
 cd ../../
 make 
-
+#The fileList is the list path of the genome files.
 ./clust -l -t 4 -d 0.3 fileList >result
 
 ```
