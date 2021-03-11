@@ -6,6 +6,10 @@
 
 using namespace std;
 
+bool cmpInfo(SimilarityInfo s1, SimilarityInfo s2){
+	return s1.id < s2.id;
+}	
+
 bool cmpEdge(EdgeInfo e1, EdgeInfo e2){
 	return e1.dist < e2.dist;
 }

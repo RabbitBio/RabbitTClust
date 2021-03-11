@@ -4,6 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <unordered_set>
+#include "SketchInfo.h"
 
 struct NeighborNode{
 	int id;
@@ -41,6 +42,7 @@ struct MST{
 
 };
 
+bool cmpInfo(SimilarityInfo s1, SimilarityInfo s2);
 
 bool cmpEdge(EdgeInfo e1, EdgeInfo e2);
 
