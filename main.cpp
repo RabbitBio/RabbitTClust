@@ -320,8 +320,10 @@ int main(int argc, char * argv[]){
 	cerr << "time of format the sequence and create sketch is: " << t1-t0 << endl;
 
 	//section 3: compute the distance matrix and create the graph.
+	//no save the whole graph, create subMST when construct the subGraph for reducing memory footprint.
 
 	vector< vector<EdgeInfo> > graphArr;
+	vector <vector<EdgeInfo> > mstArr;
 	int subSize = 8;
 	cerr << "the size of minHashes is: " << minHashes.size() << endl;
 	
@@ -344,10 +346,14 @@ int main(int argc, char * argv[]){
 
 		}
 		sort(graph.begin(), graph.end(), cmpEdge);
+		vector<EdgeInfo> tmpMst = kruskalAlgorithm(graph, minHashes.size());
 		#pragma omp critical
 		{
-		graphArr.push_back(graph);
+		mstArr.push_back(tmpMst);
+		//graphArr.push_back(graph);
 		}
+		graph.clear();
+		tmpMst.clear();
 	}
 	if(tailNum != 0){
 		vector<EdgeInfo> graph;
@@ -364,7 +370,9 @@ int main(int argc, char * argv[]){
 		if(graph.size() != 0){
 			cerr << "the graph size is not 0" << endl;
 			sort(graph.begin(), graph.end(), cmpEdge);
-			graphArr.push_back(graph);
+			vector<EdgeInfo> tmpMst = kruskalAlgorithm(graph, minHashes.size());
+			mstArr.push_back(tmpMst);
+			//graphArr.push_back(graph);
 		}
 
 	}
@@ -376,11 +384,11 @@ int main(int argc, char * argv[]){
 
 	//section 4: generate the MST
 	
-	vector <vector<EdgeInfo> > mstArr;
-	for(int i = 0; i < graphArr.size(); i++){
-		vector<EdgeInfo> tmpMst = kruskalAlgorithm(graphArr[i], minHashes.size());
-		mstArr.push_back(tmpMst);
-	}
+//	//vector <vector<EdgeInfo> > mstArr;
+//	for(int i = 0; i < graphArr.size(); i++){
+//		vector<EdgeInfo> tmpMst = kruskalAlgorithm(graphArr[i], minHashes.size());
+//		mstArr.push_back(tmpMst);
+//	}
 
 	double t3 = get_sec();
 	cerr << "time of generating tmpMSTs is: " << t3-t2 << endl;
@@ -388,6 +396,7 @@ int main(int argc, char * argv[]){
 	vector<EdgeInfo> finalGraph;
 	for(int i = 0; i < mstArr.size(); i++){
 		finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
+		mstArr[i].clear();
 	}
 
 	double t3_1 = get_sec();
@@ -441,7 +450,7 @@ int main(int argc, char * argv[]){
 		for(int j = 0; j < cluster[i].size(); j++){
 			//if(cluster[i][j] > similarityInfos.size()) continue;
 			//cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].id << '\t' << similarityInfos[cluster[i][j]].name << endl;;
-			cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].name << endl;;
+			cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].name << endl;
 		}
 		cout << endl;
 	}
