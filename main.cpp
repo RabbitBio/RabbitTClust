@@ -145,16 +145,22 @@ int main(int argc, char * argv[]){
 		}//end while
 
 		vector<SimilarityInfo> similarityInfos;
-		while(getline(fs1, line)){
+		//while(getline(fs1, line)){
+		while(1){
+			if(!getline(fs1, line)) break;
 			stringstream ss;
 			ss << line;
 			int id, length;
-			string name;
+			string name, comment;
 			ss >> id >> name >> length;
+			
+			getline(fs1, comment);
+			
 
 			SimilarityInfo tmpSimilarityInfo;
 			tmpSimilarityInfo.id = id;
 			tmpSimilarityInfo.name = name;
+			tmpSimilarityInfo.comment = comment;
 			tmpSimilarityInfo.length = length;
 			similarityInfos.push_back(tmpSimilarityInfo);
 		}
@@ -162,12 +168,28 @@ int main(int argc, char * argv[]){
 		vector<EdgeInfo> forest = generateForest(mst, threshold);
 
 		vector<vector<int> > cluster = generateCluster(forest, mst.size()+1);
+		cerr << "start the output " << endl;
 		
 		for(int i = 0; i < cluster.size(); i++){
 			printf("the cluster %d is: \n", i);
 			for(int j = 0; j < cluster[i].size(); j++){
 				//if(cluster[i][j] > similarityInfos.size()) continue;
-				cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].name << endl;;
+				cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].name << endl;
+				string tmpComment("");
+				for(int k = 1; k < similarityInfos[cluster[i][j]].comment.length(); k++){
+					if(similarityInfos[cluster[i][j]].comment[k] != '>'){
+						tmpComment += similarityInfos[cluster[i][j]].comment[k];	
+					}
+					else{
+						cout << "\t\t\t" << tmpComment << endl;
+						tmpComment = "";
+					}
+				}
+				if(tmpComment.length() != 0){
+					cout << "\t\t\t" << tmpComment << endl;
+					tmpComment = "";
+				}
+
 			}
 			cout << endl;
 		}
@@ -278,6 +300,7 @@ int main(int argc, char * argv[]){
 			int totalLength = 0;
 			
 
+			string comment("");
 			while(1){
 				int length = kseq_read(ks1);
 				totalLength += length;
@@ -286,6 +309,10 @@ int main(int argc, char * argv[]){
 				}
 
 				mh1->update(ks1->seq.s);
+				//comment += (ks1->name.s + '\t' + ks1->comment.s + '\n');
+				comment += '>';
+				comment += ks1->name.s;
+				comment += ks1->comment.s;
 
 			}
 			//cerr << "finish the file: 	" << fileList[i] << endl;
@@ -300,6 +327,8 @@ int main(int argc, char * argv[]){
 			SimilarityInfo tmpSimilarityInfo;
 			tmpSimilarityInfo.id = i;
 			tmpSimilarityInfo.name = fileList[i];
+			tmpSimilarityInfo.comment = comment;
+			comment = "";
 			tmpSimilarityInfo.length = totalLength;
 			similarityInfos.push_back(tmpSimilarityInfo);
 			}
@@ -418,7 +447,8 @@ int main(int argc, char * argv[]){
 	ofstream ofile;
 	ofile.open(inputFile+"GenomeInfo");
 	for(int i = 0; i < similarityInfos.size(); i++){
-		ofile << similarityInfos[i].id << ' ' << similarityInfos[i].name << ' ' << similarityInfos[i].length << endl;
+		ofile << similarityInfos[i].id << ' ' << similarityInfos[i].name << ' ' << ' ' << similarityInfos[i].length << endl;
+		ofile << similarityInfos[i].comment << endl;
 	}
 	ofile.close();
 
@@ -451,6 +481,22 @@ int main(int argc, char * argv[]){
 			//if(cluster[i][j] > similarityInfos.size()) continue;
 			//cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].id << '\t' << similarityInfos[cluster[i][j]].name << endl;;
 			cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].name << endl;
+			string comment("");
+			for(int k = 1; k < similarityInfos[cluster[i][j]].comment.length(); k++){
+				if(similarityInfos[cluster[i][j]].comment[k] != '>'){
+					comment += similarityInfos[cluster[i][j]].comment[k];
+				}
+				else{
+					cout << "\t\t\t" << comment << endl;
+					comment = "";
+				}
+			}
+			if(comment.length() > 0){
+				cout << "\t\t\t" << comment << endl;
+				comment = "";
+			}
+				
+			//cout << "\t\t" << similarityInfos[cluster[i][j]].comment << endl;
 		}
 		cout << endl;
 	}
