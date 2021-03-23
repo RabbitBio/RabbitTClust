@@ -38,11 +38,25 @@ using namespace std;
 
 struct SketchInfo{
 	Sketch::MinHash* minHash;
+	Sketch::WMinHash* WMinHash;
 	int index;
 };
 
 bool cmpSketch(SketchInfo s1, SketchInfo s2){
 	return s1.index < s2.index;
+}
+
+void getCWS(double * r, double * c, double * b, int sketchSize, int dimension){
+	const int DISTRIBUTION_SEED = 1;
+	default_random_engine generator(DISTRIBUTION_SEED);
+	gamma_distribution<double> gamma(2.0, 1.0);
+	uniform_real_distribution<double> uniform(0.0, 1.0);
+
+	for(int i = 0; i < sketchSize * dimension; ++i){
+		r[i] = gamma(generator);
+		c[i] = log(gamma(generator));
+		b[i] = uniform(generator) * r[i];
+	}
 }
 
 double get_sec(){
@@ -52,13 +66,14 @@ double get_sec(){
 }
 
 void printUsage(void){
-	fprintf(stdout, "usage: clust [-h] [-l] [-t] <int> [-d] <double> [-f] genomeFile\n");
+	fprintf(stdout, "usage: clust [-h] [-l] [-t] <int> [-d] <double> -F <string> [-f] genomeFile\n");
 	fprintf(stdout, "usage: clust [-h] [-f] [-d] <double> genomeInfo mstInfo\n");
 	fprintf(stdout, "	-h		: this help message\n");
 	fprintf(stdout, "	-l		: genome clustering, inputFile is the path list of the genome files\n");
 	fprintf(stdout, "	-t		: genome clustering, set the thread number\n");
 	fprintf(stdout, "	-d		: set the threshold of the clusters from the Minimum Spanning Tree\n");
 	fprintf(stdout, "	-f		: input files are genomeInfo and MST content\n");
+	fprintf(stdout, "	-F		: sketch function, includes MinHash, WMH, OMH, HLL\n"); 
 	
 }
 
@@ -68,6 +83,7 @@ int main(int argc, char * argv[]){
 	int argIndex = 1;
 	string inputFile = "genome.fna";
 	string inputFile1 = "genome.info";
+	string sketchFunc = "MinHash";
 	int threads = 1;
 	bool sketchByFile = false;
 	bool useMST = false;
@@ -102,6 +118,10 @@ int main(int argc, char * argv[]){
 				case 'f':
 					useMST = true;
 					fprintf(stderr, "input as Munimum Spanning Tree \n");
+					break;
+				case 'F':
+					sketchFunc = argv[++argIndex];
+					fprintf(stderr, "the sketch function is: %s \n", sketchFunc.c_str());
 					break;
 				default:
 					fprintf(stderr, "Invalid option %s\n", argv[argIndex]);
@@ -211,6 +231,8 @@ int main(int argc, char * argv[]){
 	vector<SketchInfo> minHashes;
 	vector<SimilarityInfo> similarityInfos;
 
+	//for weighted MinHash
+
 	double t0 = get_sec();
 
 	if(!sketchByFile){
@@ -230,37 +252,84 @@ int main(int argc, char * argv[]){
 	
 	
 		int index = 0;
-		while(1){
-			int length = kseq_read(ks1);
-			if(length < 0){
-				break;
-			}
+		if(sketchFunc == "MinHash"){
+			while(1){
+				int length = kseq_read(ks1);
+				if(length < 0){
+					break;
+				}
 	
-			//SketchInfo tmpSketchInfo;
-			SimilarityInfo tmpSimilarityInfo;
-		
-			tmpSimilarityInfo.id = index;
-			tmpSimilarityInfo.name = ks1->name.s;
-			tmpSimilarityInfo.comment = ks1->comment.s;
-			tmpSimilarityInfo.length = length;
-			//tmpSimilarityInfo.seq = ks1->seq.s;//do not store the seq content;
+				//SketchInfo tmpSketchInfo;
+				SimilarityInfo tmpSimilarityInfo;
+			
+				tmpSimilarityInfo.id = index;
+				tmpSimilarityInfo.name = ks1->name.s;
+				tmpSimilarityInfo.comment = ks1->comment.s;
+				tmpSimilarityInfo.length = length;
+				//tmpSimilarityInfo.seq = ks1->seq.s;//do not store the seq content;
 	
-			similarityInfos.push_back(tmpSimilarityInfo); 
+				similarityInfos.push_back(tmpSimilarityInfo); 
 
 
-			//Sketch::MinHash *mh1 = new Sketch::MinHash();//the sketchSize(number of hashes) need to be passed properly.
-			Sketch::MinHash *mh1 = new Sketch::MinHash(21, 10000);
-			//mh1->update((char *)similarityInfos[i].seq.c_str());
-			mh1->update(ks1->seq.s);
-			SketchInfo tmpSketchInfo;
-			tmpSketchInfo.minHash = mh1;
-			tmpSketchInfo.index = index;
-			minHashes.push_back(tmpSketchInfo);
+				//Sketch::MinHash *mh1 = new Sketch::MinHash();//the sketchSize(number of hashes) need to be passed properly.
+				Sketch::MinHash *mh1 = new Sketch::MinHash(21, 10000);
+				mh1->update(ks1->seq.s);
+
+				SketchInfo tmpSketchInfo;
+				tmpSketchInfo.minHash = mh1;
+				tmpSketchInfo.index = index;
+				minHashes.push_back(tmpSketchInfo);
+				index++;
+
+				//if(index == 5) break;
 	
-			index++;
-			//if(index == 5) break;
+			}//end while
+		}
+		else if(sketchFunc == "WMH"){
+			Sketch::WMHParameters parameter;
+			parameter.kmerSize = 21;
+			parameter.sketchSize = 50;
+			parameter.windowSize = 20;
+			parameter.r = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
+			parameter.c = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
+			parameter.b = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
+			getCWS(parameter.r, parameter.c, parameter.b, parameter.sketchSize, pow(parameter.kmerSize, 4));
+			while(1){
+				int length = kseq_read(ks1);
+				if(length < 0){
+					break;
+				}
 	
-		}//end while
+				//SketchInfo tmpSketchInfo;
+				SimilarityInfo tmpSimilarityInfo;
+			
+				tmpSimilarityInfo.id = index;
+				tmpSimilarityInfo.name = ks1->name.s;
+				tmpSimilarityInfo.comment = ks1->comment.s;
+				tmpSimilarityInfo.length = length;
+				//tmpSimilarityInfo.seq = ks1->seq.s;//do not store the seq content;
+	
+				similarityInfos.push_back(tmpSimilarityInfo); 
+
+
+				//Sketch::MinHash *mh1 = new Sketch::MinHash();//the sketchSize(number of hashes) need to be passed properly.
+				Sketch::WMinHash *mh1 = new Sketch::WMinHash(parameter);
+				mh1->update(ks1->seq.s);
+
+				mh1->computeHistoSketch();
+
+				SketchInfo tmpSketchInfo;
+				tmpSketchInfo.WMinHash = mh1;
+				tmpSketchInfo.index = index;
+				minHashes.push_back(tmpSketchInfo);
+				index++;
+
+				//if(index == 5) break;
+	
+			}//end while
+
+
+		}
 		cerr << "the number of the sequence is: " << index << endl;
 		gzclose(fp1);
 		kseq_destroy(ks1);
@@ -280,62 +349,138 @@ int main(int argc, char * argv[]){
 			fileList.push_back(fileName);
 		} 
 		
-		#pragma omp parallel for num_threads(threads) schedule(dynamic)
-		//#pragma omp parallel for num_threads(1) schedule(dynamic)
-		for(int i = 0; i < fileList.size(); i++){
-			//cout << fileList[i] << endl;
-			gzFile fp1;
-			kseq_t* ks1;
-			
-			fp1 = gzopen(fileList[i].c_str(), "r");
-			if(fp1 == NULL){
-				fprintf(stderr, "cannot open the genome file\n");
-				exit(1);
-			}
+		if(sketchFunc == "MinHash"){
+			#pragma omp parallel for num_threads(threads) schedule(dynamic)
+			//#pragma omp parallel for num_threads(1) schedule(dynamic)
+			for(int i = 0; i < fileList.size(); i++){
+				//cout << fileList[i] << endl;
+				gzFile fp1;
+				kseq_t* ks1;
+				
+				fp1 = gzopen(fileList[i].c_str(), "r");
+				if(fp1 == NULL){
+					fprintf(stderr, "cannot open the genome file\n");
+					exit(1);
+				}
 	
-			ks1 = kseq_init(fp1);
+				ks1 = kseq_init(fp1);
+				Sketch::MinHash *mh1 = new Sketch::MinHash(21, 10000);
 
-			Sketch::MinHash *mh1 = new Sketch::MinHash(21, 10000);
+				int totalLength = 0;
+				string comment("");
+				while(1){
+					int length = kseq_read(ks1);
+					totalLength += length;
+					if(length < 0){
+						break;
+					}
 
-			int totalLength = 0;
-			
+					mh1->update(ks1->seq.s);
+					//comment += (ks1->name.s + '\t' + ks1->comment.s + '\n');
+					comment += '>';
+					comment += ks1->name.s;
+					comment += ' ';
+					comment += ks1->comment.s;
 
-			string comment("");
-			while(1){
-				int length = kseq_read(ks1);
-				totalLength += length;
-				if(length < 0){
-					break;
+				}
+				//cerr << "finish the file: 	" << fileList[i] << endl;
+
+				#pragma omp critical
+				{
+
+					SketchInfo tmpSketchInfo;
+					tmpSketchInfo.minHash = mh1;
+
+					tmpSketchInfo.index = i;
+					minHashes.push_back(tmpSketchInfo);
+
+					SimilarityInfo tmpSimilarityInfo;
+					tmpSimilarityInfo.id = i;
+					tmpSimilarityInfo.name = fileList[i];
+					tmpSimilarityInfo.comment = comment;
+					comment = "";
+					tmpSimilarityInfo.length = totalLength;
+					similarityInfos.push_back(tmpSimilarityInfo);
 				}
 
-				mh1->update(ks1->seq.s);
-				//comment += (ks1->name.s + '\t' + ks1->comment.s + '\n');
-				comment += '>';
-				comment += ks1->name.s;
-				comment += ks1->comment.s;
+				gzclose(fp1);
+				kseq_destroy(ks1);
+			}//end for
+		}//end minHash
+		else if(sketchFunc == "WMH"){
+			Sketch::WMHParameters parameter;
+			parameter.kmerSize = 21;
+			parameter.sketchSize = 50;
+			parameter.windowSize = 200;
+			parameter.r = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
+			parameter.c = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
+			parameter.b = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
+			getCWS(parameter.r, parameter.c, parameter.b, parameter.sketchSize, pow(parameter.kmerSize, 4));
 
-			}
-			//cerr << "finish the file: 	" << fileList[i] << endl;
+			#pragma omp parallel for num_threads(threads) schedule(dynamic)
+			//#pragma omp parallel for num_threads(1) schedule(dynamic)
+			for(int i = 0; i < fileList.size(); i++){
+				//cout << fileList[i] << endl;
+				gzFile fp1;
+				kseq_t* ks1;
+				
+				fp1 = gzopen(fileList[i].c_str(), "r");
+				if(fp1 == NULL){
+					fprintf(stderr, "cannot open the genome file\n");
+					exit(1);
+				}
+	
+				ks1 = kseq_init(fp1);
+				Sketch::WMinHash *mh1 = new Sketch::WMinHash(parameter);
 
-			#pragma omp critical
-			{
-			SketchInfo tmpSketchInfo;
-			tmpSketchInfo.minHash = mh1;
-			tmpSketchInfo.index = i;
-			minHashes.push_back(tmpSketchInfo);
+				int totalLength = 0;
+				string comment("");
+				while(1){
+					int length = kseq_read(ks1);
+					totalLength += length;
+					if(length < 0){
+						break;
+					}
 
-			SimilarityInfo tmpSimilarityInfo;
-			tmpSimilarityInfo.id = i;
-			tmpSimilarityInfo.name = fileList[i];
-			tmpSimilarityInfo.comment = comment;
-			comment = "";
-			tmpSimilarityInfo.length = totalLength;
-			similarityInfos.push_back(tmpSimilarityInfo);
-			}
+					mh1->update(ks1->seq.s);
+					//comment += (ks1->name.s + '\t' + ks1->comment.s + '\n');
+					comment += '>';
+					comment += ks1->name.s;
+					comment += ' ';
+					comment += ks1->comment.s;
 
-			gzclose(fp1);
-			kseq_destroy(ks1);
-		}//end for
+				}
+				mh1->computeHistoSketch();
+				//cerr << "finish the file: 	" << fileList[i] << endl;
+
+				#pragma omp critical
+				{
+
+				cerr << "the index is: " << i << endl;
+					SketchInfo tmpSketchInfo;
+					tmpSketchInfo.WMinHash = mh1;
+
+					tmpSketchInfo.index = i;
+					minHashes.push_back(tmpSketchInfo);
+
+					SimilarityInfo tmpSimilarityInfo;
+					tmpSimilarityInfo.id = i;
+					tmpSimilarityInfo.name = fileList[i];
+					tmpSimilarityInfo.comment = comment;
+					comment = "";
+					tmpSimilarityInfo.length = totalLength;
+					similarityInfos.push_back(tmpSimilarityInfo);
+				}
+
+				gzclose(fp1);
+				kseq_destroy(ks1);
+			}//end for
+		}//end if WMH
+		else{
+			fprintf(stderr, "Invalid sketch function: %s\n", sketchFunc.c_str());
+			printUsage();
+			return 1;
+		}
 
 	}//end sketch by file
 
@@ -353,6 +498,7 @@ int main(int argc, char * argv[]){
 
 	vector< vector<EdgeInfo> > graphArr;
 	vector <vector<EdgeInfo> > mstArr;
+	mstArr.resize(threads);
 	int subSize = 8;
 	cerr << "the size of minHashes is: " << minHashes.size() << endl;
 	
@@ -360,12 +506,24 @@ int main(int argc, char * argv[]){
 	int id = 0;
 	int tailNum = minHashes.size() % subSize;
 	#pragma omp parallel for num_threads(threads) schedule (dynamic)
+	//#pragma omp parallel for num_threads(8) schedule (dynamic)
 	for(id = 0; id < minHashes.size(); id+=subSize){
+		int thread_id = omp_get_thread_num();
 		vector<EdgeInfo> graph;
 		for(int i = id; i < id+subSize; i++){
 			//EdgeInfo tmpEdge;
 			for(int j = i+1; j < minHashes.size(); j++){
-				double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
+				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
+				double tmpDist;
+				if(sketchFunc == "MinHash")
+					tmpDist = minHashes[i].minHash->distance(minHashes[j].minHash);
+				else if(sketchFunc == "WMH"){
+					tmpDist = minHashes[i].WMinHash->distance(minHashes[j].WMinHash);
+					//cerr << "the tmpDist is: " << tmpDist << endl;
+				}
+				else	
+					break;
+					
 				EdgeInfo tmpE;
 				tmpE.preNode = i;
 				tmpE.sufNode = j;
@@ -374,21 +532,31 @@ int main(int argc, char * argv[]){
 			}
 
 		}
+		graph.insert(graph.end(), mstArr[thread_id].begin(), mstArr[thread_id].end());
 		sort(graph.begin(), graph.end(), cmpEdge);
 		vector<EdgeInfo> tmpMst = kruskalAlgorithm(graph, minHashes.size());
-		#pragma omp critical
-		{
-		mstArr.push_back(tmpMst);
-		//graphArr.push_back(graph);
-		}
-		graph.clear();
+		mstArr[thread_id] = tmpMst;
+	//	#pragma omp critical
+	//	{
+	//	mstArr.push_back(tmpMst);
+	//	//graphArr.push_back(graph);
+	//	}
+	//	graph.clear();
 		tmpMst.clear();
 	}
 	if(tailNum != 0){
 		vector<EdgeInfo> graph;
 		for(int i = minHashes.size()-tailNum; i < minHashes.size(); i++){
 			for(int j = i+1; j < minHashes.size(); j++){
-				double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
+				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
+				double tmpDist;
+				if(sketchFunc == "MinHash")
+					tmpDist = minHashes[i].minHash->distance(minHashes[j].minHash);
+				else if(sketchFunc == "WMH")
+					tmpDist = minHashes[i].WMinHash->distance(minHashes[j].WMinHash);
+				else	
+					break;
+
 				EdgeInfo tmpE;
 				tmpE.preNode = i;
 				tmpE.sufNode = j;
@@ -398,9 +566,11 @@ int main(int argc, char * argv[]){
 		}
 		if(graph.size() != 0){
 			cerr << "the graph size is not 0" << endl;
+			graph.insert(graph.end(), mstArr[0].begin(), mstArr[0].end());
 			sort(graph.begin(), graph.end(), cmpEdge);
 			vector<EdgeInfo> tmpMst = kruskalAlgorithm(graph, minHashes.size());
-			mstArr.push_back(tmpMst);
+			mstArr[0] = tmpMst;
+			//mstArr.push_back(tmpMst);
 			//graphArr.push_back(graph);
 		}
 
@@ -445,7 +615,7 @@ int main(int argc, char * argv[]){
 	
 	//save the matching of graph id and genomeInfo 
 	ofstream ofile;
-	ofile.open(inputFile+"GenomeInfo");
+	ofile.open(inputFile+sketchFunc+"GenomeInfo");
 	for(int i = 0; i < similarityInfos.size(); i++){
 		ofile << similarityInfos[i].id << ' ' << similarityInfos[i].name << ' ' << ' ' << similarityInfos[i].length << endl;
 		ofile << similarityInfos[i].comment << endl;
@@ -454,7 +624,7 @@ int main(int argc, char * argv[]){
 
 	//save the mst
 	ofstream ofile1;
-	ofile1.open(inputFile+"MSTInfo");
+	ofile1.open(inputFile+sketchFunc+"MSTInfo");
 	for(int i = 0; i < mst.size(); i++){
 		printf("<%d, %d, %lf>\t%s\t%s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, similarityInfos[mst[i].preNode].name.c_str(), similarityInfos[mst[i].sufNode].name.c_str());
 		//printf("<%d, %d, %lf>\n", mst[i].preNode, mst[i].sufNode, mst[i].dist);
