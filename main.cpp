@@ -39,6 +39,7 @@ using namespace std;
 struct SketchInfo{
 	Sketch::MinHash* minHash;
 	Sketch::WMinHash* WMinHash;
+	Sketch::HyperLogLog* HLL;
 	int index;
 };
 
@@ -330,6 +331,36 @@ int main(int argc, char * argv[]){
 
 
 		}
+		else if(sketchFunc == "HLL"){
+			static const size_t BITS = 20;
+			while(1){
+				int length = kseq_read(ks1);
+				if(length < 0){
+					break;
+				}
+
+				SimilarityInfo tmpSimilarityInfo;
+				tmpSimilarityInfo.id = index;
+				tmpSimilarityInfo.name = ks1->name.s;
+				tmpSimilarityInfo.comment = ks1->comment.s;
+				tmpSimilarityInfo.length = length;
+
+				similarityInfos.push_back(tmpSimilarityInfo);
+
+				Sketch::HyperLogLog* hll = new Sketch::HyperLogLog(BITS);
+				hll->update(ks1->seq.s);
+
+				SketchInfo tmpSketchInfo;
+				tmpSketchInfo.HLL = hll;
+				tmpSketchInfo.index = index;
+				minHashes.push_back(tmpSketchInfo);
+				
+				index++;
+
+			}//end while
+
+	
+		}//end else if sketchFunc == HLL
 		cerr << "the number of the sequence is: " << index << endl;
 		gzclose(fp1);
 		kseq_destroy(ks1);
@@ -411,7 +442,7 @@ int main(int argc, char * argv[]){
 			Sketch::WMHParameters parameter;
 			parameter.kmerSize = 21;
 			parameter.sketchSize = 50;
-			parameter.windowSize = 200;
+			parameter.windowSize = 20;
 			parameter.r = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
 			parameter.c = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
 			parameter.b = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
@@ -456,7 +487,7 @@ int main(int argc, char * argv[]){
 				#pragma omp critical
 				{
 
-				cerr << "the index is: " << i << endl;
+				//cerr << "the index is: " << i << endl;
 					SketchInfo tmpSketchInfo;
 					tmpSketchInfo.WMinHash = mh1;
 
@@ -476,6 +507,68 @@ int main(int argc, char * argv[]){
 				kseq_destroy(ks1);
 			}//end for
 		}//end if WMH
+		else if(sketchFunc == "HLL"){
+			static const size_t BITS = 20;
+			#pragma omp parallel for num_threads(threads) schedule(dynamic)
+			//#pragma omp parallel for num_threads(1) schedule(dynamic)
+			for(int i = 0; i < fileList.size(); i++){
+				//cout << fileList[i] << endl;
+				gzFile fp1;
+				kseq_t* ks1;
+				
+				fp1 = gzopen(fileList[i].c_str(), "r");
+				if(fp1 == NULL){
+					fprintf(stderr, "cannot open the genome file\n");
+					exit(1);
+				}
+	
+				ks1 = kseq_init(fp1);
+				Sketch::HyperLogLog *hll = new Sketch::HyperLogLog(BITS);
+
+				int totalLength = 0;
+				string comment("");
+				while(1){
+					int length = kseq_read(ks1);
+					//cerr << "the length is: " << length << endl;
+					totalLength += length;
+					if(length < 0){
+						break;
+					}
+
+					hll->update(ks1->seq.s);
+					//comment += (ks1->name.s + '\t' + ks1->comment.s + '\n');
+					comment += '>';
+					comment += ks1->name.s;
+					comment += ' ';
+					comment += ks1->comment.s;
+
+				}
+			
+				#pragma omp critical
+				{
+					
+				cerr << "the index is: " << i << "\t" << fileList[i] << endl;
+
+					SketchInfo tmpSketchInfo;
+					tmpSketchInfo.HLL = hll;
+
+					tmpSketchInfo.index = i;
+					minHashes.push_back(tmpSketchInfo);
+
+					SimilarityInfo tmpSimilarityInfo;
+					tmpSimilarityInfo.id = i;
+					tmpSimilarityInfo.name = fileList[i];
+					tmpSimilarityInfo.comment = comment;
+					comment = "";
+					tmpSimilarityInfo.length = totalLength;
+					similarityInfos.push_back(tmpSimilarityInfo);
+				}
+
+				gzclose(fp1);
+				kseq_destroy(ks1);
+			}//end for
+
+		}//end HLL
 		else{
 			fprintf(stderr, "Invalid sketch function: %s\n", sketchFunc.c_str());
 			printUsage();
@@ -516,10 +609,14 @@ int main(int argc, char * argv[]){
 				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
 				double tmpDist;
 				if(sketchFunc == "MinHash")
-					tmpDist = minHashes[i].minHash->distance(minHashes[j].minHash);
+					//tmpDist = minHashes[i].minHash->distance(minHashes[j].minHash);
+					tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
 				else if(sketchFunc == "WMH"){
 					tmpDist = minHashes[i].WMinHash->distance(minHashes[j].WMinHash);
 					//cerr << "the tmpDist is: " << tmpDist << endl;
+				}
+				else if(sketchFunc == "HLL"){
+					tmpDist = minHashes[i].HLL->distance(*minHashes[j].HLL);
 				}
 				else	
 					break;
@@ -554,6 +651,9 @@ int main(int argc, char * argv[]){
 					tmpDist = minHashes[i].minHash->distance(minHashes[j].minHash);
 				else if(sketchFunc == "WMH")
 					tmpDist = minHashes[i].WMinHash->distance(minHashes[j].WMinHash);
+				else if(sketchFunc == "HLL")
+					tmpDist = minHashes[i].HLL->distance(*minHashes[j].HLL);
+
 				else	
 					break;
 
