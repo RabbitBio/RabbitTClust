@@ -1,10 +1,14 @@
 #ifndef H_SKETCH_INFO
 #define H_SKETCH_INFO
 
+#include "Sketch.h"
 #include <iostream>
 #include <string>
 #include <stdint.h>
 #include <vector>
+#include <random>
+
+using namespace std;
 
 //struct SketchInfo{
 //	int id;
@@ -17,23 +21,29 @@
 //
 //};
 
+struct SketchInfo{
+	Sketch::MinHash* minHash;
+	Sketch::WMinHash* WMinHash;
+	Sketch::HyperLogLog* HLL;
+	Sketch::OrderMinHash * OMH;
+	int index;
+};
+
 struct SimilarityInfo{
 	//for sequence information
 	int id;
-	std::string name;
-	std::string comment;
-	std::string strand;
-	std::string seq;
+	string name;
+	string comment;
+	string strand;
+	string seq;
 	uint64_t length;
 	int size;
-
-
-	//for similarity information
-	//vector<int> suffixIds;
-	//vector<double> similaritys;
 	
 };
 
+
+bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>& similarityInfos, vector<SketchInfo>& sketches, int threads);
+bool sketchFiles(string inputFile, string sketchFunc, vector<SimilarityInfo>& similarityInfos, vector<SketchInfo>& sketches, int threads);
 
 
 

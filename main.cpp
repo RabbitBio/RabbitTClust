@@ -23,7 +23,7 @@
 #include "Sketch.h"// need to add the include path in Makefile.
 #include <sys/time.h>
 #include <zlib.h>
-#include "kseq.h"
+//#include "kseq.h"
 #include <stdio.h>
 #include "MST.h"
 #include <omp.h>
@@ -32,33 +32,14 @@
 #include <string>
 #include "UnionFind.h"
 
-KSEQ_INIT(gzFile, gzread);
+//#include "getSketch.h"
+
+//KSEQ_INIT(gzFile, gzread);
 
 using namespace std;
 
-struct SketchInfo{
-	Sketch::MinHash* minHash;
-	Sketch::WMinHash* WMinHash;
-	Sketch::HyperLogLog* HLL;
-	Sketch::OrderMinHash * OMH;
-	int index;
-};
-
 bool cmpSketch(SketchInfo s1, SketchInfo s2){
 	return s1.index < s2.index;
-}
-
-void getCWS(double * r, double * c, double * b, int sketchSize, int dimension){
-	const int DISTRIBUTION_SEED = 1;
-	default_random_engine generator(DISTRIBUTION_SEED);
-	gamma_distribution<double> gamma(2.0, 1.0);
-	uniform_real_distribution<double> uniform(0.0, 1.0);
-
-	for(int i = 0; i < sketchSize * dimension; ++i){
-		r[i] = gamma(generator);
-		c[i] = log(gamma(generator));
-		b[i] = uniform(generator) * r[i];
-	}
 }
 
 double get_sec(){
@@ -167,7 +148,6 @@ int main(int argc, char * argv[]){
 		}//end while
 
 		vector<SimilarityInfo> similarityInfos;
-		//while(getline(fs1, line)){
 		while(1){
 			if(!getline(fs1, line)) break;
 			stringstream ss;
@@ -238,421 +218,15 @@ int main(int argc, char * argv[]){
 	double t0 = get_sec();
 
 	if(!sketchByFile){
-		fprintf(stderr, "input one file, sketch by sequence: \n");
-
-		gzFile fp1;
-		kseq_t* ks1;
-	
-		fp1 = gzopen(inputFile.c_str(), "r");
-		if(fp1 == NULL){
-			fprintf(stderr, "cannot open the genome file\n");
+		if(!sketchSequences(inputFile, sketchFunc, similarityInfos, sketches, threads)){
 			printUsage();
 			return 1;
 		}
-	
-		ks1 = kseq_init(fp1);
-	
-	
-		int index = 0;
-		if(sketchFunc == "MinHash"){
-			while(1){
-				int length = kseq_read(ks1);
-				if(length < 0){
-					break;
-				}
-	
-				//SketchInfo tmpSketchInfo;
-				SimilarityInfo tmpSimilarityInfo;
-			
-				tmpSimilarityInfo.id = index;
-				tmpSimilarityInfo.name = ks1->name.s;
-				tmpSimilarityInfo.comment = ks1->comment.s;
-				tmpSimilarityInfo.length = length;
-				//tmpSimilarityInfo.seq = ks1->seq.s;//do not store the seq content;
-	
-				similarityInfos.push_back(tmpSimilarityInfo); 
-
-
-				//Sketch::MinHash *mh1 = new Sketch::MinHash();//the sketchSize(number of hashes) need to be passed properly.
-				Sketch::MinHash *mh1 = new Sketch::MinHash(21, 10000);
-				mh1->update(ks1->seq.s);
-
-				SketchInfo tmpSketchInfo;
-				tmpSketchInfo.minHash = mh1;
-				tmpSketchInfo.index = index;
-				sketches.push_back(tmpSketchInfo);
-				index++;
-
-				//if(index == 5) break;
-	
-			}//end while
-		}
-		else if(sketchFunc == "WMH"){
-			Sketch::WMHParameters parameter;
-			parameter.kmerSize = 21;
-			parameter.sketchSize = 50;
-			parameter.windowSize = 20;
-			parameter.r = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-			parameter.c = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-			parameter.b = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-			getCWS(parameter.r, parameter.c, parameter.b, parameter.sketchSize, pow(parameter.kmerSize, 4));
-			while(1){
-				int length = kseq_read(ks1);
-				if(length < 0){
-					break;
-				}
-	
-				//SketchInfo tmpSketchInfo;
-				SimilarityInfo tmpSimilarityInfo;
-			
-				tmpSimilarityInfo.id = index;
-				tmpSimilarityInfo.name = ks1->name.s;
-				tmpSimilarityInfo.comment = ks1->comment.s;
-				tmpSimilarityInfo.length = length;
-				//tmpSimilarityInfo.seq = ks1->seq.s;//do not store the seq content;
-	
-				similarityInfos.push_back(tmpSimilarityInfo); 
-
-
-				//Sketch::MinHash *mh1 = new Sketch::MinHash();//the sketchSize(number of hashes) need to be passed properly.
-				Sketch::WMinHash *mh1 = new Sketch::WMinHash(parameter);
-				mh1->update(ks1->seq.s);
-
-				mh1->computeHistoSketch();
-
-				SketchInfo tmpSketchInfo;
-				tmpSketchInfo.WMinHash = mh1;
-				tmpSketchInfo.index = index;
-				sketches.push_back(tmpSketchInfo);
-				index++;
-
-				//if(index == 5) break;
-	
-			}//end while
-
-
-		}
-		else if(sketchFunc == "HLL"){
-			static const size_t BITS = 20;
-			while(1){
-				int length = kseq_read(ks1);
-				if(length < 0){
-					break;
-				}
-
-				SimilarityInfo tmpSimilarityInfo;
-				tmpSimilarityInfo.id = index;
-				tmpSimilarityInfo.name = ks1->name.s;
-				tmpSimilarityInfo.comment = ks1->comment.s;
-				tmpSimilarityInfo.length = length;
-
-				similarityInfos.push_back(tmpSimilarityInfo);
-
-				Sketch::HyperLogLog* hll = new Sketch::HyperLogLog(BITS);
-				hll->update(ks1->seq.s);
-
-				SketchInfo tmpSketchInfo;
-				tmpSketchInfo.HLL = hll;
-				tmpSketchInfo.index = index;
-				sketches.push_back(tmpSketchInfo);
-				
-				index++;
-
-			}//end while
-
-	
-		}//end else if sketchFunc == HLL
-		else if(sketchFunc == "OMH"){
-			while(1){
-				int length = kseq_read(ks1);
-				if(length < 0){
-					break;
-				}
-
-				SimilarityInfo tmpSimilarityInfo;
-				tmpSimilarityInfo.id = index;
-				tmpSimilarityInfo.name = ks1->name.s;
-				tmpSimilarityInfo.comment = ks1->comment.s;
-				tmpSimilarityInfo.length = length;
-
-				similarityInfos.push_back(tmpSimilarityInfo);
-				Sketch::OrderMinHash* omh = new Sketch::OrderMinHash();
-				omh->buildSketch(ks1->seq.s);
-
-				SketchInfo tmpSketchInfo;
-				tmpSketchInfo.OMH = omh;
-				tmpSketchInfo.index = index;
-				sketches.push_back(tmpSketchInfo);
-
-				index++;
-			}//end while
-
-		}//end else if sketchFunc == OMH
-
-		cerr << "the number of the sequence is: " << index << endl;
-		gzclose(fp1);
-		kseq_destroy(ks1);
 	
 	}
 	else{//sketch by file
-		fprintf(stderr, "input fileList, sketch by file\n");
-		fstream fs(inputFile);
-		if(!fs){
-			fprintf(stderr, "error open the inputFile of fileList\n");
-			printUsage();
-			return 1;
-		}
-		vector<string> fileList;
-		string fileName;
-		while(getline(fs, fileName)){
-			fileList.push_back(fileName);
-		} 
-		
-		if(sketchFunc == "MinHash"){
-			#pragma omp parallel for num_threads(threads) schedule(dynamic)
-			//#pragma omp parallel for num_threads(1) schedule(dynamic)
-			for(int i = 0; i < fileList.size(); i++){
-				//cout << fileList[i] << endl;
-				gzFile fp1;
-				kseq_t* ks1;
-				
-				fp1 = gzopen(fileList[i].c_str(), "r");
-				if(fp1 == NULL){
-					fprintf(stderr, "cannot open the genome file\n");
-					exit(1);
-				}
-	
-				ks1 = kseq_init(fp1);
-				Sketch::MinHash *mh1 = new Sketch::MinHash(21, 10000);
 
-				int totalLength = 0;
-				string comment("");
-				while(1){
-					int length = kseq_read(ks1);
-					totalLength += length;
-					if(length < 0){
-						break;
-					}
-
-					mh1->update(ks1->seq.s);
-					//comment += (ks1->name.s + '\t' + ks1->comment.s + '\n');
-					comment += '>';
-					comment += ks1->name.s;
-					comment += ' ';
-					comment += ks1->comment.s;
-
-				}
-				//cerr << "finish the file: 	" << fileList[i] << endl;
-
-				#pragma omp critical
-				{
-
-					SketchInfo tmpSketchInfo;
-					tmpSketchInfo.minHash = mh1;
-
-					tmpSketchInfo.index = i;
-					sketches.push_back(tmpSketchInfo);
-
-					SimilarityInfo tmpSimilarityInfo;
-					tmpSimilarityInfo.id = i;
-					tmpSimilarityInfo.name = fileList[i];
-					tmpSimilarityInfo.comment = comment;
-					comment = "";
-					tmpSimilarityInfo.length = totalLength;
-					similarityInfos.push_back(tmpSimilarityInfo);
-				}
-
-				gzclose(fp1);
-				kseq_destroy(ks1);
-			}//end for
-		}//end minHash
-		else if(sketchFunc == "WMH"){
-			Sketch::WMHParameters parameter;
-			parameter.kmerSize = 21;
-			parameter.sketchSize = 50;
-			parameter.windowSize = 20;
-			parameter.r = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-			parameter.c = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-			parameter.b = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-			getCWS(parameter.r, parameter.c, parameter.b, parameter.sketchSize, pow(parameter.kmerSize, 4));
-
-			#pragma omp parallel for num_threads(threads) schedule(dynamic)
-			//#pragma omp parallel for num_threads(1) schedule(dynamic)
-			for(int i = 0; i < fileList.size(); i++){
-				//cout << fileList[i] << endl;
-				gzFile fp1;
-				kseq_t* ks1;
-				
-				fp1 = gzopen(fileList[i].c_str(), "r");
-				if(fp1 == NULL){
-					fprintf(stderr, "cannot open the genome file\n");
-					exit(1);
-				}
-	
-				ks1 = kseq_init(fp1);
-				Sketch::WMinHash *mh1 = new Sketch::WMinHash(parameter);
-
-				int totalLength = 0;
-				string comment("");
-				while(1){
-					int length = kseq_read(ks1);
-					totalLength += length;
-					if(length < 0){
-						break;
-					}
-
-					mh1->update(ks1->seq.s);
-					//comment += (ks1->name.s + '\t' + ks1->comment.s + '\n');
-					comment += '>';
-					comment += ks1->name.s;
-					comment += ' ';
-					comment += ks1->comment.s;
-
-				}
-				mh1->computeHistoSketch();
-				//cerr << "finish the file: 	" << fileList[i] << endl;
-
-				#pragma omp critical
-				{
-
-				//cerr << "the index is: " << i << endl;
-					SketchInfo tmpSketchInfo;
-					tmpSketchInfo.WMinHash = mh1;
-
-					tmpSketchInfo.index = i;
-					sketches.push_back(tmpSketchInfo);
-
-					SimilarityInfo tmpSimilarityInfo;
-					tmpSimilarityInfo.id = i;
-					tmpSimilarityInfo.name = fileList[i];
-					tmpSimilarityInfo.comment = comment;
-					comment = "";
-					tmpSimilarityInfo.length = totalLength;
-					similarityInfos.push_back(tmpSimilarityInfo);
-				}
-
-				gzclose(fp1);
-				kseq_destroy(ks1);
-			}//end for
-		}//end if WMH
-		else if(sketchFunc == "HLL"){
-			static const size_t BITS = 20;
-			#pragma omp parallel for num_threads(threads) schedule(dynamic)
-			//#pragma omp parallel for num_threads(1) schedule(dynamic)
-			for(int i = 0; i < fileList.size(); i++){
-				//cout << fileList[i] << endl;
-				gzFile fp1;
-				kseq_t* ks1;
-				
-				fp1 = gzopen(fileList[i].c_str(), "r");
-				if(fp1 == NULL){
-					fprintf(stderr, "cannot open the genome file\n");
-					exit(1);
-				}
-	
-				ks1 = kseq_init(fp1);
-				Sketch::HyperLogLog *hll = new Sketch::HyperLogLog(BITS);
-
-				int totalLength = 0;
-				string comment("");
-				while(1){
-					int length = kseq_read(ks1);
-					//cerr << "the length is: " << length << endl;
-					totalLength += length;
-					if(length < 0){
-						break;
-					}
-
-					hll->update(ks1->seq.s);
-					//comment += (ks1->name.s + '\t' + ks1->comment.s + '\n');
-					comment += '>';
-					comment += ks1->name.s;
-					comment += ' ';
-					comment += ks1->comment.s;
-
-				}
-			
-				#pragma omp critical
-				{
-					
-				//cerr << "the index is: " << i << "\t" << fileList[i] << endl;
-
-					SketchInfo tmpSketchInfo;
-					tmpSketchInfo.HLL = hll;
-
-					tmpSketchInfo.index = i;
-					sketches.push_back(tmpSketchInfo);
-
-					SimilarityInfo tmpSimilarityInfo;
-					tmpSimilarityInfo.id = i;
-					tmpSimilarityInfo.name = fileList[i];
-					tmpSimilarityInfo.comment = comment;
-					comment = "";
-					tmpSimilarityInfo.length = totalLength;
-					similarityInfos.push_back(tmpSimilarityInfo);
-				}
-
-				gzclose(fp1);
-				kseq_destroy(ks1);
-			}//end for
-
-		}//end HLL
-		else if(sketchFunc == "OMH"){
-
-			#pragma omp parallel for num_threads(threads) schedule(dynamic)
-			for(int i = 0; i < fileList.size(); i++){
-				gzFile fp1;
-				kseq_t * ks1;
-				
-				fp1 = gzopen(fileList[i].c_str(), "r");
-				if(fp1 == NULL){
-					fprintf(stderr, "cannot open the genome file\n");
-					exit(1);
-				}
-				
-				ks1 = kseq_init(fp1);
-				Sketch::OrderMinHash * omh = new Sketch::OrderMinHash();
-				int totalLength = 0;
-				string comment("");
-				while(1){
-					int length = kseq_read(ks1);
-					if(length < 0){
-						break;
-					}
-					totalLength += length;
-					omh->buildSketch(ks1->seq.s);
-					comment += '>';
-					comment += ks1->name.s;
-					comment += ' ';
-					comment += ks1->comment.s;
-
-				}
-				#pragma omp critical
-				{
-					SketchInfo tmpSketchInfo;
-					tmpSketchInfo.OMH = omh;
-					tmpSketchInfo.index = i;
-					sketches.push_back(tmpSketchInfo);
-
-					SimilarityInfo tmpSimilarityInfo;
-					tmpSimilarityInfo.id = i;
-					tmpSimilarityInfo.name = fileList[i];
-					tmpSimilarityInfo.comment = comment;
-					comment = "";
-					tmpSimilarityInfo.length = totalLength;
-					similarityInfos.push_back(tmpSimilarityInfo);
-
-
-				}
-
-				gzclose(fp1);
-				kseq_destroy(ks1);
-
-			}//end for
-
-		}//end OMH
-		else{
-			fprintf(stderr, "Invalid sketch function: %s\n", sketchFunc.c_str());
+		if(!sketchFiles(inputFile, sketchFunc, similarityInfos, sketches, threads)){
 			printUsage();
 			return 1;
 		}
@@ -701,7 +275,7 @@ int main(int argc, char * argv[]){
 					tmpDist = sketches[i].HLL->distance(*sketches[j].HLL);
 				}
 				else if(sketchFunc == "OMH"){
-					tmpDist = sketches[i].OMH->distance(* sketches[j].OMH);
+					tmpDist = sketches[i].OMH->distance(*sketches[j].OMH);
 				}
 				else	
 					break;
@@ -860,31 +434,6 @@ int main(int argc, char * argv[]){
 
 	return 0;
 }//end main
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

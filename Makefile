@@ -1,11 +1,11 @@
 TARGET=clust
 
 CXX=g++
-CXXFLAGS=-g -O3 -std=c++14 -fopenmp 
+CXXFLAGS=-g -O3 -std=c++14 -fopenmp -D THREADPOOL_MINHASH
 
 INCLUDE=./RabbitSketch/build/include
 LIBS=./RabbitSketch/build/lib
-OBJECTS=main.o MST.o
+OBJECTS=main.o MST.o SketchInfo.o
 #OBJECTS=demo.o MST.o
 #OBJECTS=test.o MST.o
 
