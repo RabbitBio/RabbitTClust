@@ -4,7 +4,19 @@
 #include <sstream>
 #include <zlib.h>
 
+#ifdef THREADPOOL_MINHASH
 #include "ThreadPool.h"
+#endif
+
+#ifdef RABBIT_IO
+#include "FastxStream.h"
+#include "FastxChunk.h"
+#include "Formater.h"
+#include "DataQueue.h"
+#include <thread>
+#include <cstdint>
+#include <unordered_map>
+#endif
 
 KSEQ_INIT(gzFile, gzread);
 using namespace std;
@@ -51,19 +63,95 @@ SketchOutput* sketchBySequence(SketchInput* input){
 	output->sketchInfo = sketchInfo;
 	//output->index = input->index;
 	return output;
-
-
 }
+
 
 void useThreadOutput(SketchOutput * output, vector<SketchInfo> &sketches){
 	//SketchInfo tmpSimilarityInf
 	sketches.push_back(output->sketchInfo);
-
-
 }
 
 #endif
 
+#ifdef RABBIT_IO
+typedef rabbit::core::TDataQueue<rabbit::fa::FastaChunk> FaChunkQueue;
+int producer_fasta_task(std::string file, rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq){
+	std::cout << "filename" << file << std::endl;
+	rabbit::fa::FastaFileReader* faFileReader;
+	faFileReader = new rabbit::fa::FastaFileReader(file, *fastaPool, false);
+	int n_chunks = 0;
+	while(1){
+		rabbit::fa::FastaChunk* faChunk = new rabbit::fa::FastaChunk;
+		faChunk = faFileReader->readNextChunk();
+		if(faChunk == NULL) break;
+		n_chunks++;
+		dq.Push(n_chunks, faChunk);
+
+	}
+	dq.SetCompleted();
+
+	return 0;
+}
+
+void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, string sketchFunc, Sketch::WMHParameters * parameters, vector<SketchInfo> *sketches, vector<SimilarityInfo> *similarityInfos){
+	int line_num = 0;
+	rabbit::int64 id = 0;
+
+	rabbit::fa::FastaChunk *faChunk;
+	while(dq.Pop(id, faChunk)){
+		std::vector<Reference> data;
+		int ref_num = rabbit::fa::chunkFormat(*faChunk, data);
+		for(Reference &r: data){
+			SimilarityInfo tmpSimilarityInfo;
+			tmpSimilarityInfo.id = r.gid;
+			tmpSimilarityInfo.name = r.name;
+			tmpSimilarityInfo.comment = r.comment;
+			tmpSimilarityInfo.length = r.length;
+			similarityInfos->push_back(tmpSimilarityInfo);
+
+			SketchInfo tmpSketchInfo; 
+			if(sketchFunc == "MinHash"){
+				Sketch::MinHash * mh1 = new Sketch::MinHash(21, 10000);
+				mh1->update((char*)r.seq.c_str());
+				tmpSketchInfo.minHash = mh1;
+			}
+			else if(sketchFunc == "WMH"){
+				Sketch::WMinHash * wmh = new Sketch::WMinHash(*parameters);
+				wmh->update((char*)r.seq.c_str());
+				wmh->computeHistoSketch();
+				tmpSketchInfo.WMinHash = wmh;
+			}
+			else if(sketchFunc == "HLL"){
+				Sketch::HyperLogLog * hll = new Sketch::HyperLogLog(20);
+				hll->update((char*)r.seq.c_str());
+				tmpSketchInfo.HLL = hll;
+			}
+			else if(sketchFunc == "OMH"){
+				Sketch::OrderMinHash* omh = new Sketch::OrderMinHash();
+				omh->buildSketch((char*)r.seq.c_str());
+				tmpSketchInfo.OMH = omh;
+			}
+
+			//tmpSketchInfo.minHash = mh1;
+			tmpSketchInfo.index = r.gid;
+			sketches->push_back(tmpSketchInfo);
+
+
+		}
+		rabbit::fa::FastaDataChunk *tmp = faChunk->chunk;
+		do{
+			if(tmp != NULL){
+			fastaPool->Release(tmp);
+			tmp = tmp->next;
+			}
+		}while(tmp!=NULL);
+
+	}
+
+}
+
+
+#endif
 
 void getCWS(double * r, double * c, double * b, int sketchSize, int dimension){
 	const int DISTRIBUTION_SEED = 1;
@@ -148,6 +236,73 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 	while(threadPool.running()){
 		useThreadOutput(threadPool.popOutputWhenAvailable(), sketches);
 	}
+	#else 
+	#ifdef RABBIT_IO
+	int th = threads - 1;//consumer threads number;
+	vector<SketchInfo>  sketchesArr[th];
+	vector<SimilarityInfo>  similarityInfosArr[th];
+	
+	rabbit::fa::FastaDataPool *fastaPool = new rabbit::fa::FastaDataPool(256, 1<< 24);
+	FaChunkQueue queue1(128, 1);
+	//cout << "--------------------" << endl;
+	std::thread producer(producer_fasta_task, inputFile, fastaPool, std::ref(queue1));
+	std::thread **threadArr = new std::thread* [th];
+
+	for(int t = 0; t < th; t++){
+		threadArr[t] = new std::thread(std::bind(consumer_fasta_task, fastaPool, std::ref(queue1), sketchFunc, &parameters, &sketchesArr[t], &similarityInfosArr[t]));
+	}
+	producer.join();
+	for(int t = 0; t < th; t++){
+		threadArr[t]->join();
+	}
+
+	if(sketchFunc == "MinHash"){
+		unordered_map<int, Sketch::MinHash* > sketchMap;
+		for(int i = 0; i < th; i++){
+			for(int j = 0; j < sketchesArr[i].size(); j++){
+				if(!sketchMap.count(sketchesArr[i][j].index)){
+					sketchMap.insert({sketchesArr[i][j].index, sketchesArr[i][j].minHash});
+				}
+				else{
+					Sketch::MinHash * tmpMH = sketchMap.at(sketchesArr[i][j].index);
+					tmpMH->merge(*sketchesArr[i][j].minHash);
+					//sketches.push_back(sketchesArr[i][j]);
+				}
+			}
+		}
+
+		for(auto &x : sketchMap){
+			SketchInfo tmpSketch;
+			tmpSketch.index = x.first;
+			tmpSketch.minHash = x.second;
+			sketches.push_back(tmpSketch);
+		}
+
+		unordered_map<int, SimilarityInfo> similarityMap;
+		for(int i = 0; i < th; i++){
+			for(int j = 0; j < similarityInfosArr[i].size(); j++){
+				if(!similarityMap.count(similarityInfosArr[i][j].id)){
+					similarityMap.insert({similarityInfosArr[i][j].id, similarityInfosArr[i][j]});
+				}
+				else{
+					SimilarityInfo &tmpSimilarityInfo = similarityMap.at(similarityInfosArr[i][j].id);
+					tmpSimilarityInfo.name +=similarityInfosArr[i][j].name;
+					tmpSimilarityInfo.comment +=similarityInfosArr[i][j].comment;
+				}
+			}
+		}
+		for(auto & x : similarityMap){
+			similarityInfos.push_back(x.second);
+		}
+	}
+	else{
+		cerr << "RabbitIO does not support unmerged MinHash functions" << endl;
+		return false;
+	}
+
+	cerr << "the size of sketches is: " << sketches.size() << endl;
+	cerr << "the size of similarityInfos is: " << similarityInfos.size() << endl;
+
 	
 	#else 
 	while(1){
@@ -193,6 +348,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 
 	}//end while
 	#endif
+	#endif
 	cerr << "the number of sequence is: " << index << endl;
 	gzclose(fp1);
 	kseq_destroy(ks1);
@@ -211,6 +367,17 @@ bool sketchFiles(string inputFile, string sketchFunc, vector<SimilarityInfo>& si
 	string fileName;
 	while(getline(fs, fileName)){
 		fileList.push_back(fileName);
+	}
+
+	Sketch::WMHParameters parameter;
+	if(sketchFunc == "WMH"){
+		parameter.kmerSize = 21;
+		parameter.sketchSize = 50;
+		parameter.windowSize = 20;
+		parameter.r = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
+		parameter.c = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
+		parameter.b = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
+		getCWS(parameter.r, parameter.c, parameter.b, parameter.sketchSize, pow(parameter.kmerSize, 4));
 	}
 
 	#pragma omp parallel for num_threads(threads) schedule(dynamic)
@@ -235,19 +402,10 @@ bool sketchFiles(string inputFile, string sketchFunc, vector<SimilarityInfo>& si
 			mh1 = new Sketch::MinHash(21, 10000);
 		}
 		else if(sketchFunc == "WMH"){
-			Sketch::WMHParameters parameter;
-			parameter.kmerSize = 21;
-			parameter.sketchSize = 50;
-			parameter.windowSize = 20;
-			parameter.r = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-			parameter.c = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-			parameter.b = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-			getCWS(parameter.r, parameter.c, parameter.b, parameter.sketchSize, pow(parameter.kmerSize, 4));
-
 			wmh1 = new Sketch::WMinHash(parameter);
 		}
 		else if(sketchFunc == "HLL"){
-			hll = new Sketch::HyperLogLog(20);
+			hll = new Sketch::HyperLogLog(10);
 		}
 		else if(sketchFunc == "OMH"){
 			omh = new Sketch::OrderMinHash();
