@@ -82,10 +82,11 @@ int producer_fasta_task(std::string file, rabbit::fa::FastaDataPool* fastaPool, 
 	int n_chunks = 0;
 	while(1){
 		rabbit::fa::FastaChunk* faChunk = new rabbit::fa::FastaChunk;
-		faChunk = faFileReader->readNextChunk();
+		faChunk = faFileReader->readNextChunkList();
 		if(faChunk == NULL) break;
 		n_chunks++;
 		dq.Push(n_chunks, faChunk);
+		//cerr << "reading : " << n_chunks << endl;
 
 	}
 	dq.SetCompleted();
@@ -100,7 +101,7 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 	rabbit::fa::FastaChunk *faChunk;
 	while(dq.Pop(id, faChunk)){
 		std::vector<Reference> data;
-		int ref_num = rabbit::fa::chunkFormat(*faChunk, data);
+		int ref_num = rabbit::fa::chunkListFormat(*faChunk, data);
 		for(Reference &r: data){
 			SimilarityInfo tmpSimilarityInfo;
 			tmpSimilarityInfo.id = r.gid;
@@ -122,7 +123,7 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 				tmpSketchInfo.WMinHash = wmh;
 			}
 			else if(sketchFunc == "HLL"){
-				Sketch::HyperLogLog * hll = new Sketch::HyperLogLog(20);
+				Sketch::HyperLogLog * hll = new Sketch::HyperLogLog(10);
 				hll->update((char*)r.seq.c_str());
 				tmpSketchInfo.HLL = hll;
 			}
@@ -135,7 +136,6 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 			//tmpSketchInfo.minHash = mh1;
 			tmpSketchInfo.index = r.gid;
 			sketches->push_back(tmpSketchInfo);
-
 
 		}
 		rabbit::fa::FastaDataChunk *tmp = faChunk->chunk;
@@ -217,7 +217,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 			sketchInfo.WMinHash = wmh;
 		}
 		else if(sketchFunc == "HLL"){
-			Sketch::HyperLogLog *hll = new Sketch::HyperLogLog(20);
+			Sketch::HyperLogLog *hll = new Sketch::HyperLogLog(10);
 			sketchInfo.HLL = hll;
 		}
 		else if(sketchFunc == "OMH"){
@@ -256,52 +256,62 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 		threadArr[t]->join();
 	}
 
-	if(sketchFunc == "MinHash"){
-		unordered_map<int, Sketch::MinHash* > sketchMap;
-		for(int i = 0; i < th; i++){
-			for(int j = 0; j < sketchesArr[i].size(); j++){
-				if(!sketchMap.count(sketchesArr[i][j].index)){
-					sketchMap.insert({sketchesArr[i][j].index, sketchesArr[i][j].minHash});
-				}
-				else{
-					Sketch::MinHash * tmpMH = sketchMap.at(sketchesArr[i][j].index);
-					tmpMH->merge(*sketchesArr[i][j].minHash);
-					//sketches.push_back(sketchesArr[i][j]);
-				}
-			}
-		}
 
-		for(auto &x : sketchMap){
-			SketchInfo tmpSketch;
-			tmpSketch.index = x.first;
-			tmpSketch.minHash = x.second;
-			sketches.push_back(tmpSketch);
-		}
-
-		unordered_map<int, SimilarityInfo> similarityMap;
-		for(int i = 0; i < th; i++){
-			for(int j = 0; j < similarityInfosArr[i].size(); j++){
-				if(!similarityMap.count(similarityInfosArr[i][j].id)){
-					similarityMap.insert({similarityInfosArr[i][j].id, similarityInfosArr[i][j]});
-				}
-				else{
-					SimilarityInfo &tmpSimilarityInfo = similarityMap.at(similarityInfosArr[i][j].id);
-					tmpSimilarityInfo.name +=similarityInfosArr[i][j].name;
-					tmpSimilarityInfo.comment +=similarityInfosArr[i][j].comment;
-				}
-			}
-		}
-		for(auto & x : similarityMap){
-			similarityInfos.push_back(x.second);
+	for(int i = 0; i < th; i++){
+		for(int j = 0; j < sketchesArr[i].size(); j++){
+			sketches.push_back(sketchesArr[i][j]);
+			similarityInfos.push_back(similarityInfosArr[i][j]);
 		}
 	}
-	else{
-		cerr << "RabbitIO does not support unmerged MinHash functions" << endl;
-		return false;
-	}
+		
+
+//	if(sketchFunc == "MinHash"){
+//		unordered_map<int, Sketch::MinHash* > sketchMap;
+//		for(int i = 0; i < th; i++){
+//			for(int j = 0; j < sketchesArr[i].size(); j++){
+//				if(!sketchMap.count(sketchesArr[i][j].index)){
+//					sketchMap.insert({sketchesArr[i][j].index, sketchesArr[i][j].minHash});
+//				}
+//				else{
+//					Sketch::MinHash * tmpMH = sketchMap.at(sketchesArr[i][j].index);
+//					tmpMH->merge(*sketchesArr[i][j].minHash);
+//					//sketches.push_back(sketchesArr[i][j]);
+//				}
+//			}
+//		}
+//
+//		for(auto &x : sketchMap){
+//			SketchInfo tmpSketch;
+//			tmpSketch.index = x.first;
+//			tmpSketch.minHash = x.second;
+//			sketches.push_back(tmpSketch);
+//		}
+//
+//		unordered_map<int, SimilarityInfo> similarityMap;
+//		for(int i = 0; i < th; i++){
+//			for(int j = 0; j < similarityInfosArr[i].size(); j++){
+//				if(!similarityMap.count(similarityInfosArr[i][j].id)){
+//					similarityMap.insert({similarityInfosArr[i][j].id, similarityInfosArr[i][j]});
+//				}
+//				else{
+//					SimilarityInfo &tmpSimilarityInfo = similarityMap.at(similarityInfosArr[i][j].id);
+//					tmpSimilarityInfo.name +=similarityInfosArr[i][j].name;
+//					tmpSimilarityInfo.comment +=similarityInfosArr[i][j].comment;
+//				}
+//			}
+//		}
+//		for(auto & x : similarityMap){
+//			similarityInfos.push_back(x.second);
+//		}
+//	}
+//	else{
+//		cerr << "RabbitIO does not support unmerged MinHash functions" << endl;
+//		return false;
+//	}
 
 	cerr << "the size of sketches is: " << sketches.size() << endl;
 	cerr << "the size of similarityInfos is: " << similarityInfos.size() << endl;
+//	exit(0);
 
 	
 	#else 
@@ -331,7 +341,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 			tmpSketchInfo.WMinHash = wmh;
 		}
 		else if(sketchFunc == "HLL"){
-			Sketch::HyperLogLog* hll = new Sketch::HyperLogLog(20);
+			Sketch::HyperLogLog* hll = new Sketch::HyperLogLog(10);
 			hll->update(ks1->seq.s);
 			tmpSketchInfo.HLL = hll;
 
