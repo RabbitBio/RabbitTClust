@@ -18,6 +18,8 @@
 #include <unordered_map>
 #endif
 
+#include "parameter.h"
+
 KSEQ_INIT(gzFile, gzread);
 using namespace std;
 
@@ -112,7 +114,7 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 
 			SketchInfo tmpSketchInfo; 
 			if(sketchFunc == "MinHash"){
-				Sketch::MinHash * mh1 = new Sketch::MinHash(21, 500);
+				Sketch::MinHash * mh1 = new Sketch::MinHash(KMER_SIZE, MINHASH_SKETCH_SIZE);
 				mh1->update((char*)r.seq.c_str());
 				tmpSketchInfo.minHash = mh1;
 			}
@@ -123,7 +125,7 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 				tmpSketchInfo.WMinHash = wmh;
 			}
 			else if(sketchFunc == "HLL"){
-				Sketch::HyperLogLog * hll = new Sketch::HyperLogLog(10);
+				Sketch::HyperLogLog * hll = new Sketch::HyperLogLog(HLL_SKETCH_BIT);
 				hll->update((char*)r.seq.c_str());
 				tmpSketchInfo.HLL = hll;
 			}
@@ -181,9 +183,9 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 	Sketch::WMHParameters parameters;
 	if(sketchFunc == "WMH"){
 		//Sketch::WMHParameters parameters;
-		parameters.kmerSize = 21;
-		parameters.sketchSize = 50;
-		parameters.windowSize = 20;
+		parameters.kmerSize = KMER_SIZE;
+		parameters.sketchSize = WMH_SKETCH_SIZE;
+		parameters.windowSize = WINDOW_SIZE;
 		parameters.r = (double *)malloc(parameters.sketchSize * pow(parameters.kmerSize, 4) * sizeof(double));
 		parameters.c = (double *)malloc(parameters.sketchSize * pow(parameters.kmerSize, 4) * sizeof(double));
 		parameters.b = (double *)malloc(parameters.sketchSize * pow(parameters.kmerSize, 4) * sizeof(double));
@@ -196,7 +198,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 	while(1){
 		int length = kseq_read(ks1);
 		if(length < 0) break;
-		if(length < 21) continue;
+		if(length < KMER_SIZE) continue;
 
 		SimilarityInfo tmpSimilarityInfoInfo;
 		tmpSimilarityInfoInfo.id = index;
@@ -210,7 +212,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 		memcpy(seqCopy, ks1->seq.s, length+1);
 		SketchInfo sketchInfo;
 		if(sketchFunc == "MinHash"){
-			Sketch::MinHash * mh1 = new Sketch::MinHash(21, 500);
+			Sketch::MinHash * mh1 = new Sketch::MinHash(KMER_SIZE, MINHASH_SKETCH_SIZE);
 			sketchInfo.minHash = mh1;
 		}
 		else if(sketchFunc == "WMH"){
@@ -218,7 +220,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 			sketchInfo.WMinHash = wmh;
 		}
 		else if(sketchFunc == "HLL"){
-			Sketch::HyperLogLog *hll = new Sketch::HyperLogLog(10);
+			Sketch::HyperLogLog *hll = new Sketch::HyperLogLog(HLL_SKETCH_BIT);
 			sketchInfo.HLL = hll;
 		}
 		else if(sketchFunc == "OMH"){
@@ -287,7 +289,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 
 		SketchInfo tmpSketchInfo;
 		if(sketchFunc == "MinHash"){
-			Sketch::MinHash *mh1 = new Sketch::MinHash(21, 100);
+			Sketch::MinHash *mh1 = new Sketch::MinHash(KMER_SIZE, MINHASH_SKETCH_SIZE);
 			mh1->update(ks1->seq.s);
 			tmpSketchInfo.minHash = mh1;
 		}
@@ -298,7 +300,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 			tmpSketchInfo.WMinHash = wmh;
 		}
 		else if(sketchFunc == "HLL"){
-			Sketch::HyperLogLog* hll = new Sketch::HyperLogLog(10);
+			Sketch::HyperLogLog* hll = new Sketch::HyperLogLog(HLL_SKETCH_BIT);
 			hll->update(ks1->seq.s);
 			tmpSketchInfo.HLL = hll;
 
@@ -338,9 +340,9 @@ bool sketchFiles(string inputFile, string sketchFunc, vector<SimilarityInfo>& si
 
 	Sketch::WMHParameters parameter;
 	if(sketchFunc == "WMH"){
-		parameter.kmerSize = 21;
-		parameter.sketchSize = 50;
-		parameter.windowSize = 20;
+		parameter.kmerSize = KMER_SIZE;
+		parameter.sketchSize = WMH_SKETCH_SIZE;
+		parameter.windowSize = WINDOW_SIZE;
 		parameter.r = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
 		parameter.c = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
 		parameter.b = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
@@ -366,13 +368,13 @@ bool sketchFiles(string inputFile, string sketchFunc, vector<SimilarityInfo>& si
 		Sketch::OrderMinHash * omh;
 
 		if(sketchFunc == "MinHash"){
-			mh1 = new Sketch::MinHash(21, 10000);
+			mh1 = new Sketch::MinHash(KMER_SIZE, MINHASH_SKETCH_SIZE);
 		}
 		else if(sketchFunc == "WMH"){
 			wmh1 = new Sketch::WMinHash(parameter);
 		}
 		else if(sketchFunc == "HLL"){
-			hll = new Sketch::HyperLogLog(10);
+			hll = new Sketch::HyperLogLog(HLL_SKETCH_BIT);
 		}
 		else if(sketchFunc == "OMH"){
 			omh = new Sketch::OrderMinHash();
