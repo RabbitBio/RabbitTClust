@@ -33,6 +33,7 @@ vector<EdgeInfo> kruskalAlgorithm(vector<EdgeInfo>graph, int vertices){
         }
 		//if(spanningTree.size() == vertices - 1) break;
     }
+	uf.clear();
     return spanningTree;
 }
 

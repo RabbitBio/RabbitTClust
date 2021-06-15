@@ -245,31 +245,27 @@ int main(int argc, char * argv[]){
 	//section 3: compute the distance matrix and create the graph.
 	//no save the whole graph, create subMST when construct the subGraph for reducing memory footprint.
 
-	vector< vector<EdgeInfo> > graphArr;
+	//vector< vector<EdgeInfo> > graphArr;
 	vector <vector<EdgeInfo> > mstArr;
 	mstArr.resize(threads);
-	int subSize = 8;
+	int subSize = 4;
 	cerr << "the size of sketches is: " << sketches.size() << endl;
 	
 	//int index = 0;
 	int id = 0;
 	int tailNum = sketches.size() % subSize;
 	#pragma omp parallel for num_threads(threads) schedule (dynamic)
-	//#pragma omp parallel for num_threads(8) schedule (dynamic)
 	for(id = 0; id < sketches.size(); id+=subSize){
 		int thread_id = omp_get_thread_num();
-		vector<EdgeInfo> graph;
 		for(int i = id; i < id+subSize; i++){
 			//EdgeInfo tmpEdge;
 			for(int j = i+1; j < sketches.size(); j++){
-				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
 				double tmpDist;
 				if(sketchFunc == "MinHash")
-					//tmpDist = minHashes[i].minHash->distance(minHashes[j].minHash);
-					tmpDist = 1.0 - sketches[i].minHash->jaccard(sketches[j].minHash);
+					tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
+					//tmpDist = 1.0 - sketches[i].minHash->jaccard(sketches[j].minHash);
 				else if(sketchFunc == "WMH"){
 					tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
-					//cerr << "the tmpDist is: " << tmpDist << endl;
 				}
 				else if(sketchFunc == "HLL"){
 					tmpDist = sketches[i].HLL->distance(*sketches[j].HLL);
@@ -284,24 +280,18 @@ int main(int argc, char * argv[]){
 				tmpE.preNode = i;
 				tmpE.sufNode = j;
 				tmpE.dist = tmpDist;
-				graph.push_back(tmpE);
+				mstArr[thread_id].push_back(tmpE);
 			}
 
 		}
-		graph.insert(graph.end(), mstArr[thread_id].begin(), mstArr[thread_id].end());
-		sort(graph.begin(), graph.end(), cmpEdge);
-		vector<EdgeInfo> tmpMst = kruskalAlgorithm(graph, sketches.size());
-		mstArr[thread_id] = tmpMst;
-	//	#pragma omp critical
-	//	{
-	//	mstArr.push_back(tmpMst);
-	//	//graphArr.push_back(graph);
-	//	}
-	//	graph.clear();
-		tmpMst.clear();
+		sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
+		vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());
+		mstArr[thread_id].swap(tmpMst);
+	
+		vector<EdgeInfo>().swap(tmpMst);
 	}
+	
 	if(tailNum != 0){
-		vector<EdgeInfo> graph;
 		for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
 			for(int j = i+1; j < sketches.size(); j++){
 				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
@@ -321,23 +311,18 @@ int main(int argc, char * argv[]){
 				tmpE.preNode = i;
 				tmpE.sufNode = j;
 				tmpE.dist = tmpDist;
-				graph.push_back(tmpE);
+				mstArr[0].push_back(tmpE);
 			}
 		}
-		if(graph.size() != 0){
-			cerr << "the graph size is not 0" << endl;
-			graph.insert(graph.end(), mstArr[0].begin(), mstArr[0].end());
-			sort(graph.begin(), graph.end(), cmpEdge);
-			vector<EdgeInfo> tmpMst = kruskalAlgorithm(graph, sketches.size());
-			mstArr[0] = tmpMst;
-			//mstArr.push_back(tmpMst);
-			//graphArr.push_back(graph);
+		if(mstArr[0].size() != 0){
+			sort(mstArr[0].begin(), mstArr[0].end(), cmpEdge);
+			vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[0], sketches.size());
+			mstArr[0].swap(tmpMst);
 		}
 
 	}
 	double t2 = get_sec();
 
-	cerr << "size of the graphsArr is: " << graphArr.size() << endl;
 	cerr << "time of computing distance and creating graph including sort the graph is: " << t2-t1<< endl;
 
 
@@ -355,7 +340,8 @@ int main(int argc, char * argv[]){
 	vector<EdgeInfo> finalGraph;
 	for(int i = 0; i < mstArr.size(); i++){
 		finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
-		mstArr[i].clear();
+		vector<EdgeInfo>().swap(mstArr[i]);
+		//mstArr[i].clear();
 	}
 
 	double t3_1 = get_sec();
@@ -365,6 +351,7 @@ int main(int argc, char * argv[]){
 	double t3_2 = get_sec();
 
 	vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
+	vector<EdgeInfo>().swap(finalGraph);
 
 	double t4 = get_sec();
 	cerr << "time of merge subGraph(subMST) and sort finalGraph and generate finalMST is: " << t4-t3 << endl;

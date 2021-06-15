@@ -112,7 +112,7 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 
 			SketchInfo tmpSketchInfo; 
 			if(sketchFunc == "MinHash"){
-				Sketch::MinHash * mh1 = new Sketch::MinHash(21, 10000);
+				Sketch::MinHash * mh1 = new Sketch::MinHash(21, 500);
 				mh1->update((char*)r.seq.c_str());
 				tmpSketchInfo.minHash = mh1;
 			}
@@ -169,6 +169,7 @@ void getCWS(double * r, double * c, double * b, int sketchSize, int dimension){
 bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>& similarityInfos, vector<SketchInfo>& sketches, int threads){
 	gzFile fp1;
 	kseq_t * ks1;
+	cerr << "input File is: " << inputFile << endl;
 	fp1 = gzopen(inputFile.c_str(), "r");
 	if(fp1 == NULL){
 		fprintf(stderr, "cannot open the genome file, %s\n", inputFile.c_str());
@@ -209,7 +210,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 		memcpy(seqCopy, ks1->seq.s, length+1);
 		SketchInfo sketchInfo;
 		if(sketchFunc == "MinHash"){
-			Sketch::MinHash * mh1 = new Sketch::MinHash(21, 10000);
+			Sketch::MinHash * mh1 = new Sketch::MinHash(21, 500);
 			sketchInfo.minHash = mh1;
 		}
 		else if(sketchFunc == "WMH"){
@@ -263,51 +264,6 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 			similarityInfos.push_back(similarityInfosArr[i][j]);
 		}
 	}
-		
-
-//	if(sketchFunc == "MinHash"){
-//		unordered_map<int, Sketch::MinHash* > sketchMap;
-//		for(int i = 0; i < th; i++){
-//			for(int j = 0; j < sketchesArr[i].size(); j++){
-//				if(!sketchMap.count(sketchesArr[i][j].index)){
-//					sketchMap.insert({sketchesArr[i][j].index, sketchesArr[i][j].minHash});
-//				}
-//				else{
-//					Sketch::MinHash * tmpMH = sketchMap.at(sketchesArr[i][j].index);
-//					tmpMH->merge(*sketchesArr[i][j].minHash);
-//					//sketches.push_back(sketchesArr[i][j]);
-//				}
-//			}
-//		}
-//
-//		for(auto &x : sketchMap){
-//			SketchInfo tmpSketch;
-//			tmpSketch.index = x.first;
-//			tmpSketch.minHash = x.second;
-//			sketches.push_back(tmpSketch);
-//		}
-//
-//		unordered_map<int, SimilarityInfo> similarityMap;
-//		for(int i = 0; i < th; i++){
-//			for(int j = 0; j < similarityInfosArr[i].size(); j++){
-//				if(!similarityMap.count(similarityInfosArr[i][j].id)){
-//					similarityMap.insert({similarityInfosArr[i][j].id, similarityInfosArr[i][j]});
-//				}
-//				else{
-//					SimilarityInfo &tmpSimilarityInfo = similarityMap.at(similarityInfosArr[i][j].id);
-//					tmpSimilarityInfo.name +=similarityInfosArr[i][j].name;
-//					tmpSimilarityInfo.comment +=similarityInfosArr[i][j].comment;
-//				}
-//			}
-//		}
-//		for(auto & x : similarityMap){
-//			similarityInfos.push_back(x.second);
-//		}
-//	}
-//	else{
-//		cerr << "RabbitIO does not support unmerged MinHash functions" << endl;
-//		return false;
-//	}
 
 	cerr << "the size of sketches is: " << sketches.size() << endl;
 	cerr << "the size of similarityInfos is: " << similarityInfos.size() << endl;
@@ -315,6 +271,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 
 	
 	#else 
+	cerr << "start read the file " << endl;
 	while(1){
 		int length = kseq_read(ks1);
 		if(length < 0){
@@ -330,7 +287,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 
 		SketchInfo tmpSketchInfo;
 		if(sketchFunc == "MinHash"){
-			Sketch::MinHash *mh1 = new Sketch::MinHash(21, 10000);
+			Sketch::MinHash *mh1 = new Sketch::MinHash(21, 100);
 			mh1->update(ks1->seq.s);
 			tmpSketchInfo.minHash = mh1;
 		}
