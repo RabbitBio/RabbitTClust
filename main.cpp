@@ -31,6 +31,8 @@
 #include <sstream>
 #include <string>
 #include "UnionFind.h"
+#include <algorithm>
+#include "parameter.h"
 
 //#include "getSketch.h"
 
@@ -216,6 +218,8 @@ int main(int argc, char * argv[]){
 	//for weighted MinHash
 
 	double t0 = get_sec();
+	int sketchSize_ = MINHASH_SKETCH_SIZE;
+	cerr << "the sketchSize is: " << sketchSize_ << endl;
 
 	if(!sketchByFile){
 		if(!sketchSequences(inputFile, sketchFunc, similarityInfos, sketches, threads)){
@@ -248,22 +252,24 @@ int main(int argc, char * argv[]){
 	//vector< vector<EdgeInfo> > graphArr;
 	vector <vector<EdgeInfo> > mstArr;
 	mstArr.resize(threads);
-	int subSize = 4;
+	int subSize = 8;
 	cerr << "the size of sketches is: " << sketches.size() << endl;
 	
 	//int index = 0;
 	int id = 0;
 	int tailNum = sketches.size() % subSize;
 	#pragma omp parallel for num_threads(threads) schedule (dynamic)
-	for(id = 0; id < sketches.size(); id+=subSize){
+	for(id = 0; id < sketches.size() - tailNum; id+=subSize){
 		int thread_id = omp_get_thread_num();
 		for(int i = id; i < id+subSize; i++){
 			//EdgeInfo tmpEdge;
 			for(int j = i+1; j < sketches.size(); j++){
 				double tmpDist;
 				if(sketchFunc == "MinHash")
+				{
 					tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
 					//tmpDist = 1.0 - sketches[i].minHash->jaccard(sketches[j].minHash);
+				}
 				else if(sketchFunc == "WMH"){
 					tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
 				}
@@ -296,8 +302,10 @@ int main(int argc, char * argv[]){
 			for(int j = i+1; j < sketches.size(); j++){
 				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
 				double tmpDist;
-				if(sketchFunc == "MinHash")
+				if(sketchFunc == "MinHash"){
 					tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
+					//tmpDist = sketches[i].minHash->jaccard(sketches[j].minHash);
+				}
 				else if(sketchFunc == "WMH")
 					tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
 				else if(sketchFunc == "HLL")
