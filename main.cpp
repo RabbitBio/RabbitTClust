@@ -24,17 +24,17 @@
 #include <sys/time.h>
 #include <zlib.h>
 //#include "kseq.h"
-#include <stdio.h>
+//#include <stdio.h>
 #include "MST.h"
 #include <omp.h>
-#include <fstream>
-#include <sstream>
-#include <string>
+//#include <fstream>
+//#include <sstream>
+//#include <string>
 #include "UnionFind.h"
 #include <algorithm>
 #include "parameter.h"
+#include "MST_IO.h"
 
-//#include "getSketch.h"
 
 //KSEQ_INIT(gzFile, gzread);
 
@@ -48,18 +48,6 @@ double get_sec(){
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
 	return (double)tv.tv_sec + (double)tv.tv_usec/1000000;
-}
-
-void printUsage(void){
-	fprintf(stdout, "usage: clust [-h] [-l] [-t] <int> [-d] <double> -F <string> [-f] genomeFile\n");
-	fprintf(stdout, "usage: clust [-h] [-f] [-d] <double> genomeInfo mstInfo\n");
-	fprintf(stdout, "	-h		: this help message\n");
-	fprintf(stdout, "	-l		: genome clustering, inputFile is the path list of the genome files\n");
-	fprintf(stdout, "	-t		: genome clustering, set the thread number\n");
-	fprintf(stdout, "	-d		: set the threshold of the clusters from the Minimum Spanning Tree\n");
-	fprintf(stdout, "	-f		: input files are genomeInfo and MST content\n");
-	fprintf(stdout, "	-F		: sketch function, includes MinHash, WMH, OMH, HLL\n"); 
-	
 }
 
 int main(int argc, char * argv[]){
@@ -117,99 +105,20 @@ int main(int argc, char * argv[]){
 		++argIndex;
 	}//end while file;
 
+	//input as GenomeInfo and MSTInfo
 	if(useMST){
-		cout << "input files is MST information and genome informations" << endl;
-		fstream fs(inputFile);
-		fstream fs1(inputFile1);
-
-		if(!fs){
-			fprintf(stderr, "error open the inputFile: %s\n", inputFile.c_str());
-			printUsage();
-			return 1;
-		}
-		if(!fs1){
-			fprintf(stderr, "error open the inputFile: %s\n", inputFile1.c_str());
-			printUsage();
-			return 1;
-		}
-		vector<EdgeInfo> mst;
-		string line;
-		while(getline(fs, line)){
-			stringstream ss;
-			ss << line;
-			int preNode, sufNode;
-			double distance;
-			ss >> preNode >> sufNode >> distance;
-
-			EdgeInfo tmpEdge;
-			tmpEdge.preNode = preNode;
-			tmpEdge.sufNode = sufNode;
-			tmpEdge.dist = distance;
-			//printf("<%d, %d, %lf>\n", tmpEdge.preNode, tmpEdge.sufNode, tmpEdge.dist); 
-			mst.push_back(tmpEdge);
-		}//end while
-
-		vector<SimilarityInfo> similarityInfos;
-		while(1){
-			if(!getline(fs1, line)) break;
-			stringstream ss;
-			ss << line;
-			int id, length;
-			string name, comment;
-			ss >> id >> name >> length;
-			
-			getline(fs1, comment);
-			
-
-			SimilarityInfo tmpSimilarityInfo;
-			tmpSimilarityInfo.id = id;
-			tmpSimilarityInfo.name = name;
-			tmpSimilarityInfo.comment = comment;
-			tmpSimilarityInfo.length = length;
-			similarityInfos.push_back(tmpSimilarityInfo);
-		}
-
-		vector<EdgeInfo> forest = generateForest(mst, threshold);
-
-		vector<vector<int> > cluster = generateCluster(forest, mst.size()+1);
-		cerr << "start the output " << endl;
-		
-		for(int i = 0; i < cluster.size(); i++){
-			printf("the cluster %d is: \n", i);
-			for(int j = 0; j < cluster[i].size(); j++){
-				//if(cluster[i][j] > similarityInfos.size()) continue;
-				cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].name << endl;
-				string tmpComment("");
-				for(int k = 1; k < similarityInfos[cluster[i][j]].comment.length(); k++){
-					if(similarityInfos[cluster[i][j]].comment[k] != '>'){
-						tmpComment += similarityInfos[cluster[i][j]].comment[k];	
-					}
-					else{
-						cout << "\t\t\t" << tmpComment << endl;
-						tmpComment = "";
-					}
-				}
-				if(tmpComment.length() != 0){
-					cout << "\t\t\t" << tmpComment << endl;
-					tmpComment = "";
-				}
-
-			}
-			cout << endl;
-		}
-
+		MST2Cluster(inputFile, inputFile1, threshold);
 		return 0;//end main 
-
 	}
 
 	if(sketchByFile) cout << "sketch by file!" << endl;
 	else cout << "sketch by sequence!" << endl;
+
+	int sketchSize_ = MINHASH_SKETCH_SIZE;
 	cout << "the thread number is: " << threads << endl;
 	cout << "the threshold is: " << threshold << endl;
+	cout << "the sketchSize is: " << sketchSize_ << endl;
 	
-
-
-
 	//section 2: read the files and create sketches.
 	//vector<Sketch::MinHash*> minHashes;
 	vector<SketchInfo> sketches;
@@ -218,8 +127,6 @@ int main(int argc, char * argv[]){
 	//for weighted MinHash
 
 	double t0 = get_sec();
-	int sketchSize_ = MINHASH_SKETCH_SIZE;
-	cerr << "the sketchSize is: " << sketchSize_ << endl;
 
 	if(!sketchByFile){
 		if(!sketchSequences(inputFile, sketchFunc, similarityInfos, sketches, threads)){
@@ -336,12 +243,6 @@ int main(int argc, char * argv[]){
 
 	//section 4: generate the MST
 	
-//	//vector <vector<EdgeInfo> > mstArr;
-//	for(int i = 0; i < graphArr.size(); i++){
-//		vector<EdgeInfo> tmpMst = kruskalAlgorithm(graphArr[i], minHashes.size());
-//		mstArr.push_back(tmpMst);
-//	}
-
 	double t3 = get_sec();
 	cerr << "time of generating tmpMSTs is: " << t3-t2 << endl;
 
@@ -369,63 +270,20 @@ int main(int argc, char * argv[]){
 	
 	
 	//save the matching of graph id and genomeInfo 
-	ofstream ofile;
-	ofile.open(inputFile+sketchFunc+"GenomeInfo");
-	for(int i = 0; i < similarityInfos.size(); i++){
-		ofile << similarityInfos[i].id << ' ' << similarityInfos[i].name << ' ' << ' ' << similarityInfos[i].length << endl;
-		ofile << similarityInfos[i].comment << endl;
-	}
-	ofile.close();
-
-	//save the mst
-	ofstream ofile1;
-	ofile1.open(inputFile+sketchFunc+"MSTInfo");
-	for(int i = 0; i < mst.size(); i++){
-		printf("<%d, %d, %lf>\t%s\t%s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, similarityInfos[mst[i].preNode].name.c_str(), similarityInfos[mst[i].sufNode].name.c_str());
-		//printf("<%d, %d, %lf>\n", mst[i].preNode, mst[i].sufNode, mst[i].dist);
-		ofile1 << mst[i].preNode << ' ' << mst[i].sufNode << ' ' << mst[i].dist << endl;
-	}
-	cout << endl;
-	ofile1.close();
+	saveMST(inputFile, sketchFunc, similarityInfos, mst, sketchByFile);
 
 	double t5 = get_sec();
 
 	//section 5; generate the clustering 
 	
-	vector<EdgeInfo> forest;
-	forest = generateForest(mst, threshold);
+	vector<EdgeInfo> forest = generateForest(mst, threshold);
 
 	vector<vector<int> >cluster = generateCluster(forest, sketches.size());
 
 	double t6 = get_sec();
 	cerr << "time of generating forest and cluster is: " << t6 - t5 << endl;
 
-	for(int i = 0; i < cluster.size(); i++){
-		printf("the cluster %d is: \n", i);
-		for(int j = 0; j < cluster[i].size(); j++){
-			//if(cluster[i][j] > similarityInfos.size()) continue;
-			//cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].id << '\t' << similarityInfos[cluster[i][j]].name << endl;;
-			cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].name << endl;
-			string comment("");
-			for(int k = 1; k < similarityInfos[cluster[i][j]].comment.length(); k++){
-				if(similarityInfos[cluster[i][j]].comment[k] != '>'){
-					comment += similarityInfos[cluster[i][j]].comment[k];
-				}
-				else{
-					cout << "\t\t\t" << comment << endl;
-					comment = "";
-				}
-			}
-			if(comment.length() > 0){
-				cout << "\t\t\t" << comment << endl;
-				comment = "";
-			}
-				
-			//cout << "\t\t" << similarityInfos[cluster[i][j]].comment << endl;
-		}
-		cout << endl;
-	}
-
+	printResult(cluster, similarityInfos, sketchByFile);
 
 	return 0;
 }//end main
