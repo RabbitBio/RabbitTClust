@@ -270,7 +270,7 @@ int main(int argc, char * argv[]){
 	
 	
 	//save the matching of graph id and genomeInfo 
-	saveMST(inputFile, sketchFunc, similarityInfos, mst, sketchByFile);
+	saveMST(inputFile, sketchFunc, similarityInfos, mst, sketchByFile, sketchSize_);
 
 	double t5 = get_sec();
 

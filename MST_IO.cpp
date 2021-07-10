@@ -6,8 +6,8 @@ void MST2Cluster(string inputFile, string inputFile1, double threshold)
 {
 	cout << "input files is MST information and genome informations" << endl;
 
-	fstream fs(inputFile);
-	fstream fs1(inputFile1);
+	fstream fs(inputFile);//MST Info
+	fstream fs1(inputFile1);//Genome Info
 	if(!fs){
 		fprintf(stderr, "error open the inputFile: %s\n", inputFile.c_str());
 		printUsage();
@@ -21,7 +21,13 @@ void MST2Cluster(string inputFile, string inputFile1, double threshold)
 
 	vector<EdgeInfo> mst;
 	string line;
-	//read the GenomeInfo and MST
+	//read the MSTInfo and GenomeInfo
+	getline(fs, line);//sketchByFile or not
+	cerr << line << endl;
+	getline(fs, line);//Sketch Function
+	cerr << line << endl;
+	getline(fs, line);//SketchSize
+	cerr << line << endl;
 	while(getline(fs, line)){
 		stringstream ss;
 		ss << line;
@@ -118,7 +124,7 @@ void printResult(vector< vector<int> > cluster, vector<SimilarityInfo> similarit
 
 }
 
-void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similarityInfos, vector<EdgeInfo> mst, bool sketchByFile)
+void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similarityInfos, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize)
 {
 	//save the matching of graph id and genomeInfo 
 	cerr << "save the genomeInfo into: " << inputFile+sketchFunc+"GenomeInfo" << endl;
@@ -138,8 +144,14 @@ void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similar
 	cerr << "save the MSTInfo into: " << inputFile+sketchFunc+"MSTInfo" << endl;
 	ofstream ofile1;
 	ofile1.open(inputFile+sketchFunc+"MSTInfo");
+	if(sketchByFile)
+		ofile1 << "sketch by File! " << endl;
+	else 
+		ofile1 << "sketch by Sequence!" << endl;
+	ofile1 << "the sketch function is: " << sketchFunc << endl;
+	ofile1 << "The sketchSize is: " << sketchSize << endl;
 	for(int i = 0; i < mst.size(); i++){
-		//printf("<%d, %d, %lf>\t%s\t%s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, similarityInfos[mst[i].preNode].name.c_str(), similarityInfos[mst[i].sufNode].name.c_str());
+		printf("<%d, %d, %lf>\t%s\t%s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, similarityInfos[mst[i].preNode].name.c_str(), similarityInfos[mst[i].sufNode].name.c_str());
 		ofile1 << mst[i].preNode << ' ' << mst[i].sufNode << ' ' << mst[i].dist << endl;
 	}
 	cout << endl;

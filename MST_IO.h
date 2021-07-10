@@ -13,7 +13,7 @@ void MST2Cluster(std::string inputFile, std::string inputFile1, double threshold
 void printResult(std::vector< std::vector<int> > cluster, std::vector<SimilarityInfo> similarityInfos, bool sketchByFile);
 
 
-void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similarityInfos, vector<EdgeInfo> mst, bool sketchByFile);
+void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similarityInfos, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize);
 
 
 
