@@ -115,9 +115,15 @@ int main(int argc, char * argv[]){
 	else cout << "sketch by sequence!" << endl;
 
 	int sketchSize_ = MINHASH_SKETCH_SIZE;
+	int kmerSize_ = KMER_SIZE;
 	cout << "the thread number is: " << threads << endl;
 	cout << "the threshold is: " << threshold << endl;
 	cout << "the sketchSize is: " << sketchSize_ << endl;
+#ifdef DEBUG
+	cerr << "the thread number is: " << threads << endl;
+	cerr << "the threshold is: " << threshold << endl;
+	cerr << "the sketchSize is: " << sketchSize_ << endl;
+#endif
 	
 	//section 2: read the files and create sketches.
 	//vector<Sketch::MinHash*> minHashes;
@@ -161,7 +167,16 @@ int main(int argc, char * argv[]){
 	mstArr.resize(threads);
 	int subSize = 8;
 	cerr << "the size of sketches is: " << sketches.size() << endl;
-	
+#ifdef DEBUG	
+	int sub_cur = sketches.size() / 4000;
+	cerr << "the sub_cur is: " << sub_cur << endl;
+	int cur_cur = 0;
+	int index_cur = 0;
+	vector<double> maxDistArr(threads, 0.0);
+	double maxDist = 0.0;
+#endif
+
+
 	//int index = 0;
 	int id = 0;
 	int tailNum = sketches.size() % subSize;
@@ -194,6 +209,9 @@ int main(int argc, char * argv[]){
 				tmpE.sufNode = j;
 				tmpE.dist = tmpDist;
 				mstArr[thread_id].push_back(tmpE);
+#ifdef DEBUG
+				maxDistArr[thread_id] = maxDistArr[thread_id] > tmpDist ? maxDistArr[thread_id] : tmpDist;
+#endif
 			}
 
 		}
@@ -202,6 +220,20 @@ int main(int argc, char * argv[]){
 		mstArr[thread_id].swap(tmpMst);
 	
 		vector<EdgeInfo>().swap(tmpMst);
+#ifdef DEBUG
+		if(thread_id == 0)
+		{
+			if(id > cur_cur){
+				fprintf(stderr, "%d ", index_cur);
+				cur_cur += sub_cur;
+				index_cur++;
+				if(index_cur % 50 == 0){
+					fprintf(stderr, "\n");
+				}
+			}
+		}
+#endif
+
 	}
 	
 	if(tailNum != 0){
@@ -227,6 +259,9 @@ int main(int argc, char * argv[]){
 				tmpE.sufNode = j;
 				tmpE.dist = tmpDist;
 				mstArr[0].push_back(tmpE);
+#ifdef DEBUG
+				maxDist = maxDist > tmpDist ? maxDist : tmpDist;
+#endif
 			}
 		}
 		if(mstArr[0].size() != 0){
@@ -236,6 +271,13 @@ int main(int argc, char * argv[]){
 		}
 
 	}
+#ifdef DEBUG
+	for(int t = 0; t < threads; t++){
+		maxDist = maxDist > maxDistArr[t] ? maxDist : maxDistArr[t];
+	}
+	cerr << endl;
+	cerr << "the maxDist is: " << maxDist << endl;
+#endif
 	double t2 = get_sec();
 
 	cerr << "time of computing distance and creating graph including sort the graph is: " << t2-t1<< endl;
@@ -270,7 +312,7 @@ int main(int argc, char * argv[]){
 	
 	
 	//save the matching of graph id and genomeInfo 
-	saveMST(inputFile, sketchFunc, similarityInfos, mst, sketchByFile, sketchSize_);
+	saveMST(inputFile, sketchFunc, similarityInfos, mst, sketchByFile, sketchSize_, kmerSize_);
 
 	double t5 = get_sec();
 

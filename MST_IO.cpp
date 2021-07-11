@@ -28,6 +28,8 @@ void MST2Cluster(string inputFile, string inputFile1, double threshold)
 	cerr << line << endl;
 	getline(fs, line);//SketchSize
 	cerr << line << endl;
+	getline(fs, line);//kmerSize
+	cerr << line << endl;
 	while(getline(fs, line)){
 		stringstream ss;
 		ss << line;
@@ -124,7 +126,7 @@ void printResult(vector< vector<int> > cluster, vector<SimilarityInfo> similarit
 
 }
 
-void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similarityInfos, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize)
+void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similarityInfos, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize)
 {
 	//save the matching of graph id and genomeInfo 
 	cerr << "save the genomeInfo into: " << inputFile+sketchFunc+"GenomeInfo" << endl;
@@ -150,6 +152,7 @@ void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similar
 		ofile1 << "sketch by Sequence!" << endl;
 	ofile1 << "the sketch function is: " << sketchFunc << endl;
 	ofile1 << "The sketchSize is: " << sketchSize << endl;
+	ofile1 << "The kmerSize is: " << kmerSize << endl;
 	for(int i = 0; i < mst.size(); i++){
 		printf("<%d, %d, %lf>\t%s\t%s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, similarityInfos[mst[i].preNode].name.c_str(), similarityInfos[mst[i].sufNode].name.c_str());
 		ofile1 << mst[i].preNode << ' ' << mst[i].sufNode << ' ' << mst[i].dist << endl;
