@@ -23,6 +23,10 @@
 KSEQ_INIT(gzFile, gzread);
 using namespace std;
 
+bool cmpSketch(SketchInfo s1, SketchInfo s2){
+	return s1.id < s2.id;
+}
+
 #ifdef THREADPOOL_MINHASH
 struct SketchInput{
 	SketchInput(SketchInfo sketchInfoNew, string sketchFuncNew, char * seqNew, int indexNew): sketchInfo(sketchInfoNew), sketchFunc(sketchFuncNew), seq(seqNew), index(indexNew){}
@@ -31,8 +35,6 @@ struct SketchInput{
 	string sketchFunc;
 	char * seq;
 	int index;
-
-
 
 };
 
@@ -60,10 +62,9 @@ SketchOutput* sketchBySequence(SketchInput* input){
 	else if(sketchFunc == "OMH"){
 		sketchInfo.OMH->buildSketch(input->seq);
 	}
-	sketchInfo.index = input->index;
-
+	free(input->seq);
+	sketchInfo.id = input->index;
 	output->sketchInfo = sketchInfo;
-	//output->index = input->index;
 	return output;
 }
 
@@ -96,7 +97,7 @@ int producer_fasta_task(std::string file, rabbit::fa::FastaDataPool* fastaPool, 
 	return 0;
 }
 
-void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, string sketchFunc, Sketch::WMHParameters * parameters, vector<SketchInfo> *sketches, vector<SimilarityInfo> *similarityInfos){
+void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, string sketchFunc, Sketch::WMHParameters * parameters, vector<SketchInfo> *sketches){
 	int line_num = 0;
 	rabbit::int64 id = 0;
 
@@ -105,14 +106,13 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 		std::vector<Reference> data;
 		int ref_num = rabbit::fa::chunkListFormat(*faChunk, data);
 		for(Reference &r: data){
-			SimilarityInfo tmpSimilarityInfo;
-			tmpSimilarityInfo.id = r.gid;
-			tmpSimilarityInfo.name = r.name;
-			tmpSimilarityInfo.comment = r.comment;
-			tmpSimilarityInfo.length = r.length;
-			similarityInfos->push_back(tmpSimilarityInfo);
+			string name = r.name;
+			string comment = r.comment;
+			int length = r.length;
+			SequenceInfo curSeq{name, comment, 0, length};
 
 			SketchInfo tmpSketchInfo; 
+			tmpSketchInfo.seqInfo = curSeq;
 			if(sketchFunc == "MinHash"){
 				Sketch::MinHash * mh1 = new Sketch::MinHash(KMER_SIZE, MINHASH_SKETCH_SIZE);
 				mh1->update((char*)r.seq.c_str());
@@ -136,7 +136,7 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 			}
 
 			//tmpSketchInfo.minHash = mh1;
-			tmpSketchInfo.index = r.gid;
+			tmpSketchInfo.id = r.gid;
 			sketches->push_back(tmpSketchInfo);
 
 		}
@@ -168,7 +168,7 @@ void getCWS(double * r, double * c, double * b, int sketchSize, int dimension){
 	}
 }
 
-bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>& similarityInfos, vector<SketchInfo>& sketches, int threads){
+bool sketchSequences(string inputFile, string sketchFunc, vector<SketchInfo>& sketches, int threads){
 	gzFile fp1;
 	kseq_t * ks1;
 	cerr << "input File is: " << inputFile << endl;
@@ -182,7 +182,6 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 	ks1 = kseq_init(fp1);
 	Sketch::WMHParameters parameters;
 	if(sketchFunc == "WMH"){
-		//Sketch::WMHParameters parameters;
 		parameters.kmerSize = KMER_SIZE;
 		parameters.sketchSize = WMH_SKETCH_SIZE;
 		parameters.windowSize = WINDOW_SIZE;
@@ -200,17 +199,14 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 		if(length < 0) break;
 		if(length < KMER_SIZE) continue;
 
-		SimilarityInfo tmpSimilarityInfoInfo;
-		tmpSimilarityInfoInfo.id = index;
-		tmpSimilarityInfoInfo.name = ks1->name.s;
-		tmpSimilarityInfoInfo.comment = ks1->comment.s;
-		tmpSimilarityInfoInfo.length = length;
-
-		similarityInfos.push_back(tmpSimilarityInfoInfo);
+		string name = ks1->name.s;
+		string comment = ks1->comment.s;
+		SequenceInfo curSeq{name, comment, 0, length};
 		
 		char * seqCopy = (char*) malloc((length+1) * sizeof(char));
 		memcpy(seqCopy, ks1->seq.s, length+1);
 		SketchInfo sketchInfo;
+		sketchInfo.seqInfo = curSeq;
 		if(sketchFunc == "MinHash"){
 			Sketch::MinHash * mh1 = new Sketch::MinHash(KMER_SIZE, MINHASH_SKETCH_SIZE);
 			sketchInfo.minHash = mh1;
@@ -243,7 +239,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 	#ifdef RABBIT_IO
 	int th = threads - 1;//consumer threads number;
 	vector<SketchInfo>  sketchesArr[th];
-	vector<SimilarityInfo>  similarityInfosArr[th];
+	//vector<SimilarityInfo>  similarityInfosArr[th];
 	
 	rabbit::fa::FastaDataPool *fastaPool = new rabbit::fa::FastaDataPool(256, 1<< 24);
 	FaChunkQueue queue1(128, 1);
@@ -252,7 +248,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 	std::thread **threadArr = new std::thread* [th];
 
 	for(int t = 0; t < th; t++){
-		threadArr[t] = new std::thread(std::bind(consumer_fasta_task, fastaPool, std::ref(queue1), sketchFunc, &parameters, &sketchesArr[t], &similarityInfosArr[t]));
+		threadArr[t] = new std::thread(std::bind(consumer_fasta_task, fastaPool, std::ref(queue1), sketchFunc, &parameters, &sketchesArr[t]));
 	}
 	producer.join();
 	for(int t = 0; t < th; t++){
@@ -263,31 +259,29 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 	for(int i = 0; i < th; i++){
 		for(int j = 0; j < sketchesArr[i].size(); j++){
 			sketches.push_back(sketchesArr[i][j]);
-			similarityInfos.push_back(similarityInfosArr[i][j]);
+			//similarityInfos.push_back(similarityInfosArr[i][j]);
 		}
 	}
 
 	cerr << "the size of sketches is: " << sketches.size() << endl;
-	cerr << "the size of similarityInfos is: " << similarityInfos.size() << endl;
+	//cerr << "the size of similarityInfos is: " << similarityInfos.size() << endl;
 //	exit(0);
 
-	
 	#else 
+	//for single thread sketch
 	cerr << "start read the file " << endl;
 	while(1){
 		int length = kseq_read(ks1);
-		if(length < 0){
-			break;
-		}
-		SimilarityInfo tmpSimilarityInfo;
-		tmpSimilarityInfo.id = index;
-		tmpSimilarityInfo.name = ks1->name.s;
-		tmpSimilarityInfo.comment = ks1->comment.s;
-		tmpSimilarityInfo.length = length;
+		if(length < 0) break;
+		if(length < KMER_SIZE) continue;
 
-		similarityInfos.push_back(tmpSimilarityInfo);
+		string name = ks1->name.s;
+		string comment = ks1->comment.s;
+		SequenceInfo curSeq{name, comment, 0, length};
 
 		SketchInfo tmpSketchInfo;
+		tmpSketchInfo.seqInfo = curSeq;
+		
 		if(sketchFunc == "MinHash"){
 			Sketch::MinHash *mh1 = new Sketch::MinHash(KMER_SIZE, MINHASH_SKETCH_SIZE);
 			mh1->update(ks1->seq.s);
@@ -303,7 +297,6 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 			Sketch::HyperLogLog* hll = new Sketch::HyperLogLog(HLL_SKETCH_BIT);
 			hll->update(ks1->seq.s);
 			tmpSketchInfo.HLL = hll;
-
 		}
 		else if(sketchFunc == "OMH"){
 			Sketch::OrderMinHash* omh = new Sketch::OrderMinHash();
@@ -311,7 +304,7 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 			tmpSketchInfo.OMH = omh;
 		}
 
-		tmpSketchInfo.index = index;
+		tmpSketchInfo.id = index;
 		sketches.push_back(tmpSketchInfo);
 		index++;
 
@@ -322,10 +315,12 @@ bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>
 	gzclose(fp1);
 	kseq_destroy(ks1);
 
+	sort(sketches.begin(), sketches.end(), cmpSketch);
+
 	return true;
 }
 
-bool sketchFiles(string inputFile, string sketchFunc, vector<SimilarityInfo>& similarityInfos, vector<SketchInfo>& sketches, int threads){
+bool sketchFiles(string inputFile, string sketchFunc, vector<SketchInfo>& sketches, int threads){
 	fprintf(stderr, "input fileList, sketch by file\n");
 	fstream fs(inputFile);
 	if(!fs){
@@ -386,9 +381,8 @@ bool sketchFiles(string inputFile, string sketchFunc, vector<SimilarityInfo>& si
 		}
 
 
-		long long int totalLength = 0;
-		string comment("");
-
+		uint64_t totalLength = 0;
+		Vec_SeqInfo curFileSeqs;
 		
 		while(1){
 			int length = kseq_read(ks1);
@@ -396,11 +390,9 @@ bool sketchFiles(string inputFile, string sketchFunc, vector<SimilarityInfo>& si
 				break;
 			}
 			totalLength += length;
-
-			comment += '>';
-			comment += ks1->name.s;
-			comment += ' ';
-			comment += ks1->comment.s;
+			string name = ks1->name.s;
+			string comment = ks1->comment.s;
+			SequenceInfo tmpSeq{name, comment, 0, length};
 			
 			if(sketchFunc == "MinHash"){
 				mh1->update(ks1->seq.s);
@@ -415,10 +407,12 @@ bool sketchFiles(string inputFile, string sketchFunc, vector<SimilarityInfo>& si
 				omh->buildSketch(ks1->seq.s);
 			}
 
-		}
+			curFileSeqs.push_back(tmpSeq);
+		}//end while, end sketch current file.
 		if(sketchFunc == "WMH"){
 			wmh1->computeHistoSketch();
 		}
+
 		#pragma omp critical
 		{
 			SketchInfo tmpSketchInfo;
@@ -435,43 +429,20 @@ bool sketchFiles(string inputFile, string sketchFunc, vector<SimilarityInfo>& si
 				tmpSketchInfo.OMH = omh;
 			}
 
-			tmpSketchInfo.index = i;
+			tmpSketchInfo.id = i;
+			tmpSketchInfo.fileName = fileList[i];
+			tmpSketchInfo.totalSeqLength = totalLength;
+			tmpSketchInfo.fileSeqs = curFileSeqs;
 			sketches.push_back(tmpSketchInfo);
-
-			SimilarityInfo tmpSimilarityInfo;
-			tmpSimilarityInfo.id = i;
-			tmpSimilarityInfo.name = fileList[i];
-			tmpSimilarityInfo.comment = comment;
-			comment = "";
-			tmpSimilarityInfo.length = totalLength;
-			similarityInfos.push_back(tmpSimilarityInfo);
-			//cerr << "end the file: " << fileList[i] << endl;
-
 		}
+
 		gzclose(fp1);
 		kseq_destroy(ks1);
 	}//end for
+	sort(sketches.begin(), sketches.end(), cmpSketch);
 
 	return true;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

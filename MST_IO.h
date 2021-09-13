@@ -7,14 +7,11 @@
 #include "MST.h" //include <vector>
 #include "parameter.h"
 
+void MST2Cluster(std::string inputFile, std::string inputFile1, std::string outputFile, double threshold);
 
-void MST2Cluster(std::string inputFile, std::string inputFile1, double threshold);
+void printResult(std::vector< std::vector<int> > cluster, std::vector<SketchInfo> sketches, bool sketchByFile, string outputFile);
 
-void printResult(std::vector< std::vector<int> > cluster, std::vector<SimilarityInfo> similarityInfos, bool sketchByFile);
-
-
-void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similarityInfos, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize);
-
+void saveMST(string inputFile, string sketchFunc, vector<SketchInfo> sketches, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize);
 
 
 #endif

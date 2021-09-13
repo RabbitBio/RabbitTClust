@@ -10,40 +10,33 @@
 
 using namespace std;
 
-//struct SketchInfo{
-//	int id;
-//	std::string name;
-//	std::string comment;
-//	std::string strand;//for fastq files.
-//	uint64_t length;
-//	int size;
-//	std::vector<uint64_t> hashes;//the "uint64_t" need to be a parameter for the sketch.
-//
-//};
+//for sequence information
+struct SequenceInfo{
+	string name;
+	string comment;
+	int strand;
+	int length;
+};
 
+typedef vector<SequenceInfo> Vec_SeqInfo;
 struct SketchInfo{
+	int id;
+	string fileName;//for sketch files;
+	uint64_t totalSeqLength;
+	Vec_SeqInfo fileSeqs;//for sketch files;
+	SequenceInfo seqInfo;//for sketch squence;
+	
 	Sketch::MinHash* minHash;
 	Sketch::WMinHash* WMinHash;
 	Sketch::HyperLogLog* HLL;
 	Sketch::OrderMinHash * OMH;
-	int index;
-};
-
-struct SimilarityInfo{
-	//for sequence information
-	int id;
-	string name;
-	string comment;
-	string strand;
-	string seq;
-	uint64_t length;
-	int size;
-	
 };
 
 
-bool sketchSequences(string inputFile, string sketchFunc, vector<SimilarityInfo>& similarityInfos, vector<SketchInfo>& sketches, int threads);
-bool sketchFiles(string inputFile, string sketchFunc, vector<SimilarityInfo>& similarityInfos, vector<SketchInfo>& sketches, int threads);
+
+bool sketchSequences(string inputFile, string sketchFunc, vector<SketchInfo>& sketches, int threads);
+bool sketchFiles(string inputFile, string sketchFunc, vector<SketchInfo>& sketches, int threads);
+bool cmpSketch(SketchInfo s1, SketchInfo s2);
 
 
 

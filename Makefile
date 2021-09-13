@@ -1,9 +1,9 @@
 TARGET=clust
 
 CXX=g++
-CXXFLAGS=-g -O3 -std=c++14 -fopenmp -D THREADPOOL_MINHASH
-#CXXFLAGS=-g -O3 -std=c++14 -fopenmp -D RABBIT_IO
-#CXXFLAGS=-g -O3 -std=c++14 -fopenmp
+CXXFLAGS=-g -O3 -std=c++14 -fopenmp -D THREADPOOL_MINHASH -D DEBUG -D Timer
+#CXXFLAGS=-g -O3 -std=c++14 -fopenmp -D DEBUG
+#CXXFLAGS=-g -O3 -std=c++14 -fopenmp -D RABBIT_IO -D DEBUG
 
 INCLUDE=./RabbitSketch/build/include
 INCLUDE1=./RabbitIO/build/include

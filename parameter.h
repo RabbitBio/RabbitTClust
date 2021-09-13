@@ -8,7 +8,7 @@
 
 #include <cstdio>
 
-#define MINHASH_SKETCH_SIZE 10000
+#define MINHASH_SKETCH_SIZE 1000
 #define WMH_SKETCH_SIZE 50
 #define HLL_SKETCH_BIT 10
 #define KMER_SIZE 21

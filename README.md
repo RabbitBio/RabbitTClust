@@ -16,10 +16,10 @@ export LD_LIBRARY_PATH=`pwd`/lib:$LD_LIBRARY_PATH
 cd ../../
 make 
 #The fileList is the list path of the genome files.
-./clust -l -t 4 -d 0.3 fileList >result
+./clust -l -t 4 -d 0.3 fileList -F MinHash -o result.out
 
 #get the clustering result by inputing MST info.
-./clust -f -d 0.01 fileListGenomeInfo fileListMSTInfo
+./clust -f -d 0.01 fileListGenomeInfo fileListMSTInfo -o result.out
 
 #get more help info.
 ./clust -h

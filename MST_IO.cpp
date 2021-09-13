@@ -2,7 +2,7 @@
 //#include "parameter.h"
 using namespace std;
 
-void MST2Cluster(string inputFile, string inputFile1, double threshold)
+void MST2Cluster(string inputFile, string inputFile1, string outputFile, double threshold)
 {
 	cout << "input files is MST information and genome informations" << endl;
 
@@ -30,6 +30,7 @@ void MST2Cluster(string inputFile, string inputFile1, double threshold)
 	cerr << line << endl;
 	getline(fs, line);//kmerSize
 	cerr << line << endl;
+
 	while(getline(fs, line)){
 		stringstream ss;
 		ss << line;
@@ -37,96 +38,122 @@ void MST2Cluster(string inputFile, string inputFile1, double threshold)
 		double distance;
 		ss >> preNode >> sufNode >> distance;
 
-		EdgeInfo tmpEdge;
-		tmpEdge.preNode = preNode;
-		tmpEdge.sufNode = sufNode;
-		tmpEdge.dist = distance;
-		//printf("<%d, %d, %lf>\n", tmpEdge.preNode, tmpEdge.sufNode, tmpEdge.dist); 
+		EdgeInfo tmpEdge{preNode, sufNode, distance};
 		mst.push_back(tmpEdge);
 	}//end while
 
-	vector<SimilarityInfo> similarityInfos;
+	//read the fileSeqs.info or seq.info
 	//TODO: transfer the paremeter from the GenomeInfo file.
 	if(!getline(fs1, line)){
 		fprintf(stderr, "the inputFile: %s is NULL\n", inputFile1.c_str());
 		exit(1);
 	}
-	cerr << "the sketchByFile is: " << line << endl;
+
+	//sketchByfile is 1 else is 0
 	bool sketchByFile = stoi(line);
 	cerr << "the sketchByFile is: " << sketchByFile << endl;
 
+	vector<SketchInfo> sketches;
 
-	while(1){
-		if(!getline(fs1, line)) break;
-		stringstream ss;
-		ss << line;
-		int id, length;
-		string name, comment;
-		ss >> id >> name >> length;
-		
-		getline(fs1, comment);
-		
-
-		SimilarityInfo tmpSimilarityInfo;
-		tmpSimilarityInfo.id = id;
-		tmpSimilarityInfo.name = name;
-		tmpSimilarityInfo.comment = comment;
-		tmpSimilarityInfo.length = length;
-		similarityInfos.push_back(tmpSimilarityInfo);
+	if(sketchByFile)
+	{
+		while(1)
+		{
+			if(!getline(fs1, line)) break;
+			int sequenceNumber = stoi(line);
+			string fileName;
+			getline(fs1, fileName);
+			Vec_SeqInfo curFileSeqs;
+			uint64_t totalLength = 0;
+			//this is the sequences info in one file
+			for(int i = 0; i < sequenceNumber; i++)
+			{
+				getline(fs1, line);
+				string name, comment;
+				int strand, length;
+				stringstream ss;
+				ss << line;
+				ss >> name >> strand >> length;
+				getline(fs1, comment);
+				totalLength += length;
+				SequenceInfo curSeq{name, comment, strand, length};
+				curFileSeqs.push_back(curSeq);
+			}
+			SketchInfo curSketch;
+			curSketch.fileName = fileName;
+			curSketch.totalSeqLength = totalLength;
+			curSketch.fileSeqs = curFileSeqs;
+			sketches.push_back(curSketch);
+		}
+	}
+	else//sketch sequences
+	{
+		while(1)
+		{
+			if(!getline(fs1, line)) break;
+			string name, comment;
+			int strand, length;
+			stringstream ss;
+			ss << line;
+			ss >> name >> strand >> length;
+			getline(fs1, comment);
+			SequenceInfo curSeq{name, comment, strand, length};
+			SketchInfo curSketch;
+			curSketch.seqInfo = curSeq;
+			sketches.push_back(curSketch);
+		}
 	}
 
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
 
 	vector<vector<int> > cluster = generateCluster(forest, mst.size()+1);
 
-	printResult(cluster, similarityInfos, sketchByFile);
+	printResult(cluster, sketches, sketchByFile, outputFile);
 
 }
 
-void printResult(vector< vector<int> > cluster, vector<SimilarityInfo> similarityInfos, bool sketchByFile)
+void printResult(vector< vector<int> > cluster, vector<SketchInfo> sketches, bool sketchByFile, string outputFile)
 {
-	cerr << "start the output " << endl;
+	cerr << "output the result into: " << outputFile << endl;
+	FILE *fp = fopen(outputFile.c_str(), "w");
 	
 	if(sketchByFile)
 	{
 		for(int i = 0; i < cluster.size(); i++){
-			printf("the cluster %d is: \n", i);
-			for(int j = 0; j < cluster[i].size(); j++){
-				//if(cluster[i][j] > similarityInfos.size()) continue;
-				cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].length << "nt\t" << similarityInfos[cluster[i][j]].name << endl;
-				string tmpComment("");
-				for(int k = 1; k < similarityInfos[cluster[i][j]].comment.length(); k++){
-					if(similarityInfos[cluster[i][j]].comment[k] != '>'){
-						tmpComment += similarityInfos[cluster[i][j]].comment[k];	
-					}
-					else{
-						cout << "\t\t\t\t" << tmpComment << endl;
-						tmpComment = "";
-					}
-				}
-				if(tmpComment.length() != 0){
-					cout << "\t\t\t\t" << tmpComment << endl;
-					tmpComment = "";
-				}
+			//printf("the cluster %d is: \n", i);
+			fprintf(fp, "the cluster %d is: \n", i);
+			for(int j = 0; j < cluster[i].size(); j++)
+			{
+				int curId = cluster[i][j];
+				//printf("\t%6d\t%6d\t%12dnt\t%20s\t%s\n", j, curId, sketches[curId].totalSeqLength, sketches[curId].fileSeqs[0].name.c_str(), sketches[curId].fileSeqs[0].comment.c_str());
+				fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n", j, curId, sketches[curId].totalSeqLength, sketches[curId].fileSeqs[0].name.c_str(), sketches[curId].fileSeqs[0].comment.c_str());
 
 			}
-			cout << endl;
+			//printf("\n");
+			fprintf(fp, "\n");
 		}
 	}//end sketchByFile
+
 	else//sketch by sequence
 	{
 		for(int i = 0; i < cluster.size(); i++){
-			printf("the cluster %d is: \n", i);
-			for(int j = 0; j < cluster[i].size(); j++){
-				cout << j << '\t' << cluster[i][j] << '\t' << similarityInfos[cluster[i][j]].length << "nt\t" << similarityInfos[cluster[i][j]].name << ' ' << similarityInfos[cluster[i][j]].comment << endl;
-
+			//printf("the cluster %d is: \n", i);
+			fprintf(fp, "the cluster %d is: \n", i);
+			for(int j = 0; j < cluster[i].size(); j++)
+			{
+				int curId = cluster[i][j];		
+				//printf("\t%6d\t%6d\t%12dnt\t%20s\t%s\n", j, curId, sketches[curId].seqInfo.length, sketches[curId].seqInfo.name.c_str(), sketches[curId].seqInfo.comment.c_str());
+				fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n", j, curId, sketches[curId].seqInfo.length, sketches[curId].seqInfo.name.c_str(), sketches[curId].seqInfo.comment.c_str());
 			}
+			//printf("\n");
+			fprintf(fp, "\n");
 		}
 	}//end sketchBySequence
+	fclose(fp);
 
 }
 
-void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similarityInfos, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize)
+void saveMST(string inputFile, string sketchFunc, vector<SketchInfo> sketches, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize)
 {
 	//save the matching of graph id and genomeInfo 
 	cerr << "save the genomeInfo into: " << inputFile+sketchFunc+"GenomeInfo" << endl;
@@ -136,9 +163,34 @@ void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similar
 		ofile << '1' << endl;
 	else
 		ofile << '0' << endl;
-	for(int i = 0; i < similarityInfos.size(); i++){
-		ofile << similarityInfos[i].id << ' ' << similarityInfos[i].name << ' ' << ' ' << similarityInfos[i].length << endl;
-		ofile << similarityInfos[i].comment << endl;
+	
+	if(sketchByFile)
+	{
+		for(int i = 0; i < sketches.size(); i++)
+		{
+			Vec_SeqInfo curFileSeqs = sketches[i].fileSeqs;
+			ofile << curFileSeqs.size() << endl;//get the current file sequence number
+			ofile << sketches[i].fileName << endl;
+			for(int j = 0; j < curFileSeqs.size(); j++)
+			{
+				/*	each line is name, strand, length, comment of the sequence.
+				 *	place comment in a new line because there are space in the commment(the comment is not a single word.
+				 *	When use the stringstream, it is sensitive to the space.
+				 */												
+				ofile << curFileSeqs[j].name << ' ' << ' ' << curFileSeqs[j].strand << ' ' << curFileSeqs[j].length << endl;
+				ofile << curFileSeqs[j].comment << endl;
+			}
+		}
+	}
+	else//sketchBySequence
+	{
+		for(int i = 0; i < sketches.size(); i++)
+		{
+			SequenceInfo curSeq = sketches[i].seqInfo;
+			ofile << curSeq.name << ' ' << ' ' << curSeq.strand << ' ' << curSeq.length << endl;
+			ofile << curSeq.comment << endl;
+		}
+
 	}
 	ofile.close();
 
@@ -146,15 +198,22 @@ void saveMST(string inputFile, string sketchFunc, vector<SimilarityInfo> similar
 	cerr << "save the MSTInfo into: " << inputFile+sketchFunc+"MSTInfo" << endl;
 	ofstream ofile1;
 	ofile1.open(inputFile+sketchFunc+"MSTInfo");
+
 	if(sketchByFile)
 		ofile1 << "sketch by File! " << endl;
 	else 
 		ofile1 << "sketch by Sequence!" << endl;
+
 	ofile1 << "the sketch function is: " << sketchFunc << endl;
 	ofile1 << "The sketchSize is: " << sketchSize << endl;
 	ofile1 << "The kmerSize is: " << kmerSize << endl;
 	for(int i = 0; i < mst.size(); i++){
-		printf("<%d, %d, %lf>\t%s\t%s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, similarityInfos[mst[i].preNode].name.c_str(), similarityInfos[mst[i].sufNode].name.c_str());
+		//if(sketchByFile){
+		//	printf("{%6d,\t%6d,\t\t%lf }\t%60s\t%60s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, sketches[mst[i].preNode].fileName.c_str(), sketches[mst[i].sufNode].fileName.c_str());
+		//}
+		//else{
+		//	printf("{%6d,\t%6d,\t\t%lf }\t%20s\t%20s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, sketches[mst[i].preNode].seqInfo.name.c_str(), sketches[mst[i].sufNode].seqInfo.name.c_str());
+		//}
 		ofile1 << mst[i].preNode << ' ' << mst[i].sufNode << ' ' << mst[i].dist << endl;
 	}
 	cout << endl;
