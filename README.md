@@ -6,6 +6,7 @@ RabbitTClust is a clustering method based on Minimum Spanning Tree. The distance
 Starting:
 ```bash
 git clone --recursive git@github.com:RabbitBio/RabbitTClust.git
+#make rabbitSketch library
 cd RabbitSketch
 mkdir build
 cd build 
@@ -13,13 +14,20 @@ cmake -DCXXAPI=ON -DCMAKE_INSTALL_PREFIX=. ..
 make && make install
 export LD_LIBRARY_PATH=`pwd`/lib:$LD_LIBRARY_PATH
 
+#make rabbitIO library
+cd RabbitIO
+mkdir build && cd build
+cmake -DCMAKE_INSTALL_PREFIX=. ..
+make && make install
+export LD_LIBRARY_PATH=`pwd`/io:$LD_LIBRARY_PATH
+
 cd ../../
 make 
 #The fileList is the list path of the genome files.
-./clust -l -t 4 -d 0.3 fileList -F MinHash -o result.out
+./clust -l -t 4 -d 0.3 -F MinHash -o result.out fileList
 
 #get the clustering result by inputing MST info.
-./clust -f -d 0.01 fileListGenomeInfo fileListMSTInfo -o result.out
+./clust -f -d 0.01 -o result.out fileListGenomeInfo fileListMSTInfo
 
 #get more help info.
 ./clust -h
