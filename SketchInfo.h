@@ -25,6 +25,7 @@ struct SketchInfo{
 	uint64_t totalSeqLength;
 	Vec_SeqInfo fileSeqs;//for sketch files;
 	SequenceInfo seqInfo;//for sketch squence;
+	bool isContainment = false;
 	
 	Sketch::MinHash* minHash;
 	Sketch::WMinHash* WMinHash;
@@ -34,8 +35,8 @@ struct SketchInfo{
 
 
 
-bool sketchSequences(string inputFile, string sketchFunc, vector<SketchInfo>& sketches, int threads);
-bool sketchFiles(string inputFile, string sketchFunc, vector<SketchInfo>& sketches, int threads);
+bool sketchSequences(string inputFile, string sketchFunc, bool isContainment, vector<SketchInfo>& sketches, int threads);
+bool sketchFiles(string inputFile, string sketchFunc, bool isContainment, vector<SketchInfo>& sketches, int threads);
 bool cmpSketch(SketchInfo s1, SketchInfo s2);
 
 

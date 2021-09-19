@@ -48,6 +48,7 @@ int main(int argc, char * argv[]){
 	string outputFile = "result.out";
 	int threads = 1;
 	bool sketchByFile = false;
+	bool isContainment = false;
 	bool useMST = false;
 	double threshold = 1.0;
 	while(argIndex < argc){
@@ -73,6 +74,10 @@ int main(int argc, char * argv[]){
 				case 'l':
 					sketchByFile = true;
 					fprintf(stderr, "sketch by file: \n");
+					break;
+				case 'c':
+					isContainment = true;
+					fprintf(stderr, "compute containment\n");
 					break;
 				case 'd':
 					threshold = stod(argv[++argIndex]);
@@ -127,14 +132,14 @@ int main(int argc, char * argv[]){
 #endif
 
 	if(!sketchByFile){
-		if(!sketchSequences(inputFile, sketchFunc, sketches, threads)){
+		if(!sketchSequences(inputFile, sketchFunc, isContainment, sketches, threads)){
 			printUsage();
 			return 1;
 		}
 	
 	}//end sketch by sequence
 	else{
-		if(!sketchFiles(inputFile, sketchFunc, sketches, threads)){
+		if(!sketchFiles(inputFile, sketchFunc, isContainment, sketches, threads)){
 			printUsage();
 			return 1;
 		}

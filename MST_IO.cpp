@@ -208,12 +208,13 @@ void saveMST(string inputFile, string sketchFunc, vector<SketchInfo> sketches, v
 	ofile1 << "The sketchSize is: " << sketchSize << endl;
 	ofile1 << "The kmerSize is: " << kmerSize << endl;
 	for(int i = 0; i < mst.size(); i++){
-		//if(sketchByFile){
-		//	printf("{%6d,\t%6d,\t\t%lf }\t%60s\t%60s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, sketches[mst[i].preNode].fileName.c_str(), sketches[mst[i].sufNode].fileName.c_str());
-		//}
-		//else{
-		//	printf("{%6d,\t%6d,\t\t%lf }\t%20s\t%20s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, sketches[mst[i].preNode].seqInfo.name.c_str(), sketches[mst[i].sufNode].seqInfo.name.c_str());
-		//}
+	//	if(sketchByFile){
+	//		//printf("{%6d,\t%6d,\t\t%lf }\t%60s\t%60s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, sketches[mst[i].preNode].fileName.c_str(), sketches[mst[i].sufNode].fileName.c_str());
+	//		printf("{%6d,\t%6d,\t\t%lf }\t%60s\t%60s\n", sketches[mst[i].preNode].totalSeqLength, sketches[mst[i].sufNode].totalSeqLength, mst[i].dist, sketches[mst[i].preNode].fileName.c_str(), sketches[mst[i].sufNode].fileName.c_str());
+	//	}
+	//	else{
+	//		printf("{%6d,\t%6d,\t\t%lf }\t%20s\t%20s\n", mst[i].preNode, mst[i].sufNode, mst[i].dist, sketches[mst[i].preNode].seqInfo.name.c_str(), sketches[mst[i].sufNode].seqInfo.name.c_str());
+	//	}
 		ofile1 << mst[i].preNode << ' ' << mst[i].sufNode << ' ' << mst[i].dist << endl;
 	}
 	cout << endl;

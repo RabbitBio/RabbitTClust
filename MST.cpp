@@ -47,7 +47,10 @@ vector<EdgeInfo> generateMST(vector<SketchInfo>& sketches, string sketchFunc, in
 				double tmpDist;
 				if(sketchFunc == "MinHash")
 				{
-					tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
+					if(sketches[i].isContainment)
+						tmpDist = 1.0 - sketches[i].minHash->containJaccard(sketches[j].minHash);
+					else
+						tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
 					//tmpDist = 1.0 - sketches[i].minHash->jaccard(sketches[j].minHash);
 				}
 				else if(sketchFunc == "WMH"){
@@ -79,7 +82,10 @@ vector<EdgeInfo> generateMST(vector<SketchInfo>& sketches, string sketchFunc, in
 				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
 				double tmpDist;
 				if(sketchFunc == "MinHash"){
-					tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
+					if(sketches[i].isContainment)
+						tmpDist = 1.0 - sketches[i].minHash->containJaccard(sketches[j].minHash);
+					else
+						tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
 					//tmpDist = sketches[i].minHash->jaccard(sketches[j].minHash);
 				}
 				else if(sketchFunc == "WMH")
