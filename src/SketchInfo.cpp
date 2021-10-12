@@ -97,7 +97,7 @@ int producer_fasta_task(std::string file, rabbit::fa::FastaDataPool* fastaPool, 
 	return 0;
 }
 
-void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, string sketchFunc, bool isContainment, Sketch::WMHParameters * parameters, vector<SketchInfo> *sketches){
+void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, Sketch::WMHParameters * parameters, vector<SketchInfo> *sketches){
 	int line_num = 0;
 	rabbit::int64 id = 0;
 
@@ -117,12 +117,12 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 				Sketch::MinHash * mh1;
 				if(isContainment)
 				{
-					int curSketchSize = std::max(length/SKETCH_COMPRESS_SEQUENCE, 10);
-					mh1 = new Sketch::MinHash(KMER_SIZE, curSketchSize);
+					int curSketchSize = std::max(length/SKETCH_COMPRESS_SEQUENCE, 100);
+					mh1 = new Sketch::MinHash(kmerSize, curSketchSize);
 					tmpSketchInfo.isContainment = true;
 				}
 				else
-					mh1 = new Sketch::MinHash(KMER_SIZE, MINHASH_SKETCH_SIZE);
+					mh1 = new Sketch::MinHash(kmerSize, sketchSize);
 				mh1->update((char*)r.seq.c_str());
 				tmpSketchInfo.minHash = mh1;
 			}
@@ -176,7 +176,7 @@ void getCWS(double * r, double * c, double * b, int sketchSize, int dimension){
 	}
 }
 
-bool sketchSequences(string inputFile, string sketchFunc, bool isContainment, vector<SketchInfo>& sketches, int threads){
+bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, vector<SketchInfo>& sketches, int threads){
 	gzFile fp1;
 	kseq_t * ks1;
 	cerr << "input File is: " << inputFile << endl;
@@ -190,7 +190,7 @@ bool sketchSequences(string inputFile, string sketchFunc, bool isContainment, ve
 	ks1 = kseq_init(fp1);
 	Sketch::WMHParameters parameters;
 	if(sketchFunc == "WMH"){
-		parameters.kmerSize = KMER_SIZE;
+		parameters.kmerSize = kmerSize;
 		parameters.sketchSize = WMH_SKETCH_SIZE;
 		parameters.windowSize = WINDOW_SIZE;
 		parameters.r = (double *)malloc(parameters.sketchSize * pow(parameters.kmerSize, 4) * sizeof(double));
@@ -205,7 +205,7 @@ bool sketchSequences(string inputFile, string sketchFunc, bool isContainment, ve
 	while(1){
 		int length = kseq_read(ks1);
 		if(length < 0) break;
-		if(length < KMER_SIZE) continue;
+		if(length < kmerSize) continue;
 
 		string name = ks1->name.s;
 		string comment = ks1->comment.s;
@@ -219,12 +219,12 @@ bool sketchSequences(string inputFile, string sketchFunc, bool isContainment, ve
 			Sketch::MinHash * mh1;
 			if(isContainment)
 			{
-				int curSketchSize = std::max(length/SKETCH_COMPRESS_SEQUENCE, 10);
-				mh1 = new Sketch::MinHash(KMER_SIZE, curSketchSize);
+				int curSketchSize = std::max(length/SKETCH_COMPRESS_SEQUENCE, 100);
+				mh1 = new Sketch::MinHash(kmerSize, curSketchSize);
 				sketchInfo.isContainment = true;
 			}
 			else
-				mh1 = new Sketch::MinHash(KMER_SIZE, MINHASH_SKETCH_SIZE);
+				mh1 = new Sketch::MinHash(kmerSize, sketchSize);
 			sketchInfo.minHash = mh1;
 		}
 		else if(sketchFunc == "WMH"){
@@ -264,7 +264,7 @@ bool sketchSequences(string inputFile, string sketchFunc, bool isContainment, ve
 	std::thread **threadArr = new std::thread* [th];
 
 	for(int t = 0; t < th; t++){
-		threadArr[t] = new std::thread(std::bind(consumer_fasta_task, fastaPool, std::ref(queue1), sketchFunc, isContainment, &parameters, &sketchesArr[t]));
+		threadArr[t] = new std::thread(std::bind(consumer_fasta_task, fastaPool, std::ref(queue1), kmerSize, sketchSize, sketchFunc, isContainment, &parameters, &sketchesArr[t]));
 	}
 	producer.join();
 	for(int t = 0; t < th; t++){
@@ -289,7 +289,7 @@ bool sketchSequences(string inputFile, string sketchFunc, bool isContainment, ve
 	while(1){
 		int length = kseq_read(ks1);
 		if(length < 0) break;
-		if(length < KMER_SIZE) continue;
+		if(length < kmerSize) continue;
 
 		string name = ks1->name.s;
 		string comment = ks1->comment.s;
@@ -302,12 +302,12 @@ bool sketchSequences(string inputFile, string sketchFunc, bool isContainment, ve
 			Sketch::MinHash* mh1;
 			if(isContainment)
 			{
-				int curSketchSize = std::max(length/SKETCH_COMPRESS_SEQUENCE, 10);
-				mh1 = new Sketch::MinHash(KMER_SIZE, curSketchSize);
+				int curSketchSize = std::max(length/SKETCH_COMPRESS_SEQUENCE, 100);
+				mh1 = new Sketch::MinHash(kmerSize, curSketchSize);
 				tmpSketchInfo.isContainment = true;
 			}
 			else
-				mh1 = new Sketch::MinHash(KMER_SIZE, MINHASH_SKETCH_SIZE);
+				mh1 = new Sketch::MinHash(kmerSize, sketchSize);
 			mh1->update(ks1->seq.s);
 			tmpSketchInfo.minHash = mh1;
 		}
@@ -344,7 +344,7 @@ bool sketchSequences(string inputFile, string sketchFunc, bool isContainment, ve
 	return true;
 }
 
-bool sketchFiles(string inputFile, string sketchFunc, bool isContainment, vector<SketchInfo>& sketches, int threads){
+bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, vector<SketchInfo>& sketches, int threads){
 	fprintf(stderr, "input fileList, sketch by file\n");
 	fstream fs(inputFile);
 	if(!fs){
@@ -359,7 +359,7 @@ bool sketchFiles(string inputFile, string sketchFunc, bool isContainment, vector
 
 	Sketch::WMHParameters parameter;
 	if(sketchFunc == "WMH"){
-		parameter.kmerSize = KMER_SIZE;
+		parameter.kmerSize = kmerSize;
 		parameter.sketchSize = WMH_SKETCH_SIZE;
 		parameter.windowSize = WINDOW_SIZE;
 		parameter.r = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
@@ -418,11 +418,11 @@ bool sketchFiles(string inputFile, string sketchFunc, bool isContainment, vector
 
 		if(sketchFunc == "MinHash"){
 			if(isContainment){
-				int curSketchSize = std::max(fileLength / SKETCH_COMPRESS_GENOME, 10);
-				mh1 = new Sketch::MinHash(KMER_SIZE, curSketchSize);
+				int curSketchSize = std::max(fileLength / SKETCH_COMPRESS_GENOME, 100);
+				mh1 = new Sketch::MinHash(kmerSize, curSketchSize);
 			}
 			else
-				mh1 = new Sketch::MinHash(KMER_SIZE, MINHASH_SKETCH_SIZE);
+				mh1 = new Sketch::MinHash(kmerSize, sketchSize);
 		}
 		else if(sketchFunc == "WMH"){
 			wmh1 = new Sketch::WMinHash(parameter);
@@ -493,10 +493,11 @@ bool sketchFiles(string inputFile, string sketchFunc, bool isContainment, vector
 			tmpSketchInfo.fileName = fileList[i];
 			tmpSketchInfo.totalSeqLength = totalLength;
 			tmpSketchInfo.fileSeqs = curFileSeqs;
-			sketches.push_back(tmpSketchInfo);
+			if(totalLength >= 10000)//filter the poor quality genome assemblies whose length less than 10k bp(fastANI paper)
+				sketches.push_back(tmpSketchInfo);
 			if(isContainment)
 			{
-				int curSketchSize = std::max(fileLength / SKETCH_COMPRESS_GENOME, 10);
+				int curSketchSize = std::max(fileLength / SKETCH_COMPRESS_GENOME, 100);
 				//fprintf(stdout, "sketchSize is: %d\t abs sub is: %d\t totalLength: %d\t fileLength: %d\t %s\n", curSketchSize, fileLength - totalLength, totalLength, fileLength, fileList[i].c_str());
 				
 			}

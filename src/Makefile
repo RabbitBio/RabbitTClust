@@ -5,10 +5,10 @@ CXXFLAGS=-g -O3 -std=c++14 -fopenmp -D THREADPOOL_MINHASH -D DEBUG -D Timer
 #CXXFLAGS=-g -O3 -std=c++14 -fopenmp -D DEBUG
 #CXXFLAGS=-g -O3 -std=c++14 -fopenmp -D RABBIT_IO -D DEBUG
 
-INCLUDE=./RabbitSketch/build/include
-INCLUDE1=./RabbitIO/build/include
-LIBS=./RabbitSketch/build/lib
-LIBS1=./RabbitIO/build/io
+INCLUDE=../RabbitSketch/build/include
+INCLUDE1=../RabbitIO/build/include
+LIBS=../RabbitSketch/build/lib
+LIBS1=../RabbitIO/build/io
 OBJECTS=main.o MST.o SketchInfo.o MST_IO.o parameter.o
 
 $(TARGET):$(OBJECTS)

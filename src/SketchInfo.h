@@ -35,8 +35,8 @@ struct SketchInfo{
 
 
 
-bool sketchSequences(string inputFile, string sketchFunc, bool isContainment, vector<SketchInfo>& sketches, int threads);
-bool sketchFiles(string inputFile, string sketchFunc, bool isContainment, vector<SketchInfo>& sketches, int threads);
+bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, vector<SketchInfo>& sketches, int threads);
+bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, vector<SketchInfo>& sketches, int threads);
 bool cmpSketch(SketchInfo s1, SketchInfo s2);
 
 

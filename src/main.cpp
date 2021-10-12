@@ -28,6 +28,7 @@
 #include <algorithm>
 #include "parameter.h"
 #include "MST_IO.h"
+#include <math.h>
 
 using namespace std;
 
@@ -50,7 +51,9 @@ int main(int argc, char * argv[]){
 	bool sketchByFile = false;
 	bool isContainment = false;
 	bool useMST = false;
-	double threshold = 1.0;
+	double threshold = 0.05;
+	int kmerSize = 21;
+	int sketchSize = 1000;
 	while(argIndex < argc){
 		if(useMST && argIndex + 2 == argc){
 			inputFile1 = argv[argIndex];
@@ -77,11 +80,21 @@ int main(int argc, char * argv[]){
 					break;
 				case 'c':
 					isContainment = true;
+					//threshold = 1 - exp(-threshold * KMER_SIZE) / (2 - exp(-threshold * KMER_SIZE));//generator from mash distance
+					threshold = 0.25;
 					fprintf(stderr, "compute containment\n");
+					break;
+				case 'k':
+					kmerSize = stoi(argv[++argIndex]);
+					fprintf(stderr, "set kmerSize: %d\n", kmerSize);
+					break;
+				case 's':
+					sketchSize = stoi(argv[++argIndex]);
+					fprintf(stderr, "set sketchSize:  %d\n", sketchSize);
 					break;
 				case 'd':
 					threshold = stod(argv[++argIndex]);
-					fprintf(stderr, "set the threshold is: %lf \n", threshold);
+					fprintf(stderr, "set the threshold: %lf \n", threshold);
 					break;
 				case 'f':
 					useMST = true;
@@ -113,15 +126,21 @@ int main(int argc, char * argv[]){
 	if(sketchByFile) cout << "sketch by file!" << endl;
 	else cout << "sketch by sequence!" << endl;
 
-	int sketchSize_ = MINHASH_SKETCH_SIZE;
-	int kmerSize_ = KMER_SIZE;
-	cout << "the thread number is: " << threads << endl;
-	cout << "the threshold is: " << threshold << endl;
-	cout << "the sketchSize is: " << sketchSize_ << endl;
+	
+	int sketchSize_;
+	if(isContainment)
+		sketchSize_ = sketchByFile ? SKETCH_COMPRESS_GENOME : SKETCH_COMPRESS_SEQUENCE;
+	else 
+		sketchSize_ = sketchSize;
+	//int kmerSize_ = KMER_SIZE;
 #ifdef DEBUG
+	cerr << "the kmerSize is: " << kmerSize << endl;
 	cerr << "the thread number is: " << threads << endl;
 	cerr << "the threshold is: " << threshold << endl;
-	cerr << "the sketchSize is: " << sketchSize_ << endl;
+	if(isContainment)
+		cerr << "the sketchSize is in proportion with 1/" << sketchSize_ << endl;
+	else
+		cerr << "the sketchSize is: " << sketchSize_ << endl;
 #endif
 	
 	//section 2: read the files and create sketches.
@@ -132,18 +151,20 @@ int main(int argc, char * argv[]){
 #endif
 
 	if(!sketchByFile){
-		if(!sketchSequences(inputFile, sketchFunc, isContainment, sketches, threads)){
+		if(!sketchSequences(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, sketches, threads)){
 			printUsage();
 			return 1;
 		}
 	
 	}//end sketch by sequence
 	else{
-		if(!sketchFiles(inputFile, sketchFunc, isContainment, sketches, threads)){
+		if(!sketchFiles(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, sketches, threads)){
 			printUsage();
 			return 1;
 		}
 	}//end sketch by file
+
+	cerr << "the size of sketches(number of genomes or sequences) is: " << sketches.size() << endl;
 #ifdef Timer
 	double t1 = get_sec();
 	cerr << "========time of sketch is: " << t1 - t0 << "========" << endl;
@@ -157,7 +178,7 @@ int main(int argc, char * argv[]){
 #endif
 
 	//save the matching of graph id and genomeInfo 
-	saveMST(inputFile, sketchFunc, sketches, mst, sketchByFile, sketchSize_, kmerSize_);
+	saveMST(inputFile, sketchFunc, isContainment, sketches, mst, sketchByFile, sketchSize_, kmerSize);
 
 #ifdef Timer
 	double t3 = get_sec();

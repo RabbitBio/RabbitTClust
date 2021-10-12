@@ -4,6 +4,8 @@ void printUsage(){
 	fprintf(stdout, "usage: clust [-h] [-l] [-t] <int> [-d] <double> -F <string> [-o] <string> genomeFile\n");
 	fprintf(stdout, "usage: clust [-h] [-f] [-d] <double> genomeInfo mstInfo\n");
 	fprintf(stdout, "	-h		: this help message\n");
+	fprintf(stdout, "	-k		: set kmer size, default 21\n");
+	fprintf(stdout, "	-s		: set sketch size, default 1000\n");
 	fprintf(stdout, "	-l		: genome clustering, inputFile is the path list of the genome files\n");
 	fprintf(stdout, "	-c		: compute the containment of sequences(genomes), need sketch function MinHash\n");
 	fprintf(stdout, "	-t		: set the thread number\n");

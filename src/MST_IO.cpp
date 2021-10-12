@@ -1,6 +1,21 @@
 #include "MST_IO.h"
+#include <ctime>
 //#include "parameter.h"
 using namespace std;
+
+const string currentDataTime(){
+	time_t now = time(0);
+	struct tm tstruct;
+	char buf[80];
+	tstruct = *localtime(&now);
+	strftime(buf, sizeof(buf), "%Y_%m_%d_%H-%M-%S", &tstruct);
+
+	return buf;
+}
+
+inline bool cmpSketchLength(ClusterInfo c1, ClusterInfo c2){
+	return c1.length > c2.length;
+}
 
 void MST2Cluster(string inputFile, string inputFile1, string outputFile, double threshold)
 {
@@ -112,21 +127,42 @@ void MST2Cluster(string inputFile, string inputFile1, string outputFile, double 
 
 }
 
-void printResult(vector< vector<int> > cluster, vector<SketchInfo> sketches, bool sketchByFile, string outputFile)
+void printResult(vector< vector<int> > clusterOrigin, vector<SketchInfo> sketches, bool sketchByFile, string outputFile)
 {
 	cerr << "output the result into: " << outputFile << endl;
 	FILE *fp = fopen(outputFile.c_str(), "w");
 	
 	if(sketchByFile)
 	{
+		//sort the genomes within a cluster by degression of genome size.
+		vector< vector<ClusterInfo> > cluster;
+		for(int i = 0; i < clusterOrigin.size(); i++)
+		{
+			vector<ClusterInfo> tmpInfo;
+			for(int j = 0; j < clusterOrigin[i].size(); j++)
+			{
+				int id = clusterOrigin[i][j];
+				tmpInfo.push_back({id, sketches[id].totalSeqLength});
+			}
+			std::sort(tmpInfo.begin(), tmpInfo.end(), cmpSketchLength);
+			cluster.push_back(tmpInfo);
+			vector<ClusterInfo>().swap(tmpInfo);
+		}
+
 		for(int i = 0; i < cluster.size(); i++){
-			//printf("the cluster %d is: \n", i);
+			//int tmpId = cluster[i][0].id;
+			//fprintf(fp, "%s\n", sketches[tmpId].fileName.c_str());
+			//continue;
 			fprintf(fp, "the cluster %d is: \n", i);
 			for(int j = 0; j < cluster[i].size(); j++)
 			{
-				int curId = cluster[i][j];
+				int curId = cluster[i][j].id;
 				//printf("\t%6d\t%6d\t%12dnt\t%20s\t%s\n", j, curId, sketches[curId].totalSeqLength, sketches[curId].fileSeqs[0].name.c_str(), sketches[curId].fileSeqs[0].comment.c_str());
-				fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n", j, curId, sketches[curId].totalSeqLength, sketches[curId].fileSeqs[0].name.c_str(), sketches[curId].fileSeqs[0].comment.c_str());
+				//fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n", j, curId, sketches[curId].totalSeqLength, sketches[curId].fileSeqs[0].name.c_str(), sketches[curId].fileSeqs[0].comment.c_str());
+				fprintf(fp, "\t%5d\t%6d\t%12dnt\t%20s\t%20s\t%s\n", j, curId, sketches[curId].totalSeqLength, sketches[curId].fileName.c_str(),  sketches[curId].fileSeqs[0].name.c_str(), sketches[curId].fileSeqs[0].comment.c_str());
+				//fprintf(fp, "\t%s\n", key.c_str());
+				//fprintf(fp, "\t%20s\n", sketches[curId].fileName.c_str());
+				//fprintf(fp, "\t%6d\t%6d\t%12dnt\t%30s%20s\t%s\n", j, curId, sketches[curId].totalSeqLength, sketches[curId].fileName.c_str(), sketches[curId].fileSeqs[0].name.c_str(), sketches[curId].fileSeqs[0].comment.c_str());
 
 			}
 			//printf("\n");
@@ -136,12 +172,26 @@ void printResult(vector< vector<int> > cluster, vector<SketchInfo> sketches, boo
 
 	else//sketch by sequence
 	{
+		//sort the sequences within a cluster by degression of sequence length.
+		vector< vector<ClusterInfo> > cluster;
+		for(int i = 0; i < clusterOrigin.size(); i++)
+		{
+			vector<ClusterInfo> tmpInfo;
+			for(int j = 0; j < clusterOrigin[i].size(); j++)
+			{
+				int id = clusterOrigin[i][j];
+				tmpInfo.push_back({id, (uint64_t)sketches[id].seqInfo.length});
+			}
+			std::sort(tmpInfo.begin(), tmpInfo.end(), cmpSketchLength);
+			cluster.push_back(tmpInfo);
+			vector<ClusterInfo>().swap(tmpInfo);
+		}
+
 		for(int i = 0; i < cluster.size(); i++){
-			//printf("the cluster %d is: \n", i);
 			fprintf(fp, "the cluster %d is: \n", i);
 			for(int j = 0; j < cluster[i].size(); j++)
 			{
-				int curId = cluster[i][j];		
+				int curId = cluster[i][j].id;		
 				//printf("\t%6d\t%6d\t%12dnt\t%20s\t%s\n", j, curId, sketches[curId].seqInfo.length, sketches[curId].seqInfo.name.c_str(), sketches[curId].seqInfo.comment.c_str());
 				fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n", j, curId, sketches[curId].seqInfo.length, sketches[curId].seqInfo.name.c_str(), sketches[curId].seqInfo.comment.c_str());
 			}
@@ -153,12 +203,19 @@ void printResult(vector< vector<int> > cluster, vector<SketchInfo> sketches, boo
 
 }
 
-void saveMST(string inputFile, string sketchFunc, vector<SketchInfo> sketches, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize)
+void saveMST(string inputFile, string sketchFunc, bool isContainment, vector<SketchInfo> sketches, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize)
 {
 	//save the matching of graph id and genomeInfo 
-	cerr << "save the genomeInfo into: " << inputFile+sketchFunc+"GenomeInfo" << endl;
+	string folderPath = currentDataTime();
+	string command = "mkdir -p " + folderPath;
+	system(command.c_str());
+	string prefixName = inputFile;
+	std::size_t found = prefixName.find_last_of('/');//if not found, return std::string::npos(-1);
+	prefixName = prefixName.substr(found+1);
+
+	cerr << "save the genomeInfo into: " << folderPath << '/' << prefixName+sketchFunc+"GenomeInfo" << endl;
 	ofstream ofile;
-	ofile.open(inputFile+sketchFunc+"GenomeInfo");
+	ofile.open(folderPath + '/' + prefixName+sketchFunc+"GenomeInfo");
 	if(sketchByFile)
 		ofile << '1' << endl;
 	else
@@ -195,17 +252,28 @@ void saveMST(string inputFile, string sketchFunc, vector<SketchInfo> sketches, v
 	ofile.close();
 
 	//save the mst
-	cerr << "save the MSTInfo into: " << inputFile+sketchFunc+"MSTInfo" << endl;
+	cerr << "save the MSTInfo into: " << folderPath << '/' << prefixName+sketchFunc+"MSTInfo" << endl;
 	ofstream ofile1;
-	ofile1.open(inputFile+sketchFunc+"MSTInfo");
+	ofile1.open(folderPath + '/' + prefixName+sketchFunc+"MSTInfo");
 
 	if(sketchByFile)
 		ofile1 << "sketch by File! " << endl;
 	else 
 		ofile1 << "sketch by Sequence!" << endl;
 
-	ofile1 << "the sketch function is: " << sketchFunc << endl;
-	ofile1 << "The sketchSize is: " << sketchSize << endl;
+	string tmpFunc = sketchFunc;
+	if(sketchFunc == "MinHash")
+	{
+	if(isContainment)
+		tmpFunc += " containment";
+	else
+		tmpFunc += " mashDistance";
+	}
+	ofile1 << "the sketch function is: " << tmpFunc << endl;
+	if(isContainment)
+		ofile1 << "The sketchSize is in proportion with 1/" << sketchSize << endl;
+	else
+		ofile1 << "The sketchSize is: " << sketchSize << endl;
 	ofile1 << "The kmerSize is: " << kmerSize << endl;
 	for(int i = 0; i < mst.size(); i++){
 	//	if(sketchByFile){
