@@ -1,5 +1,5 @@
-/* input file is the inputFile list.
- * output file(nonRedundantList) contains the fileName for each line.
+/* Input file is the inputFile list.
+ * Output file(nonRedundantList) contains the fileName for each line.
  * All the fileNames in the output file(nonRedundantList) have very low similarity with each other.
  * The nonRedundantList is to reduce the distraction of similar genomes with generating simulated database(very different genome size).
  *

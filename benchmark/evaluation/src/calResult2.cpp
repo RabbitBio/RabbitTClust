@@ -1,5 +1,6 @@
 /* The evaluation of cluster is based on the precision and recall.
- * calResult.cpp is used to calculate the evaluation of precision and recall.
+ * calResult2.cpp is used to calculate the evaluation of precision and recall.
+ * The label of genome is as the first two keywords of nomenclature of gene feature.
  * all the concepts refer to https://nlp.stanford.edu/IR-book/html/htmledition/evaluation-of-clustering-1.html 
  *
  */
