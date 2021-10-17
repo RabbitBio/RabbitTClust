@@ -8,26 +8,30 @@ Starting:
 git clone --recursive git@github.com:RabbitBio/RabbitTClust.git
 #make rabbitSketch library
 cd RabbitSketch
-mkdir build
-cd build 
+mkdir build && cd build 
 cmake -DCXXAPI=ON -DCMAKE_INSTALL_PREFIX=. ..
 make && make install
 export LD_LIBRARY_PATH=`pwd`/lib:$LD_LIBRARY_PATH
+cd ../../
 
 #make rabbitIO library
 cd RabbitIO
 mkdir build && cd build
 cmake -DCMAKE_INSTALL_PREFIX=. ..
 make && make install
-export LD_LIBRARY_PATH=`pwd`/io:$LD_LIBRARY_PATH
-
+export LD_LIBRARY_PATH=`pwd`/lib:$LD_LIBRARY_PATH
 cd ../../
-make 
-#The fileList is the list path of the genome files.
-./clust -l -t 4 -d 0.3 -F MinHash -o result.out fileList
+
+mkdir build && cd build
+cmake -DUSE_RABBITIO=ON ..
+make && make install
+cd ../
+
+#The refList is the list path of the RefSeq genome files.
+./clust -l -t 48 -o ref.out refList
 
 #get the clustering result by inputing MST info.
-./clust -f -d 0.01 -o result.out fileListGenomeInfo fileListMSTInfo
+./clust -f -d 0.01 -o result.out refListMinHashGenomeInfo refListMinHashMSTInfo
 
 #get more help info.
 ./clust -h
