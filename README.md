@@ -28,10 +28,10 @@ make && make install
 cd ../
 
 #The refList is the list path of the RefSeq genome files.
-./clust -l -t 48 -o ref.out refList
+./clust -l -t 48 -i refList -o ref.out
 
 #get the clustering result by inputing MST info.
-./clust -f -d 0.01 -o result.out refListMinHashGenomeInfo refListMinHashMSTInfo
+./clust -f -d 0.01 -i refListMinHashGenomeInfo refListMinHashMSTInfo -o result.out
 
 #get more help info.
 ./clust -h

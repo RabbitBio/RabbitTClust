@@ -55,67 +55,88 @@ int main(int argc, char * argv[]){
 	int kmerSize = 21;
 	int sketchSize = 1000;
 	while(argIndex < argc){
-		if(useMST && argIndex + 2 == argc){
-			inputFile1 = argv[argIndex];
-		}
-		else if(argIndex + 1 == argc){
-			if(argv[argIndex][1] == 'h'){
-				printUsage();
-				return 1;
-			}
-			inputFile = argv[argIndex];
-		}
-		else{
-			switch(argv[argIndex][1]){
-				case 't':
-					threads = atoi(argv[++argIndex]);
-					if(threads < 1 || threads > 128){
-						fprintf(stderr, "Invalid thread number %d\n", threads);
+		//if(useMST && argIndex + 2 == argc){
+		//	inputFile1 = argv[argIndex];
+		//}
+		//else if(argIndex + 1 == argc){
+		//	if(argv[argIndex][1] == 'h'){
+		//		printUsage();
+		//		return 1;
+		//	}
+		//	inputFile = argv[argIndex];
+		//}
+		//else{
+		switch(argv[argIndex][1]){
+			case 't':
+				threads = atoi(argv[++argIndex]);
+				if(threads < 1 || threads > 128){
+					fprintf(stderr, "Invalid thread number %d\n", threads);
+					return 1;
+				}
+				break;
+			case 'l':
+				sketchByFile = true;
+				fprintf(stderr, "sketch by file: \n");
+				break;
+			case 'c':
+				isContainment = true;
+				//threshold = 1 - exp(-threshold * KMER_SIZE) / (2 - exp(-threshold * KMER_SIZE));//generator from mash distance
+				threshold = 0.25;
+				fprintf(stderr, "compute containment\n");
+				break;
+			case 'k':
+				kmerSize = stoi(argv[++argIndex]);
+				fprintf(stderr, "set kmerSize: %d\n", kmerSize);
+				break;
+			case 's':
+				sketchSize = stoi(argv[++argIndex]);
+				fprintf(stderr, "set sketchSize:  %d\n", sketchSize);
+				break;
+			case 'd':
+				threshold = stod(argv[++argIndex]);
+				fprintf(stderr, "set the threshold: %lf \n", threshold);
+				break;
+			case 'f':
+				useMST = true;
+				fprintf(stderr, "input as Munimum Spanning Tree \n");
+				break;
+			case 'F':
+				sketchFunc = argv[++argIndex];
+				fprintf(stderr, "the sketch function is: %s \n", sketchFunc.c_str());
+				break;
+			case 'o':
+				outputFile = argv[++argIndex];
+				fprintf(stderr, "set output file: %s \n", outputFile.c_str());
+				break;
+			case 'i':
+			{
+				if(!useMST)
+				{
+					inputFile = argv[++argIndex];
+					fprintf(stderr, "the inputFile is: %s \n", inputFile.c_str());
+				}
+				else
+				{
+					inputFile1 = argv[++argIndex];
+					if(argIndex == argc)
+					{
+						fprintf(stderr, "error input File with -f options, exit\n");
+						printUsage();
 						return 1;
 					}
-					break;
-				case 'l':
-					sketchByFile = true;
-					fprintf(stderr, "sketch by file: \n");
-					break;
-				case 'c':
-					isContainment = true;
-					//threshold = 1 - exp(-threshold * KMER_SIZE) / (2 - exp(-threshold * KMER_SIZE));//generator from mash distance
-					threshold = 0.25;
-					fprintf(stderr, "compute containment\n");
-					break;
-				case 'k':
-					kmerSize = stoi(argv[++argIndex]);
-					fprintf(stderr, "set kmerSize: %d\n", kmerSize);
-					break;
-				case 's':
-					sketchSize = stoi(argv[++argIndex]);
-					fprintf(stderr, "set sketchSize:  %d\n", sketchSize);
-					break;
-				case 'd':
-					threshold = stod(argv[++argIndex]);
-					fprintf(stderr, "set the threshold: %lf \n", threshold);
-					break;
-				case 'f':
-					useMST = true;
-					fprintf(stderr, "input as Munimum Spanning Tree \n");
-					break;
-				case 'F':
-					sketchFunc = argv[++argIndex];
-					fprintf(stderr, "the sketch function is: %s \n", sketchFunc.c_str());
-					break;
-				case 'o':
-					outputFile = argv[++argIndex];
-					fprintf(stderr, "set output file: %s \n", outputFile.c_str());
-					break;
-				default:
-					fprintf(stderr, "Invalid option %s\n", argv[argIndex]);
-					printUsage();
-					return 1;
+					inputFile = argv[++argIndex];
+					fprintf(stderr, "the genomeInfo and MSTInfo are: %s and %s\n", inputFile1.c_str(), inputFile.c_str());
+				}
+				break;
 			}
+			default:
+				fprintf(stderr, "Invalid option %s\n", argv[argIndex]);
+				printUsage();
+				return 1;
 		}
+		//}
 		++argIndex;
-	}//end while file;
+	}//end while argument parse;
 
 	//input as GenomeInfo and MSTInfo
 	if(useMST){
