@@ -54,8 +54,11 @@ aux_source_directory(src DIR_SRCS)
 
 add_executable(clust ${DIR_SRCS})
 
-target_link_libraries(clust rabbitsketch rabbitio z)
-
+if(USE_RABBITIO)
+	target_link_libraries(clust rabbitsketch rabbitio z)
+else()
+	target_link_libraries(clust rabbitsketch z)
+endif()
 
 install(TARGETS clust DESTINATION ./)
 

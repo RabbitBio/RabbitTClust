@@ -2,6 +2,7 @@
  * calResult2.cpp is used to calculate the evaluation of precision and recall.
  * The label of genome is as the first two keywords of nomenclature of gene feature.
  * all the concepts refer to https://nlp.stanford.edu/IR-book/html/htmledition/evaluation-of-clustering-1.html 
+ * The parameter -i and -l corresponding to the cluster of sequences and genomes.
  *
  */
 
@@ -125,8 +126,13 @@ double getRI(vector< vector<uint64_t> > numClust, unordered_map<string, uint64_t
 
 
 int main(int argc, char* argv[]){
-	if(argc < 2) return 1;
-	string inputFile = argv[1];
+	if(argc < 3){
+		cerr << "run with: ./calResult2 -l(-i) result.out" << endl;
+		cerr << "where -l means cluster by genomes, -i means cluster by sequences" << endl;
+		return 1;
+	}
+	string argument = argv[1];
+	string inputFile = argv[2];
 
 	fstream fs(inputFile);
 	string line;
@@ -157,7 +163,15 @@ int main(int argc, char* argv[]){
 			int curId, genomeId;
 			string genomeSize, fileName, genomeName;
 			string type0, type1, type2;
-			ss >> curId >> genomeId >> genomeSize >> fileName >> genomeName >> type0 >> type1 >> type2;
+			if(argument == "-l")
+				ss >> curId >> genomeId >> genomeSize >> fileName >> genomeName >> type0 >> type1 >> type2;
+			else if(argument == "-i")
+				ss >> curId >> genomeId >> genomeSize >> genomeName >> type0 >> type1 >> type2;
+			else
+			{
+				cerr << "err input argument: " << argument <<endl;
+				return 1;
+			}
 			if(type0.substr(0, 10) == "UNVERIFIED")
 			{
 				type0 = type1;
