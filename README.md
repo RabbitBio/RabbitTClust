@@ -1,7 +1,12 @@
-# RabbitClustering
+# RabbitTClust
 
-## RabbitTClust
 RabbitTClust is a clustering method based on Minimum Spanning Tree. The distance computing is based on Sketch.
+
+## Installation
+
+### Dependancy
+* c++14
+* [zlib](https://zlib.net/)
 
 Starting:
 ```bash
