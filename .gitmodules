@@ -3,4 +3,4 @@
 	url = git@github.com:RabbitBio/RabbitIO.git
 [submodule "RabbitSketch"]
 	path = RabbitSketch
-	url = git@github.com:ZekunYin/RabbitSketch.git
+	url = git@github.com:RabbitBio/RabbitSketch.git
