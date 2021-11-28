@@ -4,3 +4,7 @@ benchmark/evaluation/calResult2
 benchmark/evaluation/mapGenome
 build/
 clust
+
+2021_*
+*.out
+*.clust

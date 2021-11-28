@@ -3,6 +3,7 @@
  * The label of genome is as the first two keywords of nomenclature of gene feature.
  * all the concepts refer to https://nlp.stanford.edu/IR-book/html/htmledition/evaluation-of-clustering-1.html 
  * The parameter -i and -l corresponding to the cluster of sequences and genomes.
+ * All the result files of different application are in CD-HIT format as the evaluation input.
  *
  */
 
@@ -124,21 +125,14 @@ double getRI(vector< vector<uint64_t> > numClust, unordered_map<string, uint64_t
 	return ri;
 }
 
-
-int main(int argc, char* argv[]){
-	if(argc < 3){
-		cerr << "run with: ./calResult2 -l(-i) result.out" << endl;
-		cerr << "where -l means cluster by genomes, -i means cluster by sequences" << endl;
-		return 1;
-	}
-	string argument = argv[1];
-	string inputFile = argv[2];
-
+void calRabbitTClust(string argument, string inputFile)
+{
 	fstream fs(inputFile);
 	string line;
 	unordered_map<string, uint64_t> mapClust;
 	vector< vector<uint64_t> > numClust;
 	unordered_map<string, uint64_t> tmpMap;
+
 	while(getline(fs, line))
 	{
 		if(line.length() == 0) continue;
@@ -170,7 +164,7 @@ int main(int argc, char* argv[]){
 			else
 			{
 				cerr << "err input argument: " << argument <<endl;
-				return 1;
+				return;
 			}
 			if(type0.substr(0, 10) == "UNVERIFIED")
 			{
@@ -193,16 +187,229 @@ int main(int argc, char* argv[]){
 	cout << "the purity is: " << result << endl;
 	double ri = getRI(numClust, mapClust);
 	cout << "the ri is: " << ri << endl;
+}
 
-	//for(uint64_t i = 0; i < numClust.size(); i++)
-	//{
-	//	for(uint64_t j = 0; j < numClust[i].size(); j++)
-	//	{
-	//		cout << numClust[i][j] << '\t';
-	//	}
-	//	cout << endl;
-	//}
+void calMeshClust2(string argument, string inputFile)
+{
+	fstream fs(inputFile);
+	string line;
+	unordered_map<string, uint64_t> mapClust;
+	vector< vector<uint64_t> > numClust;
+	unordered_map<string, uint64_t> tmpMap;
 
+	while(getline(fs, line))
+	{
+		if(line.length() == 0) continue;
+		if(line[0] == '>')//end the last cluster
+		{
+			if(tmpMap.size() != 0)
+			{
+				vector<uint64_t> tmpClust;
+				for(auto x : tmpMap)
+				{
+					tmpClust.push_back(x.second);
+				}
+				unordered_map<string, uint64_t>().swap(tmpMap);
+				numClust.push_back(tmpClust);
+				vector<uint64_t>().swap(tmpClust);
+			}
+		}
+		else
+		{
+			stringstream ss;
+			ss << line;
+			int curId, genomeId;
+			string genomeSize, fileName, genomeName;
+			string type0, type1, type2;
+			if(argument == "-l")
+				ss >> curId >> genomeSize >> fileName >> genomeName >> type0 >> type1 >> type2;
+			else if(argument == "-i")
+				ss >> curId >> genomeSize >> genomeName >> type0 >> type1 >> type2;
+			else
+			{
+				cerr << "err input argument: " << argument <<endl;
+				return;
+			}
+			if(type0.substr(0, 10) == "UNVERIFIED")
+			{
+				type0 = type1;
+				type1 = type2;
+			}
+			if(type0.back() == ',') type0.pop_back();
+			if(type1.back() == ',') type1.pop_back();
+
+			string key = type0 + '\t' + type1;
+			tmpMap.insert({key, 0});
+			tmpMap[key]++;
+			mapClust.insert({key, 0});
+			mapClust[key]++;
+		}
+
+	}//end while
+
+	double result = getPurity(numClust);
+	cout << "the purity is: " << result << endl;
+	double ri = getRI(numClust, mapClust);
+	cout << "the ri is: " << ri << endl;
+}
+
+void calGClust(string argument, string inputFile)
+{
+	fstream fs(inputFile);
+	string line;
+	unordered_map<string, uint64_t> mapClust;
+	vector< vector<uint64_t> > numClust;
+	unordered_map<string, uint64_t> tmpMap;
+
+	while(getline(fs, line))
+	{
+		if(line.length() == 0) continue;
+		if(line[0] != '\t')//end the last cluster
+		{
+			if(tmpMap.size() != 0)
+			{
+				vector<uint64_t> tmpClust;
+				for(auto x : tmpMap)
+				{
+					tmpClust.push_back(x.second);
+				}
+				unordered_map<string, uint64_t>().swap(tmpMap);
+				numClust.push_back(tmpClust);
+				vector<uint64_t>().swap(tmpClust);
+			}
+		}
+		else
+		{
+			stringstream ss;
+			ss << line;
+			int curId, genomeId;
+			string genomeSize, fileName, genomeName;
+			string type0, type1, type2;
+			if(argument == "-l")
+				ss >> curId >> genomeSize >> fileName >> genomeName >> type0 >> type1 >> type2;
+			else if(argument == "-i")
+				ss >> curId >> genomeSize >> genomeName >> type0 >> type1 >> type2;
+			else
+			{
+				cerr << "err input argument: " << argument <<endl;
+				return;
+			}
+			if(type0.substr(0, 10) == "UNVERIFIED")
+			{
+				type0 = type1;
+				type1 = type2;
+			}
+			if(type0.back() == ',') type0.pop_back();
+			if(type1.back() == ',') type1.pop_back();
+
+			string key = type0 + '\t' + type1;
+			tmpMap.insert({key, 0});
+			tmpMap[key]++;
+			mapClust.insert({key, 0});
+			mapClust[key]++;
+		}
+
+	}//end while
+
+	double result = getPurity(numClust);
+	cout << "the purity is: " << result << endl;
+	double ri = getRI(numClust, mapClust);
+	cout << "the ri is: " << ri << endl;
+}
+
+void calMothur(string argument, string inputFile)
+{
+	fstream fs(inputFile);
+	string line;
+	unordered_map<string, uint64_t> mapClust;
+	vector< vector<uint64_t> > numClust;
+	unordered_map<string, uint64_t> tmpMap;
+
+	while(getline(fs, line))
+	{
+		if(line.length() == 0) continue;
+		if(line[0] != '\t')//end the last cluster
+		{
+			if(tmpMap.size() != 0)
+			{
+				vector<uint64_t> tmpClust;
+				for(auto x : tmpMap)
+				{
+					tmpClust.push_back(x.second);
+				}
+				unordered_map<string, uint64_t>().swap(tmpMap);
+				numClust.push_back(tmpClust);
+				vector<uint64_t>().swap(tmpClust);
+			}
+		}
+		else
+		{
+			stringstream ss;
+			ss << line;
+			int curId, genomeId;
+			string genomeSize, fileName, genomeName;
+			string type0, type1, type2;
+			if(argument == "-l")
+				ss >> fileName >> genomeName >> type0 >> type1 >> type2;
+			else if(argument == "-i")
+				ss >> genomeName >> type0 >> type1 >> type2;
+			else
+			{
+				cerr << "err input argument: " << argument <<endl;
+				return;
+			}
+			if(type0.substr(0, 10) == "UNVERIFIED")
+			{
+				type0 = type1;
+				type1 = type2;
+			}
+			if(type0.back() == ',') type0.pop_back();
+			if(type1.back() == ',') type1.pop_back();
+
+			string key = type0 + '\t' + type1;
+			tmpMap.insert({key, 0});
+			tmpMap[key]++;
+			mapClust.insert({key, 0});
+			mapClust[key]++;
+		}
+
+	}//end while
+
+	double result = getPurity(numClust);
+	cout << "the purity is: " << result << endl;
+	double ri = getRI(numClust, mapClust);
+	cout << "the ri is: " << ri << endl;
+}
+
+
+
+int main(int argc, char* argv[]){
+	if(argc < 4){
+		cerr << "run with: ./calResult2 RabbitTClust -l(-i) result.out" << endl;
+		cerr << "the second parameter includes: RabbitTClust, MeshClust2, gclust, Mothur " << endl;;
+		cerr << "the third parameter includes -l and -i, where -l means cluster by genomes, -i means cluster by sequences" << endl;
+		cerr << "the fourth parameter is the cluster result file to evaluate" << endl;
+		return 1;
+	}
+	string clustFunc = argv[1];
+	string argument = argv[2];
+	string inputFile = argv[3];
+
+	cerr << "print the result of: " << inputFile << endl;
+
+	if(clustFunc == "RabbitTClust")
+		calRabbitTClust(argument, inputFile);
+	else if(clustFunc == "MeshClust2")
+		calMeshClust2(argument, inputFile);
+	else if(clustFunc == "gclust")
+		calGClust(argument, inputFile);
+	else if(clustFunc == "Mothur")
+		calMothur(argument, inputFile);
+	else{
+		cerr << "error input argument of applications, needs one of these: RabbitTClust, MeshClust2, gclust, or Mother" << endl;
+		return 1;
+	}
+	cerr << endl;
 
 	return 0;
 }

@@ -81,7 +81,7 @@ int main(int argc, char * argv[]){
 			case 'c':
 				isContainment = true;
 				//threshold = 1 - exp(-threshold * KMER_SIZE) / (2 - exp(-threshold * KMER_SIZE));//generator from mash distance
-				threshold = 0.25;
+				threshold = 0.30;
 				fprintf(stderr, "compute containment\n");
 				break;
 			case 'k':

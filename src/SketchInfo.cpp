@@ -493,8 +493,8 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 			tmpSketchInfo.fileName = fileList[i];
 			tmpSketchInfo.totalSeqLength = totalLength;
 			tmpSketchInfo.fileSeqs = curFileSeqs;
-			if(totalLength >= 10000)//filter the poor quality genome assemblies whose length less than 10k bp(fastANI paper)
-				sketches.push_back(tmpSketchInfo);
+			//if(totalLength >= 10000)//filter the poor quality genome assemblies whose length less than 10k bp(fastANI paper)
+			sketches.push_back(tmpSketchInfo);
 			if(isContainment)
 			{
 				int curSketchSize = std::max(fileLength / SKETCH_COMPRESS_GENOME, 100);

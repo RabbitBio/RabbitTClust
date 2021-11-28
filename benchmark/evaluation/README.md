@@ -9,7 +9,13 @@ The compile.sh is used to compile the src file.
   * Run with `./calGenome2 bacteriaList`, the result is saved in genomeType2.out
 * calResult.cpp: 
   * It is used to calculate the evaluation cluster result. It will output the purity, precision, recall, rand index and F1-score of the result.  
-  * Run with `./calResult1 bacteria.out` or `./calResult2 bacteria.out` for differnt label levels. The bacteria.out is the output result file of RabbitTClust.
+  * Run with `./calResult2 RabbitTClust -l bacteria.out`. The bacteria.out is the output result file of RabbitTClust.
+* calNMI.cpp:
+	* It is used to convert the cluster result from the CD-HIT format to NMI-INPUT format.
+	* Run with `./nmi RabbitTClust -l bacteria.out rabbit_bacteria.nmi`
+* getNMI.cpp:
+	* It is used to calculate the Normalized Mutual Information (NMI) for different applications.
+	* The input file "rabbit_sub.nmi" is a file with two lines generator from calNMI.cpp
 
 
 
