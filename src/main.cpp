@@ -54,18 +54,8 @@ int main(int argc, char * argv[]){
 	double threshold = 0.05;
 	int kmerSize = 21;
 	int sketchSize = 1000;
+	int containCompress = 10000;
 	while(argIndex < argc){
-		//if(useMST && argIndex + 2 == argc){
-		//	inputFile1 = argv[argIndex];
-		//}
-		//else if(argIndex + 1 == argc){
-		//	if(argv[argIndex][1] == 'h'){
-		//		printUsage();
-		//		return 1;
-		//	}
-		//	inputFile = argv[argIndex];
-		//}
-		//else{
 		switch(argv[argIndex][1]){
 			case 't':
 				threads = atoi(argv[++argIndex]);
@@ -80,9 +70,9 @@ int main(int argc, char * argv[]){
 				break;
 			case 'c':
 				isContainment = true;
-				//threshold = 1 - exp(-threshold * KMER_SIZE) / (2 - exp(-threshold * KMER_SIZE));//generator from mash distance
+				containCompress = stoi(argv[++argIndex]);
 				threshold = 0.30;
-				fprintf(stderr, "compute containment\n");
+				fprintf(stderr, "compute containment, The sketchSize is in proportion with 1/%d \n", containCompress);
 				break;
 			case 'k':
 				kmerSize = stoi(argv[++argIndex]);
@@ -148,20 +138,14 @@ int main(int argc, char * argv[]){
 	else cout << "sketch by sequence!" << endl;
 
 	
-	int sketchSize_;
-	if(isContainment)
-		sketchSize_ = sketchByFile ? SKETCH_COMPRESS_GENOME : SKETCH_COMPRESS_SEQUENCE;
-	else 
-		sketchSize_ = sketchSize;
-	//int kmerSize_ = KMER_SIZE;
 #ifdef DEBUG
 	cerr << "the kmerSize is: " << kmerSize << endl;
 	cerr << "the thread number is: " << threads << endl;
 	cerr << "the threshold is: " << threshold << endl;
 	if(isContainment)
-		cerr << "the sketchSize is in proportion with 1/" << sketchSize_ << endl;
+		cerr << "the sketchSize is in proportion with 1/" << containCompress << endl;
 	else
-		cerr << "the sketchSize is: " << sketchSize_ << endl;
+		cerr << "the sketchSize is: " << sketchSize << endl;
 #endif
 	
 	//section 2: read the files and create sketches.
@@ -172,14 +156,14 @@ int main(int argc, char * argv[]){
 #endif
 
 	if(!sketchByFile){
-		if(!sketchSequences(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, sketches, threads)){
+		if(!sketchSequences(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
 			printUsage();
 			return 1;
 		}
 	
 	}//end sketch by sequence
 	else{
-		if(!sketchFiles(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, sketches, threads)){
+		if(!sketchFiles(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
 			printUsage();
 			return 1;
 		}
@@ -199,7 +183,7 @@ int main(int argc, char * argv[]){
 #endif
 
 	//save the matching of graph id and genomeInfo 
-	saveMST(inputFile, sketchFunc, isContainment, sketches, mst, sketchByFile, sketchSize_, kmerSize);
+	saveMST(inputFile, sketchFunc, isContainment, containCompress, sketches, mst, sketchByFile, sketchSize, kmerSize);
 
 #ifdef Timer
 	double t3 = get_sec();

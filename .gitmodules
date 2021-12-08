@@ -1,6 +1,6 @@
-[submodule "RabbitIO"]
+[submodule "RabbitFX"]
 	path = RabbitIO
-	url = git@github.com:RabbitBio/RabbitIO.git
+	url = git@github.com:RabbitBio/RabbitFX.git
 [submodule "RabbitSketch"]
 	path = RabbitSketch
 	url = git@github.com:RabbitBio/RabbitSketch.git

@@ -32,8 +32,8 @@ double getPurity(vector< vector<uint64_t> > numClust)
 		purityElement += tmpPurity;
 	}
 
-	cerr << "the purityElement is: " << purityElement << endl;
-	cerr << "the totalElement is: " << totalElement << endl;
+	cout << "the purityElement is: " << purityElement << endl;
+	cout << "the totalElement is: " << totalElement << endl;
 	double result = (double) purityElement / totalElement;
 	return result;
 }
@@ -107,10 +107,10 @@ double getRI(vector< vector<uint64_t> > numClust, unordered_map<string, uint64_t
 	uint64_t fp = getFP(numClust);
 	uint64_t fn = getFN(numClust, mapClust);
 	uint64_t tn = getTN(numClust, mapClust);
-	cerr << "tp: " << tp << endl;
-	cerr << "fp: " << fp << endl;
-	cerr << "fn: " << fn << endl;
-	cerr << "tn: " << tn << endl;
+	cout << "tp: " << tp << endl;
+	cout << "fp: " << fp << endl;
+	cout << "fn: " << fn << endl;
+	cout << "tn: " << tn << endl;
 	double ri = (double) (tp + tn) / (tp + fp + fn + tn);
 	double precision = (double)tp / (tp + fp);
 	double recall = (double)tp / (tp + fn);

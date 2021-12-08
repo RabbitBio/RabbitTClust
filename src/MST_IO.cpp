@@ -203,7 +203,7 @@ void printResult(vector< vector<int> > clusterOrigin, vector<SketchInfo> sketche
 
 }
 
-void saveMST(string inputFile, string sketchFunc, bool isContainment, vector<SketchInfo> sketches, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize)
+void saveMST(string inputFile, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo> sketches, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize)
 {
 	//save the matching of graph id and genomeInfo 
 	string folderPath = currentDataTime();
@@ -271,7 +271,7 @@ void saveMST(string inputFile, string sketchFunc, bool isContainment, vector<Ske
 	}
 	ofile1 << "the sketch function is: " << tmpFunc << endl;
 	if(isContainment)
-		ofile1 << "The sketchSize is in proportion with 1/" << sketchSize << endl;
+		ofile1 << "The sketchSize is in proportion with 1/" << containCompress << endl;
 	else
 		ofile1 << "The sketchSize is: " << sketchSize << endl;
 	ofile1 << "The kmerSize is: " << kmerSize << endl;

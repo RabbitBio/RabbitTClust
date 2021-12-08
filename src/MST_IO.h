@@ -16,7 +16,7 @@ void MST2Cluster(std::string inputFile, std::string inputFile1, std::string outp
 
 void printResult(std::vector< std::vector<int> > clusterOrigin, std::vector<SketchInfo> sketches, bool sketchByFile, string outputFile);
 
-void saveMST(string inputFile, string sketchFunc, bool isContainment, vector<SketchInfo> sketches, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize);
+void saveMST(string inputFile, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo> sketches, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize);
 
 
 #endif
