@@ -1,5 +1,5 @@
 [submodule "RabbitFX"]
-	path = RabbitIO
+	path = RabbitFX
 	url = git@github.com:RabbitBio/RabbitFX.git
 [submodule "RabbitSketch"]
 	path = RabbitSketch
