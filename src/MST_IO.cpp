@@ -75,25 +75,36 @@ void MST2Cluster(string inputFile, string inputFile1, string outputFile, double 
 		while(1)
 		{
 			if(!getline(fs1, line)) break;
-			int sequenceNumber = stoi(line);
-			string fileName;
-			getline(fs1, fileName);
+			string fileName, name, comment, tmp;
+			int strand, totalLength;
+			stringstream ss;
+			ss << line;
+			ss >> fileName >> name >> strand >> totalLength;
+			while(ss >> tmp) 
+				comment += tmp + ' ';
+			//if(!getline(fs1, line)) break;
+			//int sequenceNumber = stoi(line);
+			//string fileName;
+			//getline(fs1, fileName);
+			//Vec_SeqInfo curFileSeqs;
+			//uint64_t totalLength = 0;
+			////this is the sequences info in one file
+			//for(int i = 0; i < sequenceNumber; i++)
+			//{
+			//	getline(fs1, line);
+			//	string name, comment;
+			//	int strand, length;
+			//	stringstream ss;
+			//	ss << line;
+			//	ss >> name >> strand >> length;
+			//	getline(fs1, comment);
+			//	totalLength += length;
+			//	SequenceInfo curSeq{name, comment, strand, length};
+			//	curFileSeqs.push_back(curSeq);
+			//}
 			Vec_SeqInfo curFileSeqs;
-			uint64_t totalLength = 0;
-			//this is the sequences info in one file
-			for(int i = 0; i < sequenceNumber; i++)
-			{
-				getline(fs1, line);
-				string name, comment;
-				int strand, length;
-				stringstream ss;
-				ss << line;
-				ss >> name >> strand >> length;
-				getline(fs1, comment);
-				totalLength += length;
-				SequenceInfo curSeq{name, comment, strand, length};
-				curFileSeqs.push_back(curSeq);
-			}
+			SequenceInfo curSeq{name, comment, strand, totalLength};
+			curFileSeqs.push_back(curSeq);
 			SketchInfo curSketch;
 			curSketch.fileName = fileName;
 			curSketch.totalSeqLength = totalLength;
@@ -226,17 +237,18 @@ void saveMST(string inputFile, string sketchFunc, bool isContainment, int contai
 		for(int i = 0; i < sketches.size(); i++)
 		{
 			Vec_SeqInfo curFileSeqs = sketches[i].fileSeqs;
-			ofile << curFileSeqs.size() << endl;//get the current file sequence number
-			ofile << sketches[i].fileName << endl;
-			for(int j = 0; j < curFileSeqs.size(); j++)
-			{
-				/*	each line is name, strand, length, comment of the sequence.
-				 *	place comment in a new line because there are space in the commment(the comment is not a single word.
-				 *	When use the stringstream, it is sensitive to the space.
-				 */												
-				ofile << curFileSeqs[j].name << ' ' << ' ' << curFileSeqs[j].strand << ' ' << curFileSeqs[j].length << endl;
-				ofile << curFileSeqs[j].comment << endl;
-			}
+			ofile << sketches[i].fileName << ' ' << curFileSeqs[0].name << ' ' << curFileSeqs[0].strand << ' ' << sketches[i].totalSeqLength << ' ' << curFileSeqs[0].comment << '\n';
+			//ofile << curFileSeqs.size() << endl;//get the current file sequence number
+			//ofile << sketches[i].fileName << endl;
+			//for(int j = 0; j < curFileSeqs.size(); j++)
+			//{
+			//	/*	each line is name, strand, length, comment of the sequence.
+			//	 *	place comment in a new line because there are space in the commment(the comment is not a single word.
+			//	 *	When use the stringstream, it is sensitive to the space.
+			//	 */												
+			//	ofile << curFileSeqs[j].name << ' ' << ' ' << curFileSeqs[j].strand << ' ' << curFileSeqs[j].length << endl;
+			//	ofile << curFileSeqs[j].comment << endl;
+			//}
 		}
 	}
 	else//sketchBySequence
