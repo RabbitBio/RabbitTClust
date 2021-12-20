@@ -1,4 +1,4 @@
-[RabbitTClust](rabbittclust.png)
+![RabbitTClust](rabbittclust.png)
 
 RabbitTClust is an efficient sketch-based genome clustering application 
 using minimum spanning trees. It enables processing of large-scale 
