@@ -466,7 +466,10 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 				omh->buildSketch(ks1->seq.s);
 			}
 
-			curFileSeqs.push_back(tmpSeq);
+			//only save the info of the first sequence for reducing the memory footprint
+			//and the overhead of sorting the sketches vector array.
+			if(curFileSeqs.size() == 0)
+				curFileSeqs.push_back(tmpSeq);
 		}//end while, end sketch current file.
 		if(sketchFunc == "WMH"){
 			wmh1->computeHistoSketch();
@@ -501,6 +504,7 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 		gzclose(fp1);
 		kseq_destroy(ks1);
 	}//end for
+
 	sort(sketches.begin(), sketches.end(), cmpSketch);
 
 	return true;

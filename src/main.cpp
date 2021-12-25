@@ -20,7 +20,6 @@
 #include <iostream>
 #include "SketchInfo.h"
 #include "Sketch.h"// need to add the include path in Makefile.
-#include <sys/time.h>
 #include <zlib.h>
 #include "MST.h"
 #include <omp.h>
@@ -31,13 +30,6 @@
 #include <math.h>
 
 using namespace std;
-
-
-double get_sec(){
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	return (double)tv.tv_sec + (double)tv.tv_usec/1000000;
-}
 
 int main(int argc, char * argv[]){
 

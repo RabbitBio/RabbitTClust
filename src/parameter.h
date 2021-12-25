@@ -23,6 +23,13 @@
 #define WINDOW_SIZE 20
 #define HLL_SKETCH_BIT 10
 
+#include <sys/time.h>
+inline double get_sec(){
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return (double)tv.tv_sec + (double)tv.tv_usec/1000000;
+}
+
 inline void printUsage(){
 	fprintf(stdout, "usage: clust [-h] [-l] [-t] <int> [-d] <double> -F <string> [-o] <string> -i <string> \n");
 	fprintf(stdout, "usage: clust [-h] [-f] [-d] <double> -i <string> <string> -o <string>\n");
