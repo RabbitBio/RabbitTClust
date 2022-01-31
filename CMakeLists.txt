@@ -35,7 +35,7 @@ if(USE_Timer)
 endif()
 
 if(USE_RABBITFX)
-	set(CMAKE_CXX_FLAGS "-D RABBIT_IO ${CMAKE_CXX_FLAGS}")
+	set(CMAKE_CXX_FLAGS "-D RABBIT_FX ${CMAKE_CXX_FLAGS}")
 	include_directories(src RabbitSketch/build/include RabbitFX/build/include)
 	link_directories(RabbitSketch/build/lib RabbitFX/build/lib)
 else()

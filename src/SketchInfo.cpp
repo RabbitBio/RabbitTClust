@@ -8,7 +8,7 @@
 #include "ThreadPool.h"
 #endif
 
-#ifdef RABBIT_IO
+#ifdef RABBIT_FX
 #include "FastxStream.h"
 #include "FastxChunk.h"
 #include "Formater.h"
@@ -77,7 +77,7 @@ void useThreadOutput(SketchOutput * output, vector<SketchInfo> &sketches){
 
 #endif
 
-#ifdef RABBIT_IO
+#ifdef RABBIT_FX
 typedef rabbit::core::TDataQueue<rabbit::fa::FastaChunk> FaChunkQueue;
 int producer_fasta_task(std::string file, rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq){
 	std::cout << "filename" << file << std::endl;
@@ -253,8 +253,8 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 		useThreadOutput(threadPool.popOutputWhenAvailable(), sketches);
 	}
 	#else 
-	#ifdef RABBIT_IO
-	int th = threads - 1;//consumer threads number;
+	#ifdef RABBIT_FX
+	int th = std::max(threads - 1, 1);//consumer threads number;
 	vector<SketchInfo>  sketchesArr[th];
 	//vector<SimilarityInfo>  similarityInfosArr[th];
 	
