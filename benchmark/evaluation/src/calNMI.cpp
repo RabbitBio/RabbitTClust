@@ -1,9 +1,10 @@
-/* The evaluation of cluster is based on the precision and recall.
- * calResult2.cpp is used to calculate the evaluation of precision and recall.
- * The label of genome is as the first two keywords of nomenclature of gene feature.
- * The parameter -i and -l corresponding to the cluster of sequences and genomes.
- * The input cluster file is the CD-HIT format.
+/* Authur: Xiaoming Xu
+ * Email: xiaoming.xu@mail.sdu.edu.cn
  *
+ * calNMI.cpp is used for the preprocessing of the evaluation of NMI (normalized mutual information);
+ * The ground truth labels of genomes are as the first two keywords of nomenclature of gene feature.
+ * The parameter -i and -l corresponding to the cluster of genomes served as sequences and files.
+ * The input cluster files are in the CD-HIT format.
  *
  */
 
@@ -17,9 +18,20 @@
 
 using namespace std;
 
+inline void printInfo()
+{
+	cerr << "run with: ./calNMI RabbitTClust -l(-i) bacteria.out bacteria.nmi" << endl;
+	cerr << "The second argument (rabbitTClust) is applications, including RabbitTClust, MeshClust2, gclust or Mothur " << endl;
+	cerr << "For the third argument, -l means genomes served as files, -i means genomes served as sequences" << endl;
+	cerr << "The fourth argument (bacteria.out) is the cluster result from RabbitTClust, MeshClust2, gclust or Mothur " << endl;
+	cerr << "The fifth argument (bacteria.nmi) is the output file path" << endl;
+}
+
 void calNMI(string application, string argument, string inputFile, string outputFile)
 {	
 	ofstream ofs(outputFile);
+	ofstream ofs1(outputFile+".humanReadable");
+
 	fstream fs(inputFile);
 	string line;
 	unordered_map<string, int> mapClust;
@@ -52,6 +64,7 @@ void calNMI(string application, string argument, string inputFile, string output
 				else
 				{
 					cerr << "error argument, need -l or -i " << endl;
+					printInfo();
 					return;
 				}
 
@@ -102,7 +115,8 @@ void calNMI(string application, string argument, string inputFile, string output
 					ss >> curId >> genomeSize >> genomeName >> type0 >> type1 >> type2;
 				else
 				{
-					cerr << "err input application: " << application <<endl;
+					cerr << "error application, need RabbitTClust, Mothur, gclust or MeshClust2" << endl;
+					printInfo();
 					return;
 				}
 				if(type0.substr(0, 10) == "UNVERIFIED")
@@ -130,6 +144,16 @@ void calNMI(string application, string argument, string inputFile, string output
 
 	cerr << "the size of ourClust is: " << ourClust.size() << endl;
 	cerr << "the size of standardClust is: " << standardClust.size() << endl;
+	
+	if(ourClust.size() != standardClust.size())
+	{
+		cerr << "the size of ourClust is not equal to the standardClust, exit()" << endl;
+		return;
+	}
+	for(int i = 0; i < ourClust.size(); i++)
+	{
+		ofs1 << ourClust[i] << '\t' << standardClust[i] << endl;
+	}
 
 	for(int i = 0; i < ourClust.size(); i++)
 		ofs << ourClust[i] << ' ';
@@ -144,8 +168,7 @@ void calNMI(string application, string argument, string inputFile, string output
 
 int main(int argc, char* argv[]){
 	if(argc < 5){
-		cerr << "run with: ./nmi RabbitTClust -l(-i) bacteria.out bacteria.nmi" << endl;
-		cerr << "where -l means cluster by genomes, -i means cluster by sequences" << endl;
+		printInfo();
 		return 1;
 	}
 	string application = argv[1];

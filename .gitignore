@@ -2,6 +2,8 @@ benchmark/evaluation/calGenome
 benchmark/evaluation/calResult1
 benchmark/evaluation/calResult2
 benchmark/evaluation/mapGenome
+benchmark/evaluation/calNMI
+benchmark/evaluation/calF1
 build/
 clust
 

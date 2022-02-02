@@ -17,6 +17,14 @@
 
 using namespace std;
 
+inline void printInfo()
+{
+	cerr << "run with: ./calResult2 RabbitTClust -l(-i) result.out" << endl;
+	cerr << "the second parameter includes: RabbitTClust, MeshClust2, gclust, Mothur " << endl;;
+	cerr << "the third parameter includes -l and -i, where -l means cluster by genomes, -i means cluster by sequences" << endl;
+	cerr << "the fourth parameter is the cluster result file to evaluate" << endl;
+}
+
 double getPurity(vector< vector<uint64_t> > numClust)
 {
 	uint64_t totalElement = 0;
@@ -163,7 +171,8 @@ void calRabbitTClust(string argument, string inputFile)
 				ss >> curId >> genomeId >> genomeSize >> genomeName >> type0 >> type1 >> type2;
 			else
 			{
-				cerr << "err input argument: " << argument <<endl;
+				cerr << "err input argument " << argument <<endl;
+				printInfo();
 				return;
 			}
 			if(type0.substr(0, 10) == "UNVERIFIED")
@@ -182,6 +191,18 @@ void calRabbitTClust(string argument, string inputFile)
 		}
 
 	}//end while
+
+	if(tmpMap.size() != 0)
+	{
+		vector<uint64_t> tmpClust;
+		for(auto x : tmpMap)
+		{
+			tmpClust.push_back(x.second);
+		}
+		unordered_map<string, uint64_t>().swap(tmpMap);
+		numClust.push_back(tmpClust);
+		vector<uint64_t>().swap(tmpClust);
+	}
 
 	double result = getPurity(numClust);
 	cout << "the purity is: " << result << endl;
@@ -228,6 +249,7 @@ void calMeshClust2(string argument, string inputFile)
 			else
 			{
 				cerr << "err input argument: " << argument <<endl;
+				printInfo();
 				return;
 			}
 			if(type0.substr(0, 10) == "UNVERIFIED")
@@ -246,6 +268,17 @@ void calMeshClust2(string argument, string inputFile)
 		}
 
 	}//end while
+	if(tmpMap.size() != 0)
+	{
+		vector<uint64_t> tmpClust;
+		for(auto x : tmpMap)
+		{
+			tmpClust.push_back(x.second);
+		}
+		unordered_map<string, uint64_t>().swap(tmpMap);
+		numClust.push_back(tmpClust);
+		vector<uint64_t>().swap(tmpClust);
+	}
 
 	double result = getPurity(numClust);
 	cout << "the purity is: " << result << endl;
@@ -292,6 +325,7 @@ void calGClust(string argument, string inputFile)
 			else
 			{
 				cerr << "err input argument: " << argument <<endl;
+				printInfo();
 				return;
 			}
 			if(type0.substr(0, 10) == "UNVERIFIED")
@@ -310,6 +344,17 @@ void calGClust(string argument, string inputFile)
 		}
 
 	}//end while
+	if(tmpMap.size() != 0)
+	{
+		vector<uint64_t> tmpClust;
+		for(auto x : tmpMap)
+		{
+			tmpClust.push_back(x.second);
+		}
+		unordered_map<string, uint64_t>().swap(tmpMap);
+		numClust.push_back(tmpClust);
+		vector<uint64_t>().swap(tmpClust);
+	}
 
 	double result = getPurity(numClust);
 	cout << "the purity is: " << result << endl;
@@ -356,6 +401,7 @@ void calMothur(string argument, string inputFile)
 			else
 			{
 				cerr << "err input argument: " << argument <<endl;
+				printInfo();
 				return;
 			}
 			if(type0.substr(0, 10) == "UNVERIFIED")
@@ -374,6 +420,17 @@ void calMothur(string argument, string inputFile)
 		}
 
 	}//end while
+	if(tmpMap.size() != 0)
+	{
+		vector<uint64_t> tmpClust;
+		for(auto x : tmpMap)
+		{
+			tmpClust.push_back(x.second);
+		}
+		unordered_map<string, uint64_t>().swap(tmpMap);
+		numClust.push_back(tmpClust);
+		vector<uint64_t>().swap(tmpClust);
+	}
 
 	double result = getPurity(numClust);
 	cout << "the purity is: " << result << endl;
@@ -385,10 +442,7 @@ void calMothur(string argument, string inputFile)
 
 int main(int argc, char* argv[]){
 	if(argc < 4){
-		cerr << "run with: ./calResult2 RabbitTClust -l(-i) result.out" << endl;
-		cerr << "the second parameter includes: RabbitTClust, MeshClust2, gclust, Mothur " << endl;;
-		cerr << "the third parameter includes -l and -i, where -l means cluster by genomes, -i means cluster by sequences" << endl;
-		cerr << "the fourth parameter is the cluster result file to evaluate" << endl;
+		printInfo();
 		return 1;
 	}
 	string clustFunc = argv[1];
@@ -407,6 +461,7 @@ int main(int argc, char* argv[]){
 		calMothur(argument, inputFile);
 	else{
 		cerr << "error input argument of applications, needs one of these: RabbitTClust, MeshClust2, gclust, or Mother" << endl;
+		printInfo();
 		return 1;
 	}
 	cerr << endl;
