@@ -1,21 +1,21 @@
-/* Author: Xiaoming Xu 
+/* Author: Xiaoming Xu
  * Email: xiaoming.xu@mail.sdu.edu.cn
- *
- * calF1.cpp is used as preprocessing of the evaluation of precision, recall and F1-score.
- * The ground truth labels of genomes are as the first two keywords of nomenclature of gene feature.
+ * 
+ * calViral.cpp is used for evaluating the cluster result of viral datasets in viruSITE.
+ * The ground truth is from the taxonomy tree from the viruSITE website (http://www.virusite.org/)
  * The parameter -i and -l corresponding to the cluster of genomes served as sequences and files.
  * The input cluster files are in the CD-HIT format.
- *
+ * The output files includes both the F1-score and NMI result files.
  *
  */
 
-
 #include <iostream>
-#include <fstream>
+#include <stdio.h>
 #include <string>
-#include <vector>
 #include <unordered_map>
 #include <sstream>
+#include <fstream>
+#include <vector>
 
 using namespace std;
 
@@ -29,44 +29,81 @@ struct IdPosNum{
 	int clustSize;
 };
 
+
 inline void printInfo()
 {
-	cerr << "run with: ./calF1 RabbitTClust -l(-i) bacteria.out bacteria.f1" << endl;
+	cerr << "run with: ./calViral RabbitTClust -l(-i) groundTruth viral.out result_viral" << endl;
 	cerr << "The second argument (RabbitTClust) is applications, including RabbitTClust, MeshClust2, gclust or Mothur " << endl;
 	cerr << "For the third argument, -l means genomes served as files, -i means genomes served as sequences" << endl;
-	cerr << "The fourth argument (bacteria.out) is the cluster result from RabbitTClust, MeshClust2, gclust or Mothur " << endl;
-	cerr << "The fifth argument (bacteria.f1) is the output file path" << endl;
+	cerr << "The fourth argument (groundTruth) is the ground truth file from the taxonomy tree " << endl;
+	cerr << "The fifth argument (viral.out) is the cluster result from RabbitTClust, MeshClust2, gclust or Mothur " << endl;
+	cerr << "The sixth argument (result_viral) is the output file path" << endl;
 }
 
-void calF1(string application, string argument, string inputFile, string outputFile)
-{	
-	ofstream ofs(outputFile);
-	ofstream ofs1(outputFile+".humanReadable");
+void calViral(string application, string argument, string groundTruth, string inputFile, string outputFile)
+{
+	string outputF1 = outputFile + ".f1";
+	string outputNMI = outputFile + ".nmi";
+	ofstream ofs0_f1(outputF1);
+	ofstream ofs1_f1(outputF1 + ".humanReadable");
+	ofstream ofs0_NMI(outputNMI);
+	ofstream ofs1_NMI(outputNMI + ".humanReadable");
 
-	fstream fs(inputFile);
+	fstream fs0(groundTruth);
+	fstream fs1(inputFile);
+
 	string line;
+	
+	unordered_map<string, int> groundTruthMap;
+	int labelIndex = 0;
+	int lineIndex = 0;
 
-	int curStandardIndex = 0;
-	vector<int> ourClust;
+	vector<int> ourClustF1;
 	vector<int> standardClust;
-	unordered_map<string, int> standardMap;
 	unordered_map<int, int> curMap;
 	vector<IdPosNum> clustLabelInfo;
 	int startPos = 0;
+	
+	vector<int> ourClustNMI;
+	int curClustIndex = 0;
 
-	while(getline(fs, line))
+	//for ground truth 
+	while(getline(fs0, line))
+	{
+		if(line[0] == '\t')
+		{
+			if(lineIndex % 3 == 0)
+			{
+				stringstream ss;
+				ss << line;
+				string genomeName;
+				ss >> genomeName;
+				groundTruthMap.insert({genomeName, labelIndex});
+			}
+			lineIndex++;
+		}
+		else//a new label
+		{
+			labelIndex++;
+		}
+
+	}//end while
+	cerr << "the size of groundTruthMap is: " << groundTruthMap.size() << endl;
+
+	//for cluster result
+	while(getline(fs1, line))
 	{
 		if(line.length() == 0) continue;
 		if(application == "MeshClust2")
 		{
 			if(line[0] == '>')
 			{
+				curClustIndex++;
 				if(curMap.size() != 0)
 				{
 					int maxNumber = 0;
 					int maxIndex = 0;
 					int clustSize = 0;
-
 					for(auto x : curMap)
 					{
 						if(x.second > maxNumber)
@@ -76,10 +113,9 @@ void calF1(string application, string argument, string inputFile, string outputF
 						}
 						clustSize += x.second;
 					}
-
 					for(int i = 0; i < clustSize; i++)
 					{
-						ourClust.push_back(maxIndex);
+						ourClustF1.push_back(maxIndex);
 					}
 
 					IdPosNum ipn;
@@ -88,59 +124,50 @@ void calF1(string application, string argument, string inputFile, string outputF
 					ipn.clustSize = clustSize;
 					clustLabelInfo.push_back(ipn);
 					startPos += clustSize;
-
+					
 					unordered_map<int, int>().swap(curMap);
 				}
 			}
 			else{
+				ourClustNMI.push_back(curClustIndex);
 				stringstream ss;
 				ss << line;
 				int curId, genomeId;
 				string genomeSize, fileName, genomeName;
-				string type0, type1, type2;
+				//string type0, type1, type2;
 				if(argument == "-l")
-					ss >> curId >> fileName >>genomeSize >> genomeName >> type0 >> type1 >> type2;
+				 	ss >> curId >> fileName >> genomeSize >> genomeName;
 				else if(argument == "-i")
-					ss >> curId >>genomeSize >> genomeName >> type0 >> type1 >> type2;
+					ss >> curId >> genomeSize >> genomeName;
 				else
 				{
 					cerr << "error argument, need -l or -i " << endl;
 					printInfo();
 					return;
 				}
-
-				if(type0.substr(0, 10) == "UNVERIFIED")
+				
+				if(groundTruthMap.find(genomeName) == groundTruthMap.end())
 				{
-					type0 = type1;
-					type1 = type2;
+					cerr << "error label which is not in groundTruthMap " << endl;
+					cerr << "the error label is: " << genomeName << endl;
+					return;
 				}
-				if(type0.back() == ',') type0.pop_back();
-				if(type1.back() == ',') type1.pop_back();
-
-				string key = type0 + '\t' + type1;
 
 				//for ground truth labels
-				if(standardMap.find(key) == standardMap.end())//new label comes
-				{
-					standardMap.insert({key, curStandardIndex});
-					standardClust.push_back(curStandardIndex);
-					curStandardIndex++;
-				}
-				else
-				{
-					standardClust.push_back(standardMap[key]);
-				}
+				standardClust.push_back(groundTruthMap[genomeName]);
 
 				//for prediction labels
-				int curLabel = standardMap[key];
+				int curLabel = groundTruthMap[genomeName];
 				curMap.insert({curLabel, 0});
 				curMap[curLabel]++;
+					
 			}
 		}//end MeshClust2
-		else //other application(RabbitTClust, gclust, Mothur)
+		else//other applications(RabbitTClust, gclust, Mothur)
 		{
 			if(line[0] != '\t')
 			{
+				curClustIndex++;
 				if(curMap.size() != 0)
 				{
 					int maxNumber = 0;
@@ -159,7 +186,7 @@ void calF1(string application, string argument, string inputFile, string outputF
 
 					for(int i = 0; i < clustSize; i++)
 					{
-						ourClust.push_back(maxIndex);
+						ourClustF1.push_back(maxIndex);
 					}
 
 					IdPosNum ipn;
@@ -171,60 +198,57 @@ void calF1(string application, string argument, string inputFile, string outputF
 
 					unordered_map<int, int>().swap(curMap);
 				}
+
 			}
-			else{
+			else
+			{
+				ourClustNMI.push_back(curClustIndex);
 				stringstream ss;
 				ss << line;
 				int curId, genomeId;
 				string genomeSize, fileName, genomeName;
-				string type0, type1, type2;
+				//string type0, type1, type2;
 				if(application == "RabbitTClust")
 				{
 					if(argument == "-l")
-						ss >> curId >> genomeId >> genomeSize >> fileName >> genomeName >> type0 >> type1 >> type2;
+						ss >> curId >> genomeId >> genomeSize >> fileName >> genomeName;
 					else if(argument == "-i")
-						ss >> curId >> genomeId >> genomeSize >> genomeName >> type0 >> type1 >> type2;
+						ss >> curId >> genomeId >> genomeSize >> genomeName;
+					else
+					{
+						cerr << "error argument, need -l or -i " << endl;
+						printInfo();
+						return;
+					}
 				}
 				else if(application == "Mothur")
-					ss >> genomeName >> type0 >> type1 >> type2;
+					ss >> genomeName;
 				else if(application == "gclust")
-					ss >> curId >> genomeSize >> genomeName >> type0 >> type1 >> type2;
+					ss >> curId >> genomeSize >> genomeName;
 				else
 				{
-					cerr << "error application, need RabbitTClust, Mothur, gclust or MeshClust2" << endl;
+					cerr << "error application, need RabbitTClust, Mothur, glcust or MeshClust2" << endl;
 					printInfo();
 					return;
 				}
-				if(type0.substr(0, 10) == "UNVERIFIED")
+				if(groundTruthMap.find(genomeName) == groundTruthMap.end())
 				{
-					type0 = type1;
-					type1 = type2;
+					cerr << "error label which is not in groundTruth " << endl;
+					cerr << "the error label is: " << genomeName << endl;
+					return;
 				}
-				if(type0.back() == ',') type0.pop_back();
-				if(type1.back() == ',') type1.pop_back();
-
-				string key = type0 + '\t' + type1;
-
 
 				//for ground truth labels
-				if(standardMap.find(key) == standardMap.end())//new label comes
-				{
-					standardMap.insert({key, curStandardIndex});
-					standardClust.push_back(curStandardIndex);
-					curStandardIndex++;
-				}
-				else
-				{
-					standardClust.push_back(standardMap[key]);
-				}
+				standardClust.push_back(groundTruthMap[genomeName]);
 
 				//for prediction labels
-				int curLabel = standardMap[key];
+				int curLabel = groundTruthMap[genomeName];
 				curMap.insert({curLabel, 0});
 				curMap[curLabel]++;
 
-			}//end a cluster calculation
+			}
 		}
+
 	}//end while
 
 	if(curMap.size() != 0)
@@ -245,7 +269,7 @@ void calF1(string application, string argument, string inputFile, string outputF
 
 		for(int i = 0; i < clustSize; i++)
 		{
-			ourClust.push_back(maxIndex);
+			ourClustF1.push_back(maxIndex);
 		}
 
 		IdPosNum ipn;
@@ -279,12 +303,12 @@ void calF1(string application, string argument, string inputFile, string outputF
 			if(curClustSize <= preClustSize)//curClust is less than preClust, change curClust, do not update uniqueMap
 			{
 				for(int j = curStartPos; j < curStartPos + curClustSize; j++)
-					ourClust[j] = badLabel;
+					ourClustF1[j] = badLabel;
 			}
 			else//preClust is less than curClust, change preClust, update uniqueMap
 			{
 				for(int j = preStartPos; j < preStartPos + preClustSize; j++)
-					ourClust[j] = badLabel;
+					ourClustF1[j] = badLabel;
 				uniqueMap[curLabel].startPos = curStartPos;
 				uniqueMap[curLabel].clustSize = curClustSize;
 			}
@@ -294,40 +318,51 @@ void calF1(string application, string argument, string inputFile, string outputF
 	}
 	
 	cerr << "the size of clustLabelInfo is: " << clustLabelInfo.size() << endl;
-	cerr << "the size of ourClust is: " << ourClust.size() << endl;
+	cerr << "the size of ourClustF1 is: " << ourClustF1.size() << endl;
 	cerr << "the size of standardClust is: " << standardClust.size() << endl;
-	
-	if(ourClust.size() != standardClust.size())
+
+	if(ourClustF1.size() != standardClust.size())
 	{
-		cerr << "the size of ourClust is not equal to the standardClust, exit()" << endl;
+		cerr << "the size of ourClustF1 is not equal to the standardClust, exit()" << endl;
 		return;
 	}
-	for(int i = 0; i < ourClust.size(); i++)
+	for(int i = 0; i < ourClustF1.size(); i++)
 	{
-		ofs1 << ourClust[i] << '\t' << standardClust[i] << endl;
+		ofs1_f1 << ourClustF1[i] << '\t' << standardClust[i] << endl;
+		ofs1_NMI << ourClustNMI[i] << '\t' << standardClust[i] << endl;
 	}
 
-	for(int i = 0; i < ourClust.size(); i++)
-		ofs << ourClust[i] << ' ';
-	ofs << endl;
+	for(int i = 0; i < ourClustF1.size(); i++)
+	{
+		ofs0_f1 << ourClustF1[i] << ' ';
+		ofs0_NMI << ourClustNMI[i] << ' ';
+	}
+	ofs0_f1 << endl;
+	ofs0_NMI << endl;
 	
 	for(int i = 0; i < standardClust.size(); i++)
-		ofs << standardClust[i] << ' ';
-	ofs << endl;
+	{
+		ofs0_f1 << standardClust[i] << ' ';
+		ofs0_NMI << standardClust[i] << ' ';
+	}
+	ofs0_f1 << endl;
+	ofs0_NMI << endl;
 
 }
 
-int main(int argc, char* argv[]){
-	if(argc < 5){
-		printInfo();
+int main(int argc, char * argv[]){
+	if(argc < 6){
+		printInfo();	
 		return 1;
 	}
+
 	string application = argv[1];
 	string argument = argv[2];
-	string inputFile = argv[3];
-	string outputFile = argv[4];
+	string groundTruth = argv[3];
+	string inputFile = argv[4];
+	string outputFile = argv[5];
 
-	calF1(application, argument, inputFile, outputFile);
+	calViral(application, argument, groundTruth, inputFile, outputFile);
 
 	return 0;
 }
