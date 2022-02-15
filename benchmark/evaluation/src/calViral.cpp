@@ -33,7 +33,7 @@ struct IdPosNum{
 inline void printInfo()
 {
 	cerr << "run with: ./calViral RabbitTClust -l(-i) groundTruth viral.out result_viral" << endl;
-	cerr << "The second argument (RabbitTClust) is applications, including RabbitTClust, MeshClust2, gclust or Mothur " << endl;
+	cerr << "The second argument (RabbitTClust) is applications, including RabbitTClust, MeshClust2, MeshClust3(latest version, different output format from MeshClust2), gclust, uclust or Mothur" << endl;
 	cerr << "For the third argument, -l means genomes served as files, -i means genomes served as sequences" << endl;
 	cerr << "The fourth argument (groundTruth) is the ground truth file from the taxonomy tree " << endl;
 	cerr << "The fifth argument (viral.out) is the cluster result from RabbitTClust, MeshClust2, gclust or Mothur " << endl;
@@ -91,14 +91,14 @@ void calViral(string application, string argument, string groundTruth, string in
 	cerr << "the size of groundTruthMap is: " << groundTruthMap.size() << endl;
 
 	//for cluster result
-	while(getline(fs1, line))
+	if(application == "MeshClust3")
 	{
-		if(line.length() == 0) continue;
-		if(application == "MeshClust2")
+		int curId;
+		string genomeSize, genomeName, fileName;
+		while(getline(fs1, line))
 		{
-			if(line[0] == '>')
+			if(line.length() == 0)//finish a cluster
 			{
-				curClustIndex++;
 				if(curMap.size() != 0)
 				{
 					int maxNumber = 0;
@@ -124,132 +124,205 @@ void calViral(string application, string argument, string groundTruth, string in
 					ipn.clustSize = clustSize;
 					clustLabelInfo.push_back(ipn);
 					startPos += clustSize;
-					
+
 					unordered_map<int, int>().swap(curMap);
 				}
 			}
-			else{
-				ourClustNMI.push_back(curClustIndex);
+			else
+			{
 				stringstream ss;
 				ss << line;
-				int curId, genomeId;
-				string genomeSize, fileName, genomeName;
-				//string type0, type1, type2;
-				if(argument == "-l")
-				 	ss >> curId >> fileName >> genomeSize >> genomeName;
-				else if(argument == "-i")
-					ss >> curId >> genomeSize >> genomeName;
-				else
-				{
-					cerr << "error argument, need -l or -i " << endl;
-					printInfo();
-					return;
-				}
-				
+				ss >> curId >> genomeName;
+				ourClustNMI.push_back(curId);
+				genomeName = genomeName.substr(1);//remove the '>' in the first char of genomeName
 				if(groundTruthMap.find(genomeName) == groundTruthMap.end())
 				{
 					cerr << "error label which is not in groundTruthMap " << endl;
 					cerr << "the error label is: " << genomeName << endl;
 					return;
 				}
-
-				//for ground truth labels
 				standardClust.push_back(groundTruthMap[genomeName]);
 
-				//for prediction labels
 				int curLabel = groundTruthMap[genomeName];
 				curMap.insert({curLabel, 0});
 				curMap[curLabel]++;
-					
 			}
-		}//end MeshClust2
-		else//other applications(RabbitTClust, gclust, Mothur)
+		}//end while
+	}
+	else//other applications(MeshClust2, RabbitTClust, gclust, Mothur)
+	{
+		while(getline(fs1, line))
 		{
-			if(line[0] != '\t')
+			if(line.length() == 0) continue;
+			if(application == "MeshClust2" || application == "gclust" || application == "uclust")
 			{
-				curClustIndex++;
-				if(curMap.size() != 0)
+				if(line[0] == '>')
 				{
-					int maxNumber = 0;
-					int maxIndex = 0;
-					int clustSize = 0;
-
-					for(auto x : curMap)
+					curClustIndex++;
+					if(curMap.size() != 0)
 					{
-						if(x.second > maxNumber)
+						int maxNumber = 0;
+						int maxIndex = 0;
+						int clustSize = 0;
+						for(auto x : curMap)
 						{
-							maxNumber = x.second;
-							maxIndex = x.first;
+							if(x.second > maxNumber)
+							{
+								maxNumber = x.second;
+								maxIndex = x.first;
+							}
+							clustSize += x.second;
 						}
-						clustSize += x.second;
+						for(int i = 0; i < clustSize; i++)
+						{
+							ourClustF1.push_back(maxIndex);
+						}
+
+						IdPosNum ipn;
+						ipn.label = maxIndex;
+						ipn.startPos = startPos;
+						ipn.clustSize = clustSize;
+						clustLabelInfo.push_back(ipn);
+						startPos += clustSize;
+						
+						unordered_map<int, int>().swap(curMap);
 					}
-
-					for(int i = 0; i < clustSize; i++)
-					{
-						ourClustF1.push_back(maxIndex);
-					}
-
-					IdPosNum ipn;
-					ipn.label = maxIndex;
-					ipn.startPos = startPos;
-					ipn.clustSize = clustSize;
-					clustLabelInfo.push_back(ipn);
-					startPos += clustSize;
-
-					unordered_map<int, int>().swap(curMap);
 				}
-
-			}
-			else
-			{
-				ourClustNMI.push_back(curClustIndex);
-				stringstream ss;
-				ss << line;
-				int curId, genomeId;
-				string genomeSize, fileName, genomeName;
-				//string type0, type1, type2;
-				if(application == "RabbitTClust")
-				{
-					if(argument == "-l")
-						ss >> curId >> genomeId >> genomeSize >> fileName >> genomeName;
-					else if(argument == "-i")
-						ss >> curId >> genomeId >> genomeSize >> genomeName;
+				else{
+					ourClustNMI.push_back(curClustIndex);
+					stringstream ss;
+					ss << line;
+					int curId, genomeId;
+					string genomeSize, fileName, genomeName;
+					//string type0, type1, type2;
+					if(application == "MeshClust2")
+					{
+						if(argument == "-l")
+						 	ss >> curId >> fileName >> genomeSize >> genomeName;
+						else if(argument == "-i")
+							ss >> curId >> genomeSize >> genomeName;
+						genomeName = genomeName.substr(1);//remove the '>' in the first char of genomeName
+					}
+					else if(application == "gclust")
+					{
+						ss >> curId >> genomeSize >> genomeName;
+						genomeName = genomeName.substr(1);//remove the '>' in the first char of genomeName
+					}
+					else if(application == "uclust")
+					{
+						ss >> genomeName;
+					}
 					else
 					{
 						cerr << "error argument, need -l or -i " << endl;
 						printInfo();
 						return;
 					}
+					
+					if(groundTruthMap.find(genomeName) == groundTruthMap.end())
+					{
+						cerr << "error label which is not in groundTruthMap " << endl;
+						cerr << "the error label is: " << genomeName << endl;
+						return;
+					}
+
+					//for ground truth labels
+					standardClust.push_back(groundTruthMap[genomeName]);
+
+					//for prediction labels
+					int curLabel = groundTruthMap[genomeName];
+					curMap.insert({curLabel, 0});
+					curMap[curLabel]++;
+						
 				}
-				else if(application == "Mothur")
-					ss >> genomeName;
-				else if(application == "gclust")
-					ss >> curId >> genomeSize >> genomeName;
+			}//end MeshClust2
+			else//other applications(RabbitTClust, Mothur)
+			{
+				if(line[0] != '\t')
+				{
+					curClustIndex++;
+					if(curMap.size() != 0)
+					{
+						int maxNumber = 0;
+						int maxIndex = 0;
+						int clustSize = 0;
+
+						for(auto x : curMap)
+						{
+							if(x.second > maxNumber)
+							{
+								maxNumber = x.second;
+								maxIndex = x.first;
+							}
+							clustSize += x.second;
+						}
+
+						for(int i = 0; i < clustSize; i++)
+						{
+							ourClustF1.push_back(maxIndex);
+						}
+
+						IdPosNum ipn;
+						ipn.label = maxIndex;
+						ipn.startPos = startPos;
+						ipn.clustSize = clustSize;
+						clustLabelInfo.push_back(ipn);
+						startPos += clustSize;
+
+						unordered_map<int, int>().swap(curMap);
+					}
+
+				}
 				else
 				{
-					cerr << "error application, need RabbitTClust, Mothur, glcust or MeshClust2" << endl;
-					printInfo();
-					return;
+					ourClustNMI.push_back(curClustIndex);
+					stringstream ss;
+					ss << line;
+					int curId, genomeId;
+					string genomeSize, fileName, genomeName;
+					//string type0, type1, type2;
+					if(application == "RabbitTClust")
+					{
+						if(argument == "-l")
+							ss >> curId >> genomeId >> genomeSize >> fileName >> genomeName;
+						else if(argument == "-i")
+							ss >> curId >> genomeId >> genomeSize >> genomeName;
+						else
+						{
+							cerr << "error argument, need -l or -i " << endl;
+							printInfo();
+							return;
+						}
+					}
+					else if(application == "Mothur")
+						ss >> genomeName;
+					//else if(application == "gclust")
+					//	ss >> curId >> genomeSize >> genomeName;
+					else
+					{
+						cerr << "error application, need RabbitTClust, Mothur, glcust or MeshClust2" << endl;
+						printInfo();
+						return;
+					}
+					if(groundTruthMap.find(genomeName) == groundTruthMap.end())
+					{
+						cerr << "error label which is not in groundTruth " << endl;
+						cerr << "the error label is: " << genomeName << endl;
+						return;
+					}
+
+					//for ground truth labels
+					standardClust.push_back(groundTruthMap[genomeName]);
+
+					//for prediction labels
+					int curLabel = groundTruthMap[genomeName];
+					curMap.insert({curLabel, 0});
+					curMap[curLabel]++;
+
 				}
-				if(groundTruthMap.find(genomeName) == groundTruthMap.end())
-				{
-					cerr << "error label which is not in groundTruth " << endl;
-					cerr << "the error label is: " << genomeName << endl;
-					return;
-				}
-
-				//for ground truth labels
-				standardClust.push_back(groundTruthMap[genomeName]);
-
-				//for prediction labels
-				int curLabel = groundTruthMap[genomeName];
-				curMap.insert({curLabel, 0});
-				curMap[curLabel]++;
-
 			}
-		}
-
-	}//end while
+		}//end while
+	}
 
 	if(curMap.size() != 0)
 	{
