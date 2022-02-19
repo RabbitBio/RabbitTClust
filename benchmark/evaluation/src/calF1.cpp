@@ -1,8 +1,9 @@
 /* Author: Xiaoming Xu 
  * Email: xiaoming.xu@mail.sdu.edu.cn
+ * Data: 2022/2/18
  *
- * calF1.cpp is used as preprocessing of the evaluation of precision, recall and F1-score.
- * The ground truth labels of genomes are as the first two keywords of nomenclature of gene feature.
+ * calF1.cpp is used as preprocessing of the evaluation of precision, recall and F1-score for bacteria, refseq, half-Bacteria, sub-Bacteria datasets.
+ * The ground truth labels of genomes are as species_taxid which reveals nomenclature of gene feature.
  * The parameter -i and -l corresponding to the cluster of genomes served as sequences and files.
  * The input cluster files are in the CD-HIT format.
  *
@@ -51,16 +52,15 @@ bool cmpIdNum(IdNum in1, IdNum in2){
 
 inline void printInfo()
 {
-	cerr << "run with: ./calF1 RabbitTClust -l(-i) bacteria.out bacteria.f1" << endl;
+	cerr << "run with: ./calF1 RabbitTClust -l(-i) groundTruth bacteria.out bacteria.f1" << endl;
 	cerr << "The second argument (RabbitTClust) is applications, including RabbitTClust, MeshClust2, gclust or Mothur " << endl;
 	cerr << "For the third argument, -l means genomes served as files, -i means genomes served as sequences" << endl;
-	cerr << "The fourth argument (bacteria.out) is the cluster result from RabbitTClust, MeshClust2, gclust or Mothur " << endl;
-	cerr << "The fifth argument (bacteria.f1) is the output file path" << endl;
+	cerr << "The fourth argument (groundTruth) is the ground truth from assembly_bacteria.txt of the <assembly_accession genomeName species_taxid> " << endl;
+	cerr << "The fifth argument (bacteria.out) is the cluster result from RabbitTClust, MeshClust2, gclust or Mothur " << endl;
+	cerr << "The sixth argument (bacteria.f1) is the output file path" << endl;
 }
 
 /* The output result is th resLabelArr with size of cluster number, each element is the label for the cluster.
- *
- *
  */
 int updateLabel(vector< vector<LabNum> > &labNumArr, unordered_map<int, GlobalLabelInfo> &globalMap, int clustId, int &badLabel, vector<int> &resLabelArr)//return the new badLabel
 {
@@ -104,25 +104,42 @@ int updateLabel(vector< vector<LabNum> > &labNumArr, unordered_map<int, GlobalLa
 	return badLabel;
 }
 
-void calF1(string application, string argument, string inputFile, string outputFile)
+void calF1(string application, string argument, string groundTruth, string inputFile, string outputFile)
 {	
 	ofstream ofs(outputFile);
 	ofstream ofs1(outputFile+".humanReadable");
 
-	fstream fs(inputFile);
+	fstream fs0(groundTruth);
 	string line;
+
+	unordered_map<string, int> groundTruthMapFile;
+	unordered_map<string, int> groundTruthMapSeq;
+
+	while(getline(fs0, line))
+	{
+		string assembly_accession, genomeName, species_taxid;
+		stringstream ss;
+		ss << line;
+		ss >> assembly_accession >> genomeName >> species_taxid;
+		groundTruthMapFile.insert({assembly_accession, stoi(species_taxid)});
+		groundTruthMapSeq.insert({genomeName, stoi(species_taxid)});
+
+	}
+
+	
+	fstream fs(inputFile);
 
 	int curStandardIndex = 0;
 	vector<int> ourClust;
 	vector<int> standardClust;
 	unordered_map<string, int> standardMap;
-	unordered_map<int, int> groundTruthMap;
 	unordered_map<int, int> curMap;
-
 
 	int startPos = 0;
 	vector< vector<LabNum> > labNumArr;
 	vector<PosNum> posArr;
+
+	int numNotIngroundTruth = 0;
 
 	while(getline(fs, line))
 	{
@@ -174,36 +191,21 @@ void calF1(string application, string argument, string inputFile, string outputF
 					return;
 				}
 
-				if(type0.substr(0, 10) == "UNVERIFIED")
+				genomeName = genomeName.substr(1);
+				if(groundTruthMapSeq.find(genomeName) == groundTruthMapSeq.end())
 				{
-					type0 = type1;
-					type1 = type2;
-				}
-				if(type0.back() == ',') type0.pop_back();
-				if(type1.back() == ',') type1.pop_back();
-
-				string key = type0 + '\t' + type1;
-
-				//for labels creating
-				if(standardMap.find(key) == standardMap.end())//new label comes
-				{
-					standardMap.insert({key, curStandardIndex});
-					standardClust.push_back(curStandardIndex);
-					curStandardIndex++;
+					//cerr << "the genomeName: " << genomeName << " is not in the groundTruthMapSeq!" << endl;
+					numNotIngroundTruth++;
+					continue;
 				}
 				else
 				{
-					standardClust.push_back(standardMap[key]);
+					int curLabel = groundTruthMapSeq[genomeName];
+					standardClust.push_back(curLabel);
+					curMap.insert({curLabel, 0});
+					curMap[curLabel]++;
 				}
 
-				int curLabel = standardMap[key];
-				//for ground truth labels
-				groundTruthMap.insert({curLabel, 0});
-				groundTruthMap[curLabel]++;
-
-				//for prediction labels
-				curMap.insert({curLabel, 0});
-				curMap[curLabel]++;
 			}
 		}//end MeshClust2
 		else //other application(RabbitTClust, gclust, Mothur)
@@ -245,51 +247,83 @@ void calF1(string application, string argument, string inputFile, string outputF
 				if(application == "RabbitTClust")
 				{
 					if(argument == "-l")
+					{
 						ss >> curId >> genomeId >> genomeSize >> fileName >> genomeName >> type0 >> type1 >> type2;
+						int startIndex = fileName.find_last_of('/');
+						int endIndex = fileName.find('_', startIndex + 5);
+						string key = fileName.substr(startIndex+1, endIndex -startIndex -1);
+						if(groundTruthMapFile.find(key) == groundTruthMapFile.end())
+						{
+							//cerr << "the key: " << key << " is not in the groundTruth!" << endl;
+							numNotIngroundTruth++;
+							continue;//skip this label
+						}
+						else
+						{
+							int curLabel = groundTruthMapFile[key];
+							standardClust.push_back(curLabel);
+							curMap.insert({curLabel, 0});
+							curMap[curLabel]++;
+						}
+					}
 					else if(argument == "-i")
+					{
 						ss >> curId >> genomeId >> genomeSize >> genomeName >> type0 >> type1 >> type2;
+						if(groundTruthMapSeq.find(genomeName) == groundTruthMapSeq.end())
+						{
+							//cerr << "the genomeName: " << genomeName << " is not in the groundTruthMapSeq!" << endl;
+							numNotIngroundTruth++;
+							continue;
+						}
+						else
+						{
+							int curLabel = groundTruthMapSeq[genomeName];
+							standardClust.push_back(curLabel);
+							curMap.insert({curLabel, 0});
+							curMap[curLabel]++;
+						}
+					}
 				}
-				else if(application == "Mothur")
+				else if(application == "Mothur")//TODO
+				{
 					ss >> genomeName >> type0 >> type1 >> type2;
-				else if(application == "gclust")
+					if(groundTruthMapSeq.find(genomeName) == groundTruthMapSeq.end())
+					{
+						//cerr << "the genomeName: " << genomeName << " is not in the groundTruthMapSeq!" << endl;
+						numNotIngroundTruth++;
+						continue;
+					}
+					else
+					{
+						int curLabel = groundTruthMapSeq[genomeName];
+						standardClust.push_back(curLabel);
+						curMap.insert({curLabel, 0});
+						curMap[curLabel]++;
+					}
+				}
+				else if(application == "gclust")//TODO
+				{
 					ss >> curId >> genomeSize >> genomeName >> type0 >> type1 >> type2;
+					if(groundTruthMapSeq.find(genomeName) == groundTruthMapSeq.end())
+					{
+						//cerr << "the genomeName: " << genomeName << " is not in the groundTruthMapSeq!" << endl;
+						numNotIngroundTruth++;
+						continue;
+					}
+					else
+					{
+						int curLabel = groundTruthMapSeq[genomeName];
+						standardClust.push_back(curLabel);
+						curMap.insert({curLabel, 0});
+						curMap[curLabel]++;
+					}
+				}
 				else
 				{
 					cerr << "error application, need RabbitTClust, Mothur, gclust or MeshClust2" << endl;
 					printInfo();
 					return;
 				}
-				if(type0.substr(0, 10) == "UNVERIFIED")
-				{
-					type0 = type1;
-					type1 = type2;
-				}
-				if(type0.back() == ',') type0.pop_back();
-				if(type1.back() == ',') type1.pop_back();
-
-				string key = type0 + '\t' + type1;
-
-
-				//for labels creating
-				if(standardMap.find(key) == standardMap.end())//new label comes
-				{
-					standardMap.insert({key, curStandardIndex});
-					standardClust.push_back(curStandardIndex);
-					curStandardIndex++;
-				}
-				else
-				{
-					standardClust.push_back(standardMap[key]);
-				}
-
-				int curLabel = standardMap[key];
-				//for groundTruth labels
-				groundTruthMap.insert({curLabel, 0});
-				groundTruthMap[curLabel]++;
-
-				//for prediction labels
-				curMap.insert({curLabel, 0});
-				curMap[curLabel]++;
 
 			}//end a cluster calculation
 		}
@@ -331,58 +365,6 @@ void calF1(string application, string argument, string inputFile, string outputF
 	{
 		badLabel = updateLabel(labNumArr, globalMap, i, badLabel, resLabelArr); 
 	}
-
-	//deal with the badLabels
-	//get the remaining labels which are not the cluster labels.
-	vector<IdNum> remainLabelArr;
-	for(auto x : groundTruthMap)
-	{
-		int curLabel = x.first;
-		if(globalMap.find(curLabel) == globalMap.end())//the label has been used
-		{
-			IdNum idn;
-			idn.id = x.first;
-			idn.number = x.second;
-			remainLabelArr.push_back(idn);
-		}
-	}
-	std::sort(remainLabelArr.begin(), remainLabelArr.end(), cmpIdNum);
-	cerr << "the size of remainLabelArr is: " << remainLabelArr.size() << endl;
-
-	vector<IdNum> badClustArr;
-	for(int i = 0; i < resLabelArr.size(); i++)
-	{
-		IdNum idn;
-		if(resLabelArr[i] < 0)
-		{
-			idn.id = i;
-			idn.number = posArr[i].clustSize;
-			badClustArr.push_back(idn);
-		}
-	}
-	std::sort(badClustArr.begin(), badClustArr.end(), cmpIdNum);
-	int remainLabelNumber = remainLabelArr.size();
-	int badLabelNumber = badClustArr.size();
-	int fixLabelNumber;
-	if(remainLabelNumber < badLabelNumber)
-	{
-		fixLabelNumber = badLabelNumber - remainLabelNumber;
-		for(int i = 0; i < remainLabelNumber; i++)
-		{
-			int curId = badClustArr[i].id;
-			resLabelArr[curId] = remainLabelArr[i].id;
-		}
-	}
-	else
-	{
-		fixLabelNumber = remainLabelNumber - badLabelNumber;
-		for(int i = 0; i < badLabelNumber; i++)
-		{
-			int curId = badClustArr[i].id;
-			resLabelArr[curId] = remainLabelArr[i].id;
-		}
-	}
-	cerr << "the fixed number of label is: " << fixLabelNumber << endl;
 	
 	//generate the result
 	for(int i = 0; i < posArr.size(); i++)
@@ -395,12 +377,7 @@ void calF1(string application, string argument, string inputFile, string outputF
 		}
 	}
 
-//	cerr << "the badLabelNumber is: " << badLabelNumber << endl;
-//	cerr << "the final badLabel is: " << badLabel << endl;
-//	cerr << "the size of globalMap is: " << globalMap.size() << endl;
-//	cerr << "the clust number is: " << clustNumber << endl;
-//	cerr << "the standMap size is: " << standardMap.size() << endl;
-
+	cerr << "the number of which not in the groundTruth is: " << numNotIngroundTruth << endl;
 	cerr << "the size of ourClust is: " << ourClust.size() << endl;
 	cerr << "the size of standardClust is: " << standardClust.size() << endl;
 	
@@ -425,16 +402,17 @@ void calF1(string application, string argument, string inputFile, string outputF
 }
 
 int main(int argc, char* argv[]){
-	if(argc < 5){
+	if(argc < 6){
 		printInfo();
 		return 1;
 	}
 	string application = argv[1];
 	string argument = argv[2];
-	string inputFile = argv[3];
-	string outputFile = argv[4];
+	string groundTruth = argv[3];
+	string inputFile = argv[4];
+	string outputFile = argv[5];
 
-	calF1(application, argument, inputFile, outputFile);
+	calF1(application, argument, groundTruth, inputFile, outputFile);
 
 	return 0;
 

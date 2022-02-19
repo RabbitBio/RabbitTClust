@@ -4,6 +4,9 @@ benchmark/evaluation/calResult2
 benchmark/evaluation/mapGenome
 benchmark/evaluation/calNMI
 benchmark/evaluation/calF1
+benchmark/evaluation/calViral
+benchmark/evaluation/*.f1
+benchmark/evaluation/*.f1.humanReadable
 build/
 clust
 
