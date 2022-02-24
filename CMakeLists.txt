@@ -55,9 +55,9 @@ aux_source_directory(src DIR_SRCS)
 add_executable(clust ${DIR_SRCS})
 
 if(USE_RABBITFX)
-	target_link_libraries(clust rabbitsketch rabbitfx z)
+	target_link_libraries(clust rabbitsketch_static rabbitfx z)
 else()
-	target_link_libraries(clust rabbitsketch z)
+	target_link_libraries(clust rabbitsketch_static z)
 endif()
 
 install(TARGETS clust DESTINATION ./)

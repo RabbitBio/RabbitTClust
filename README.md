@@ -11,15 +11,24 @@ and parallelization on modern multi-core platforms.
 * c++14
 * [zlib](https://zlib.net/)
 
-### Starting
+### compile and install manually 
 ```bash
-git clone --recursive git@github.com:RabbitBio/RabbitTClust.git
+git clone --recursive https://github.com/RabbitBio/RabbitTClust.git
+cd RabbitTClust
+./install.sh
+
+```
+
+### compile and install manually 
+```bash
+git clone --recursive https://github.com/RabbitBio/RabbitTClust.git
+cd RabbitTClust
+
 #make rabbitSketch library
 cd RabbitSketch
 mkdir build && cd build 
 cmake -DCXXAPI=ON -DCMAKE_INSTALL_PREFIX=. ..
 make && make install
-export LD_LIBRARY_PATH=`pwd`/lib:$LD_LIBRARY_PATH
 cd ../../
 
 #make rabbitFX library
@@ -27,7 +36,6 @@ cd RabbitFX
 mkdir build && cd build
 cmake -DCMAKE_INSTALL_PREFIX=. ..
 make && make install
-export LD_LIBRARY_PATH=`pwd`/lib:$LD_LIBRARY_PATH
 cd ../../
 
 mkdir build && cd build
