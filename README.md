@@ -9,6 +9,7 @@ and parallelization on modern multi-core platforms.
 RabbitTClust version 1.0
 
 ### Dependancy
+* cmake v.3.0 or later
 * c++14
 * [zlib](https://zlib.net/)
 
