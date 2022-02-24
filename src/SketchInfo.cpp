@@ -164,18 +164,18 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 
 #endif
 
-void getCWS(double * r, double * c, double * b, int sketchSize, int dimension){
-	const int DISTRIBUTION_SEED = 1;
-	default_random_engine generator(DISTRIBUTION_SEED);
-	gamma_distribution<double> gamma(2.0, 1.0);
-	uniform_real_distribution<double> uniform(0.0, 1.0);
-
-	for(int i = 0; i < sketchSize * dimension; ++i){
-		r[i] = gamma(generator);
-		c[i] = log(gamma(generator));
-		b[i] = uniform(generator) * r[i];
-	}
-}
+//void getCWS(double * r, double * c, double * b, int sketchSize, int dimension){
+//	const int DISTRIBUTION_SEED = 1;
+//	default_random_engine generator(DISTRIBUTION_SEED);
+//	gamma_distribution<double> gamma(2.0, 1.0);
+//	uniform_real_distribution<double> uniform(0.0, 1.0);
+//
+//	for(int i = 0; i < sketchSize * dimension; ++i){
+//		r[i] = gamma(generator);
+//		c[i] = log(gamma(generator));
+//		b[i] = uniform(generator) * r[i];
+//	}
+//}
 
 bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
 	gzFile fp1;
