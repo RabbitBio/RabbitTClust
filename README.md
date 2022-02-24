@@ -6,12 +6,13 @@ datasets by combining dimensionality reduction techniques with streaming
 and parallelization on modern multi-core platforms. 
 
 ## Installation
+RabbitTClust version 1.0
 
 ### Dependancy
 * c++14
 * [zlib](https://zlib.net/)
 
-### compile and install manually 
+### Compile and install automatically
 ```bash
 git clone --recursive https://github.com/RabbitBio/RabbitTClust.git
 cd RabbitTClust
@@ -19,7 +20,7 @@ cd RabbitTClust
 
 ```
 
-### compile and install manually 
+### Compile and install manually 
 ```bash
 git clone --recursive https://github.com/RabbitBio/RabbitTClust.git
 cd RabbitTClust
