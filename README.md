@@ -6,7 +6,7 @@ datasets by combining dimensionality reduction techniques with streaming
 and parallelization on modern multi-core platforms. 
 
 ## Installation
-RabbitTClust version 1.0
+RabbitTClust version 1.0 can only support 64-bit Linux Systems.
 
 ### Dependancy
 * cmake v.3.0 or later
