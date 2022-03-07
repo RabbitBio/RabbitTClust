@@ -257,6 +257,14 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 	int th = std::max(threads - 1, 1);//consumer threads number;
 	vector<SketchInfo>  sketchesArr[th];
 	//vector<SimilarityInfo>  similarityInfosArr[th];
+	int sufIndex = inputFile.find_last_of('.');
+	string sufName = inputFile.substr(sufIndex+1);
+	if(sufName != "fasta" || sufName != "fna")
+	{
+		cerr << "error input format file: " << inputFile << endl;
+		cerr << "Only support FASTA files" << endl;
+		exit(0);
+	}
 	
 	rabbit::fa::FastaDataPool *fastaPool = new rabbit::fa::FastaDataPool(256, 1<< 24);
 	FaChunkQueue queue1(128, 1);
