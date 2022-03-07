@@ -2,7 +2,7 @@
  * Email: xiaoming.xu@mail.sdu.edu.cn
  * Data: 2022/2/18
  *
- * calF1.cpp is used as preprocessing of the evaluation of precision, recall and F1-score for bacteria, refseq, half-Bacteria, sub-Bacteria datasets.
+ * calF1.cpp is used as preprocessing of the evaluation of precision, recall, F1-score, and NMI for bacteria, refseq, half-Bacteria, sub-Bacteria datasets.
  * The ground truth labels of genomes are as species_taxid which reveals nomenclature of gene feature.
  * The parameter -i and -l corresponding to the cluster of genomes served as sequences and files.
  * The input cluster files are in the CD-HIT format.
@@ -52,7 +52,7 @@ bool cmpIdNum(IdNum in1, IdNum in2){
 
 inline void printInfo()
 {
-	cerr << "run with: ./calF1 RabbitTClust -l(-i) groundTruth bacteria.out bacteria.f1" << endl;
+	cerr << "run with: ./calLabel RabbitTClust -l(-i) groundTruth bacteria.out bacteria.f1" << endl;
 	cerr << "The second argument (RabbitTClust) is applications, including RabbitTClust, MeshClust2, gclust or Mothur " << endl;
 	cerr << "For the third argument, -l means genomes served as files, -i means genomes served as sequences" << endl;
 	cerr << "The fourth argument (groundTruth) is the ground truth from assembly_bacteria.txt of the <assembly_accession genomeName species_taxid> " << endl;
