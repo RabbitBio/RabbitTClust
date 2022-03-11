@@ -53,10 +53,10 @@ inline void printUsage(){
 	fprintf(stdout, "\t ./clust -d 0.05 -t 48 -F MinHash -i data/bacteria.fna -o bacteria.clust\n");
 
 	fprintf(stdout, "\tfor redundancy detection with containment, input is a genome file list:\n");
-	fprintf(stdout, "\t ./clust -l -c 10000 -d 0.30 -t 48 -F MinHash -i data/bacteria.fna -o bacteria.out\n");
+	fprintf(stdout, "\t ./clust -l -c 10000 -d 0.10 -t 48 -F MinHash -i data/bacteriaList -o bacteria.out\n");
 
 	fprintf(stdout, "\tfor redundancy detection with containment, input is a single genome file:\n");
-	fprintf(stdout, "\t ./clust -c 10000 -d 0.30 -t 48 -F MinHash -i data/bacteria.fna -o bacteria.out\n");
+	fprintf(stdout, "\t ./clust -c 10000 -d 0.10 -t 48 -F MinHash -i data/bacteria.fna -o bacteria.out\n");
 
 	fprintf(stdout, "\tfor generator cluster from exist MST:\n");
 	fprintf(stdout, "\t ./clust -f -d 0.05 -i bacteriaListMinHashGenomeInfo bacteriaListMinHashMSTInfo -o bacteria.clust\n");

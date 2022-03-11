@@ -56,7 +56,7 @@ Usage: clust [-h] [-f] [-d] <double> [-i] <string> <string> [-o] <string>
 -s <int>    : set sketch size, default <1000>
 -l          : list input. Lines in each <input> specify paths to genome files, one per line.
 -c <int>    : compute the containment of genomes, set proportion sketchSize = genomeSize/compress, ATTENTION with MinHash function. 
--d <double> : set the threshold cluster from the Minimum Spanning Tree, default 0.05 (0.3 for containment)
+-d <double> : set the threshold cluster from the Minimum Spanning Tree, default 0.05 (0.1 for containment of duplication or redundancy detection)
 -f          : generate cluster from the existing genomeInfo and MST content,
 -F <string> : set the sketch function, including <MinHash>, <WMH>, <OMH>, <HLL>, default <MinHash>
 -o <string> : path of result file
