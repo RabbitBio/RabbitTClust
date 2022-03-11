@@ -259,7 +259,7 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 	//vector<SimilarityInfo>  similarityInfosArr[th];
 	int sufIndex = inputFile.find_last_of('.');
 	string sufName = inputFile.substr(sufIndex+1);
-	if(sufName != "fasta" || sufName != "fna")
+	if(sufName != "fasta" && sufName != "fna" && sufName != "fa")
 	{
 		cerr << "error input format file: " << inputFile << endl;
 		cerr << "Only support FASTA files" << endl;
