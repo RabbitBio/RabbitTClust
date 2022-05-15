@@ -208,8 +208,12 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 		if(length < 0) break;
 		if(length < kmerSize) continue;
 
-		string name = ks1->name.s;
-		string comment = ks1->comment.s;
+		string name("noName");
+		string comment("noComment");
+		if(ks1->name.s != NULL)
+			name = ks1->name.s;
+		if(ks1->comment.s != NULL)
+			comment = ks1->comment.s;
 		SequenceInfo curSeq{name, comment, 0, length};
 		
 		char * seqCopy = (char*) malloc((length+1) * sizeof(char));
@@ -300,8 +304,12 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 		if(length < 0) break;
 		if(length < kmerSize) continue;
 
-		string name = ks1->name.s;
-		string comment = ks1->comment.s;
+		string name("noName");
+		string comment("noComment");
+		if(ks1->name.s != NULL)
+			name = ks1->name.s;
+		if(ks1->comment.s != NULL)
+			comment = ks1->comment.s;
 		SequenceInfo curSeq{name, comment, 0, length};
 
 		SketchInfo tmpSketchInfo;
@@ -457,8 +465,12 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 				break;
 			}
 			totalLength += length;
-			string name = ks1->name.s;
-			string comment = ks1->comment.s;
+			string name("noName");
+			string comment("noName");
+			if(ks1->name.s != NULL)
+				name = ks1->name.s;
+			if(ks1->comment.s != NULL)
+				comment = ks1->comment.s;
 			SequenceInfo tmpSeq{name, comment, 0, length};
 			
 			if(sketchFunc == "MinHash"){
