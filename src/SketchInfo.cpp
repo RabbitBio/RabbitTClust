@@ -26,6 +26,12 @@ using namespace std;
 bool cmpSketch(SketchInfo s1, SketchInfo s2){
 	return s1.id < s2.id;
 }
+bool cmpGenomeSize(SketchInfo s1, SketchInfo s2){
+	return s1.totalSeqLength > s2.totalSeqLength;
+}
+bool cmpSeqSize(SketchInfo s1, SketchInfo s2){
+	return s1.seqInfo.length > s2.seqInfo.length;
+}
 
 
 #ifdef THREADPOOL_MINHASH
@@ -163,19 +169,6 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 
 
 #endif
-
-//void getCWS(double * r, double * c, double * b, int sketchSize, int dimension){
-//	const int DISTRIBUTION_SEED = 1;
-//	default_random_engine generator(DISTRIBUTION_SEED);
-//	gamma_distribution<double> gamma(2.0, 1.0);
-//	uniform_real_distribution<double> uniform(0.0, 1.0);
-//
-//	for(int i = 0; i < sketchSize * dimension; ++i){
-//		r[i] = gamma(generator);
-//		c[i] = log(gamma(generator));
-//		b[i] = uniform(generator) * r[i];
-//	}
-//}
 
 bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
 	gzFile fp1;
@@ -352,11 +345,12 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 	}//end while
 	#endif
 	#endif
-	cerr << "the number of sequence is: " << index << endl;
+	//cerr << "the number of sequence is: " << index << endl;
 	gzclose(fp1);
 	kseq_destroy(ks1);
 
-	sort(sketches.begin(), sketches.end(), cmpSketch);
+	//sort(sketches.begin(), sketches.end(), cmpSketch);
+	sort(sketches.begin(), sketches.end(), cmpSeqSize);
 
 	return true;
 }
@@ -525,7 +519,8 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 		kseq_destroy(ks1);
 	}//end for
 
-	sort(sketches.begin(), sketches.end(), cmpSketch);
+	//sort(sketches.begin(), sketches.end(), cmpSketch);
+	sort(sketches.begin(), sketches.end(), cmpGenomeSize);
 
 	return true;
 }

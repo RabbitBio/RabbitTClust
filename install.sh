@@ -16,6 +16,12 @@ cd ../../ &&
 
 #compile the RabbitTClust
 mkdir -p build && cd build &&
-cmake -DUSE_RABBITFX=ON .. && 
+cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=ON .. && 
+make && make install &&
+cd ../ &&
+
+#mkdir -p build && cd build &&
+cd build &&
+cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF .. &&
 make && make install &&
 cd ../ 

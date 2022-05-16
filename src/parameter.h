@@ -30,6 +30,17 @@ inline double get_sec(){
 	return (double)tv.tv_sec + (double)tv.tv_usec/1000000;
 }
 
+#include <ctime>
+inline const string currentDataTime(){
+	time_t now = time(0);
+	struct tm tstruct;
+	char buf[80];
+	tstruct = *localtime(&now);
+	strftime(buf, sizeof(buf), "%Y_%m_%d_%H-%M-%S", &tstruct);
+
+	return buf;
+}
+
 inline void printUsage(){
 	fprintf(stdout, "usage: clust [-h] [-l] [-t] <int> [-d] <double> -F <string> [-o] <string> -i <string> \n");
 	fprintf(stdout, "usage: clust [-h] [-f] [-d] <double> -i <string> <string> -o <string>\n");

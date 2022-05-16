@@ -29,6 +29,11 @@
 #include "MST_IO.h"
 #include <math.h>
 
+#ifdef GREEDY_CLUST
+#include "Sketch_IO.h"
+#include "greedy.h"
+#endif
+
 using namespace std;
 
 int main(int argc, char * argv[]){
@@ -42,7 +47,7 @@ int main(int argc, char * argv[]){
 	int threads = 1;
 	bool sketchByFile = false;
 	bool isContainment = false;
-	bool useMST = false;
+	bool useFile = false;
 	double threshold = 0.05;
 	int kmerSize = 21;
 	int sketchSize = 1000;
@@ -79,8 +84,12 @@ int main(int argc, char * argv[]){
 				fprintf(stderr, "set the threshold: %lf \n", threshold);
 				break;
 			case 'f':
-				useMST = true;
-				fprintf(stderr, "input as Munimum Spanning Tree \n");
+				useFile = true;
+				#ifdef GREEDY_CLUST
+				fprintf(stderr, "input as sketches informations for greedy incremental cluster\n");
+				#else
+				fprintf(stderr, "input as MST for Minimum Spanning Tree cluster\n");
+				#endif
 				break;
 			case 'F':
 				sketchFunc = argv[++argIndex];
@@ -92,22 +101,26 @@ int main(int argc, char * argv[]){
 				break;
 			case 'i':
 			{
-				if(!useMST)
+				if(!useFile)
 				{
 					inputFile = argv[++argIndex];
 					fprintf(stderr, "the inputFile is: %s \n", inputFile.c_str());
 				}
 				else
 				{
-					inputFile1 = argv[++argIndex];
+					inputFile = argv[++argIndex];
 					if(argIndex == argc)
 					{
 						fprintf(stderr, "error input File with -f options, exit\n");
 						printUsage();
 						return 1;
 					}
-					inputFile = argv[++argIndex];
-					fprintf(stderr, "the genomeInfo and MSTInfo are: %s and %s\n", inputFile1.c_str(), inputFile.c_str());
+					inputFile1 = argv[++argIndex];
+					#ifdef GREEDY_CLUST
+					fprintf(stderr, "the genomeInfo and SketchInfo are: %s and %s\n", inputFile.c_str(), inputFile1.c_str());
+					#else
+					fprintf(stderr, "the genomeInfo and MSTInfo are: %s and %s\n", inputFile.c_str(), inputFile1.c_str());
+					#endif
 				}
 				break;
 			}
@@ -120,9 +133,21 @@ int main(int argc, char * argv[]){
 		++argIndex;
 	}//end while argument parse;
 
-	//input as GenomeInfo and MSTInfo
-	if(useMST){
+
+#ifdef GREEDY_CLUST
+	cerr << "use the Greedy cluster" << endl;
+#else
+	cerr << "use the MST cluster" << endl;
+#endif
+
+
+	//input as GenomeInfo and MSTInfo or sketch informations
+	if(useFile){
+#ifdef GREEDY_CLUST
+		Sketch2Clust(inputFile, inputFile1, outputFile, threshold, threads);
+#else
 		MST2Cluster(inputFile, inputFile1, outputFile, threshold);
+#endif
 		return 0;//end main 
 	}
 
@@ -167,6 +192,21 @@ int main(int argc, char * argv[]){
 	cerr << "========time of sketch is: " << t1 - t0 << "========" << endl;
 #endif
 
+
+#ifdef GREEDY_CLUST
+	saveSketches(sketches, inputFile, sketchFunc, isContainment, containCompress, sketchByFile, sketchSize, kmerSize);
+#ifdef Timer
+	double t2 = get_sec();
+	cerr << "========time of saveSketches is: " << t2 - t1 << "========" << endl;
+#endif
+	vector<vector<int> >cluster = greedyCluster(sketches, sketchFunc, threshold, threads);
+#ifdef Timer
+	double t3 = get_sec();
+	cerr << "========time of greedyCluster is: " << t3 - t2 << "========" << endl;
+#endif
+	printResult(cluster, sketches, sketchByFile, outputFile);
+
+#else
 	//section 3: compute the distance matrix and generate MST
 	vector<EdgeInfo> mst = generateMST(sketches, sketchFunc, threads);
 #ifdef Timer
@@ -193,11 +233,13 @@ int main(int argc, char * argv[]){
 	cerr << "========time of generator forest and cluster is: " << t4 - t3 << "========" << endl;
 #endif
 
+
 	printResult(cluster, sketches, sketchByFile, outputFile);
 #ifdef Timer
 	double t5 = get_sec();
 	cerr << "========time of save result is: " << t5 - t4 << "========" << endl;
 #endif
+#endif//endif GREEDY_CLUST
 
 	return 0;
 }//end main
