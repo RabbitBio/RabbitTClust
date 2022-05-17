@@ -1,5 +1,7 @@
 #ifdef GREEDY_CLUST
 #include "greedy.h"
+#include <map>
+#include <omp.h>
 using namespace std;
 
 /* @brief									Generating clusters by greedy incremental algorthm.
@@ -17,33 +19,57 @@ vector<vector<int> >greedyCluster(vector<SketchInfo> sketches, string sketchFunc
 	int * clustLabels = new int[numGenomes];
 	memset(clustLabels, 0, numGenomes*sizeof(int));
 	vector<vector<int> > cluster;
+	vector<int> representiveArr;
+	map<int, vector<int> > semiClust;
+	representiveArr.push_back(0);
+	semiClust.insert({0, vector<int>()});
 
-	for(int i = 0; i < numGenomes; i++){
-		if(clustLabels[i] == 0){
-			vector<int> curClust;
-			curClust.push_back(i);
-			clustLabels[i] = 1;
-			for(int j = i+1; j < numGenomes; j++){
-				if(clustLabels[j] == 0){
-					double dist;
-					if(sketchFunc == "MinHash"){
-						if(sketches[i].isContainment)
-							dist = 1.0 - sketches[i].minHash->containJaccard(sketches[j].minHash);
-						else
-							dist = sketches[i].minHash->distance(sketches[j].minHash);
-					}
-					else{
-						cerr << "can only support MinHash with greedy incremental clust" << endl;
-						exit(1);
-					}
-					if(dist < threshold){
-						curClust.push_back(j);
-						clustLabels[j] = 1;
-					}
-				}
+	for(int j = 1; j < numGenomes; j++){
+		map<double, int> distMapCenter;
+		#pragma omp parallel for num_threads(threads)
+		for(int i = 0; i < representiveArr.size(); i++){
+			int repId = representiveArr[i];
+			double dist;
+			if(sketchFunc == "MinHash"){
+				if(sketches[repId].isContainment)
+					dist = 1.0 - sketches[repId].minHash->containJaccard(sketches[j].minHash);
+				else
+					dist = sketches[repId].minHash->distance(sketches[j].minHash);
 			}
-			cluster.push_back(curClust);
-		}//end if
+			else{
+				cerr << "can only support MinHash with greedy incremental clust" << endl;
+				exit(1);
+			}
+			if(dist < threshold){
+				clustLabels[j] = 1;
+				#pragma omp critical
+				{
+					distMapCenter.insert({dist, repId});
+				}
+				//break;
+			}
+		}//end for i
+		if(clustLabels[j] == 0){//this genome is a representative genome
+			representiveArr.push_back(j);
+			semiClust.insert({j, vector<int>()});
+		}
+		else{//this genome is a redundant genome, get the nearest representive genome as its center
+			auto it = distMapCenter.begin();
+			int repId = it->second;
+			semiClust[repId].push_back(j);
+		}
+		map<double, int>().swap(distMapCenter);
+		
+	}//end for j
+	//cerr << "the representiveArr size is : " << representiveArr.size() << endl;
+
+	for(auto x : semiClust){
+		int center = x.first;
+		vector<int> redundantArr = x.second;
+		vector<int> curClust;
+		curClust.push_back(center);
+		curClust.insert(curClust.end(), redundantArr.begin(), redundantArr.end());
+		cluster.push_back(curClust);
 	}
 
 	return cluster;
