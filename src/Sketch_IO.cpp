@@ -5,6 +5,9 @@
 #include "greedy.h"
 #include "MST_IO.h"
 
+bool cmpIndex(SketchInfo s1, SketchInfo s2){
+	return s1.id < s2.id;
+}
 
 /* @brief											Saving the sketches including hash values, genome informations into output files.
  * @details										To save the genome informations into outputGenomeInfo. To save the sketches informations 
@@ -134,14 +137,24 @@ void Sketch2Clust(string inputFile0, string inputFile1, string outputFile, doubl
 	string sketchFunc = line;
 
 	vector<SketchInfo> sketches;
-	Sketch::MinHash * mh1;
-	int sketchId = 0;
+	//int sketchId = 0;
+
+	vector<string> infoArr;
+	vector<string> valueArr;
 
 	while(getline(fs0, line)){
-		SketchInfo tmpSketchInfo;
+		infoArr.push_back(line);
+		getline(fs1, line);
+		valueArr.push_back(line);
+	}
 
+	#pragma omp parallel for num_threads(threads)
+	for(int i = 0; i < infoArr.size(); i++){
+		SketchInfo tmpSketchInfo;
+		Sketch::MinHash * mh1;
+		string infoLine = infoArr[i];
 		stringstream ss;
-		ss << line;
+		ss << infoLine;
 		string fileName, seqName, seqComment, tmpComment;
 		int seqStrand, seqLength(0);
 		uint64_t totalLength;
@@ -169,9 +182,9 @@ void Sketch2Clust(string inputFile0, string inputFile1, string outputFile, doubl
 			tmpSketchInfo.seqInfo = curSeq;
 		}
 
-		getline(fs1, line);
+		string valueLine = valueArr[i];
 		stringstream ss1;
-		ss1 << line;
+		ss1 << valueLine;
 		vector<uint64_t> hashArr;
 		uint64_t hashValue;
 		while(ss1 >> hashValue){
@@ -189,9 +202,16 @@ void Sketch2Clust(string inputFile0, string inputFile1, string outputFile, doubl
 			mh1->loadMinHashes(hashArr);
 			tmpSketchInfo.minHash = mh1;
 		}
-		tmpSketchInfo.id = sketchId++;
-		sketches.push_back(tmpSketchInfo);
-	}//end while
+		tmpSketchInfo.id = i;
+		#pragma omp critical
+		{
+			sketches.push_back(tmpSketchInfo);
+		}
+	}
+	vector<string>().swap(infoArr);
+	vector<string>().swap(valueArr);
+	std::sort(sketches.begin(), sketches.end(), cmpIndex);
+
 #ifdef Timer
 	double t1 = get_sec();
 	cerr << "========time of load genome Infos and sketch Infos is: " << t1 - t0 << endl;

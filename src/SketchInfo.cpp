@@ -27,10 +27,14 @@ bool cmpSketch(SketchInfo s1, SketchInfo s2){
 	return s1.id < s2.id;
 }
 bool cmpGenomeSize(SketchInfo s1, SketchInfo s2){
-	return s1.totalSeqLength > s2.totalSeqLength;
+	if(s1.totalSeqLength > s2.totalSeqLength)	return true;
+	else if(s1.totalSeqLength == s2.totalSeqLength)	return s1.id < s2.id;
+	else	return false;
 }
 bool cmpSeqSize(SketchInfo s1, SketchInfo s2){
-	return s1.seqInfo.length > s2.seqInfo.length;
+	if(s1.seqInfo.length > s2.seqInfo.length)	return true;
+	else if(s1.seqInfo.length == s2.seqInfo.length)	return s1.id < s2.id;
+	else return false;
 }
 
 
