@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
+#include <unordered_set>
 
 using namespace std;
 struct LabNum{
@@ -119,6 +120,7 @@ void calF1(string application, string argument, string groundTruth, string input
 
 	unordered_map<string, int> groundTruthMapFile;
 	unordered_map<string, int> groundTruthMapSeq;
+	unordered_set<int> groundTruthClustNumber;
 
 	while(getline(fs0, line))
 	{
@@ -128,8 +130,10 @@ void calF1(string application, string argument, string groundTruth, string input
 		ss >> assembly_accession >> genomeName >> species_taxid;
 		groundTruthMapFile.insert({assembly_accession, stoi(species_taxid)});
 		groundTruthMapSeq.insert({genomeName, stoi(species_taxid)});
+		groundTruthClustNumber.insert(stoi(species_taxid));
 
 	}
+	cerr << "the groundTruthClustNumber size is: " << groundTruthClustNumber.size() << endl;
 
 	
 	fstream fs(inputFile);
@@ -313,8 +317,16 @@ void calF1(string application, string argument, string groundTruth, string input
 						{
 							ss >> curId >> genomeId >> genomeSize >> fileName >> genomeName >> type0 >> type1 >> type2;
 							int startIndex = fileName.find_last_of('/');
+							//cerr << fileName << endl;
+							//cerr << startIndex << endl;
 							int endIndex = fileName.find('_', startIndex + 5);
+							if(fileName.find('_', startIndex+5) == -1)
+								endIndex = fileName.find('.', startIndex+5);
+							//int endIndex = std::max(fileName.find('_', startIndex + 5), fileName.find('.', startIndex + 5));
+							//cerr << endIndex << endl;
 							string key = fileName.substr(startIndex+1, endIndex -startIndex -1);
+							//cerr << key << endl;
+							//exit(0);
 							if(groundTruthMapFile.find(key) == groundTruthMapFile.end())
 							{
 								//cerr << "the key: " << key << " is not in the groundTruth!" << endl;

@@ -1,0 +1,297 @@
+./S9_Viral_FA/Amalgaviridae.fa
+	refseq|NC_035189|3387bp|Antonospora
+	locustae virus 1, complete genome Amalgaviridae
+	
+	refseq|NC_014593|3431bp|Blueberry
+	latent virus, complete genome Amalgaviridae
+	
+	refseq|NC_014481|3427bp|Rhododendron
+	virus A, complete genome Amalgaviridae
+	
+	refseq|NC_011591|3437bp|Southern
+	tomato virus, complete genome Amalgaviridae
+	
+	refseq|NC_035070|3420bp|Spinach
+	amalgavirus 1, complete genome Amalgaviridae
+	
+	refseq|NC_034614|3383bp|Zostera
+	marina amalgavirus 1, complete genome Amalgaviridae
+	
+	refseq|NC_034615|3316bp|Zostera
+	marina amalgavirus 2, complete genome Amalgaviridae
+	
+	refseq|NC_003874|3157bp|Zygosaccharomyces
+	bailii virus Z, complete genome Amalgaviridae
+	
+./S9_Viral_FA/Badnavirus.fa
+	refseq|NC_015506|7408bp|Banana
+	streak CA virus, complete genome Badnavirus
+	
+	refseq|NC_007002|7263bp|Banana
+	streak GF virus, complete genome Badnavirus
+	
+	refseq|NC_015507|7769bp|Banana
+	streak IM virus, complete genome Badnavirus
+	
+	refseq|NC_006955|7650bp|Banana
+	streak MY virus, complete genome Badnavirus
+	
+	refseq|NC_003381|7389bp|Banana
+	streak OL virus, complete genome Badnavirus
+	
+	refseq|NC_015502|7519bp|Banana
+	streak UA virus, complete genome Badnavirus
+	
+	refseq|NC_015503|7458bp|Banana
+	streak UI virus, complete genome Badnavirus
+	
+	refseq|NC_015504|7401bp|Banana
+	streak UL virus, complete genome Badnavirus
+	
+	refseq|NC_015505|7532bp|Banana
+	streak UM virus, complete genome Badnavirus
+	
+	refseq|NC_008018|7722bp|Banana
+	streak virus Acuminata Yunnan, complete genome Badnavirus
+	
+	refseq|NC_007003|7801bp|Banana
+	streak VN virus, complete genome Badnavirus
+	
+	refseq|NC_029303|7663bp|Blackberry
+	Virus F, complete genome Badnavirus
+	
+	refseq|NC_011592|8759bp|Bougainvillea
+	chlorotic vein banding virus, complete genome Badnavirus
+	
+	refseq|NC_033738|7533bp|Cacao
+	mild mosaic virus, complete genome Badnavirus
+	
+	refseq|NC_001574|7161bp|Cacao
+	swollen shoot virus, complete genome Badnavirus
+	
+	refseq|NC_033739|7454bp|Cacao
+	yellow vein-banding virus, complete genome Badnavirus
+	
+	refseq|NC_030462|6966bp|Canna
+	yellow mottle virus, complete genome Badnavirus
+	
+	refseq|NC_003382|7559bp|Citrus
+	yellow mosaic virus, complete genome Badnavirus
+	
+	refseq|NC_001343|7489bp|Commelina
+	yellow mottle virus, complete genome Badnavirus
+	
+	refseq|NC_011097|9205bp|Cycad
+	leaf necrosis virus, complete genome Badnavirus
+	
+	refseq|NC_009010|7261bp|Dioscorea
+	bacilliform virus, complete genome Badnavirus
+	
+	refseq|NC_008034|7531bp|Dracaena
+	mottle virus, complete genome Badnavirus
+	
+	refseq|NC_017830|7140bp|Fig
+	badnavirus 1, complete genome Badnavirus
+	
+	refseq|NC_018105|7659bp|Gooseberry
+	vein banding associated virus, complete genome Badnavirus
+	
+	refseq|NC_027131|6988bp|Grapevine
+	roditis leaf discoloration-associated virus, complete genome Badnavirus
+	
+	refseq|NC_015784|7753bp|Grapevine
+	vein-clearing virus, complete genome Badnavirus
+	
+	refseq|NC_023485|7435bp|Hibiscus
+	bacilliform virus GD1, complete genome Badnavirus
+	
+	refseq|NC_004540|7591bp|Kalanchoe
+	top-spotting virus, complete genome Badnavirus
+	
+	refseq|NC_026020|6945bp|Mulberry
+	badnavirus 1, complete genome Badnavirus
+	
+	refseq|NC_024301|7424bp|Pagoda
+	yellow mosaic associated virus, complete genome Badnavirus
+	
+	refseq|NC_013262|7586bp|Pelargonium
+	vein banding virus, complete genome Badnavirus
+	
+	refseq|NC_022365|7562bp|Piper
+	yellow mottle virus, complete genome Badnavirus
+	
+	refseq|NC_026238|7836bp|Rubus
+	yellow net virus, complete genome Badnavirus
+	
+	refseq|NC_013455|7317bp|Sugarcane
+	bacilliform Guadeloupe D virus, complete genome Badnavirus
+	
+	refseq|NC_003031|7687bp|Sugarcane
+	bacilliform IM virus, complete genome Badnavirus
+	
+	refseq|NC_008017|7568bp|Sugarcane
+	bacilliform MO virus, complete genome Badnavirus
+	
+	refseq|NC_015655|8082bp|Sweet
+	potato badnavirus A, complete genome Badnavirus
+	
+	refseq|NC_012728|7961bp|Sweet
+	potato badnavirus B, complete genome Badnavirus
+	
+	refseq|NC_026819|7641bp|Taro
+	bacilliform CH virus, complete genome Badnavirus
+	
+	refseq|NC_004450|7458bp|Taro
+	bacilliform virus, complete genome Badnavirus
+	
+	refseq|NC_034252|7326bp|Wisteria
+	badnavirus 1, complete genome Badnavirus
+	
+	refseq|NC_026472|7661bp|Yacon
+	necrotic mottle virus, complete genome Badnavirus
+	
+./S9_Viral_FA/Birnaviridae_segmentA.fa
+	refseq|NC_005982|3429bp|Blotched
+	snakehead virus, segment A Birnaviridae
+	
+	refseq|NC_004177|3360bp|Drosophila
+	x virus, segment A Birnaviridae
+	
+	refseq|NC_016518|3427bp|Espirito
+	Santo virus, segment A Birnaviridae
+	
+	refseq|NC_004178|3183bp|Infectious
+	bursal disease virus, segment A Birnaviridae
+	
+	refseq|NC_001915|3097bp|Infectious
+	pancreatic necrosis virus, segment A Birnaviridae
+	
+	refseq|NC_028252|2942bp|Tasmanian
+	aquabirnavirus, segment A Birnaviridae
+	
+	refseq|NC_030242|2972bp|Victorian
+	trout aquabirnavirus, segment A Birnaviridae
+	
+	refseq|NC_004168|2976bp|Yellowtail
+	ascites virus, segment A Birnaviridae
+	
+./S9_Viral_FA/Birnaviridae_segmentB.fa
+	refseq|NC_005983|2750bp|Blotched
+	snakehead virus, segment B Birnaviridae
+	
+	refseq|NC_004169|3243bp|Drosophila
+	x virus, segment B Birnaviridae
+	
+	refseq|NC_016517|3250bp|Espirito
+	Santo virus, segment B Birnaviridae
+	
+	refseq|NC_004179|2715bp|Infectious
+	bursal disease virus, segment B Birnaviridae
+	
+	refseq|NC_001916|2784bp|Infectious
+	pancreatic necrosis virus, segment B Birnaviridae
+	
+	refseq|NC_028253|2605bp|Tasmanian
+	aquabirnavirus, segment B Birnaviridae
+	
+	refseq|NC_030244|2611bp|Victorian
+	trout aquabirnavirus, segment B Birnaviridae
+	
+	refseq|NC_004176|2735bp|Yellowtail
+	ascites virus, segment B Birnaviridae
+	
+./S9_Viral_FA/Caulimovirus.fa
+	refseq|NC_027924|8105bp|Atractylodes
+	mild mottle virus, complete genome Caulimovirus
+	
+	refseq|NC_003498|7932bp|Carnation
+	etched ring virus, complete genome Caulimovirus
+	
+	refseq|NC_001497|8024bp|Cauliflower
+	mosaic virus, complete genome Caulimovirus
+	
+	refseq|NC_018616|7916bp|Dahlia
+	mosaic virus, complete genome Caulimovirus
+	
+	refseq|NC_010738|8463bp|Eupatorium
+	vein clearing virus, complete genome Caulimovirus
+	
+	refseq|NC_003554|7743bp|Figwort
+	mosaic virus, complete genome Caulimovirus
+	
+	refseq|NC_018858|7954bp|Horseradish
+	latent virus, complete genome Caulimovirus
+	
+	refseq|NC_010737|7713bp|Lamium
+	leaf distortion virus, complete genome Caulimovirus
+	
+	refseq|NC_004036|7857bp|Mirabilis
+	mosaic virus, complete genome Caulimovirus
+	
+	refseq|NC_018505|7757bp|Soybean
+	Putnam virus, complete genome Caulimovirus
+	
+	refseq|NC_001725|7876bp|Strawberry
+	vein banding virus, complete genome Caulimovirus
+	
+./S9_Viral_FA/Reptarenavirus_segmentL.fa
+	refseq|NC_018484|6812bp|CAS
+	virus, segment L Reptarenavirus
+	
+	refseq|NC_018482|6922bp|Golden
+	Gate virus, segment L Reptarenavirus
+	
+	refseq|NC_023762|6932bp|ROUT
+	virus, segment L Reptarenavirus
+	
+	refseq|NC_023765|6935bp|University
+	of Helsinki virus, segment L Reptarenavirus
+	
+./S9_Viral_FA/Reptarenavirus_segmentS.fa
+	refseq|NC_018481|3368bp|CAS
+	virus, segment S Reptarenavirus
+	
+	refseq|NC_018483|3482bp|Golden
+	Gate virus, segment S Reptarenavirus
+	
+	refseq|NC_023761|3351bp|ROUT
+	virus, segment S Reptarenavirus
+	
+	refseq|NC_023766|3399bp|University
+	of Helsinki virus, segment S Reptarenavirus
+	
+./S9_Viral_FA/Soymovirus.fa
+	refseq|NC_003138|8303bp|Blueberry
+	red ringspot virus, complete genome Soymovirus
+	
+	refseq|NC_004324|8253bp|Cestrum
+	yellow leaf curling virus, complete genome Soymovirus
+	
+	refseq|NC_001634|8174bp|Peanut
+	chlorotic streak virus, complete genome Soymovirus
+	
+	refseq|NC_001739|8178bp|Soybean
+	chlorotic mottle virus, complete genome Soymovirus
+	
+	refseq|NC_030205|7535bp|Water
+	chestnut soymovirus 1, complete genome Soymovirus
+	
+./S9_Viral_FA/Spumavirus.fa
+	refseq|NC_010820|13111bp|African
+	green monkey simian foamy virus, complete genome Spumavirus
+	
+	refseq|NC_001831|12002bp|Bovine
+	foamy virus, complete genome Spumavirus
+	
+	refseq|NC_002201|12035bp|Equine
+	foamy virus, complete genome Spumavirus
+	
+	refseq|NC_001871|10479bp|Feline
+	foamy virus, complete genome Spumavirus
+	
+	refseq|NC_010819|12972bp|Macaque
+	simian foamy virus, complete genome Spumavirus
+	
+	refseq|NC_001364|13246bp|Simian
+	foamy virus, complete genome Spumavirus
+	

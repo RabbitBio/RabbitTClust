@@ -12,6 +12,8 @@ benchmark/evaluation/*.nmi
 benchmark/evaluation/*.nmi.humanReadable
 build/
 clust
+clust-mst
+clust-greedy
 
 2022_*
 *.out
