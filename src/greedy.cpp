@@ -59,6 +59,7 @@ vector<vector<int> >greedyCluster(vector<SketchInfo> sketches, string sketchFunc
 			semiClust[repId].push_back(j);
 		}
 		map<double, int>().swap(distMapCenter);
+		if(j % 10000 == 0) cerr << "finished cluster " << j << endl;
 		
 	}//end for j
 	//cerr << "the representiveArr size is : " << representiveArr.size() << endl;

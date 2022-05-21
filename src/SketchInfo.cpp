@@ -517,6 +517,7 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 			tmpSketchInfo.fileSeqs = curFileSeqs;
 			//if(totalLength >= 10000)//filter the poor quality genome assemblies whose length less than 10k bp(fastANI paper)
 			sketches.push_back(tmpSketchInfo);
+			if(i % 10000 == 0)	cerr << "finished sketching: " << i << " genomes" << endl;
 		}
 
 		gzclose(fp1);

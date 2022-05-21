@@ -73,6 +73,7 @@ vector<EdgeInfo> generateMST(vector<SketchInfo>& sketches, string sketchFunc, in
 				mstArr[thread_id].push_back(tmpE);
 			}
 		}
+		if(thread_id == 0 && id % 10000 < 50)	cerr << "finish MST: " << id << endl;
 
 		sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
 		vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());
