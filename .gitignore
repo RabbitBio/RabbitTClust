@@ -10,6 +10,7 @@ benchmark/evaluation/*.f1
 benchmark/evaluation/*.f1.humanReadable
 benchmark/evaluation/*.nmi
 benchmark/evaluation/*.nmi.humanReadable
+benchmark/evaluation/*.purity
 build/
 clust
 clust-mst
