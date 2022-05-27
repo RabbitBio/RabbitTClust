@@ -7,7 +7,7 @@ inline bool cmpSketchLength(ClusterInfo c1, ClusterInfo c2){
 	return c1.length > c2.length;
 }
 
-void MST2Cluster(string inputFile, string inputFile1, string outputFile, double threshold)
+bool loadMSTs(string inputFile, string inputFile1, vector<SketchInfo>& sketches, vector<EdgeInfo>& mst)
 {
 	cerr << "input files is MST information and genome informations" << endl;
 
@@ -36,12 +36,10 @@ void MST2Cluster(string inputFile, string inputFile1, string outputFile, double 
 
 	//sketchByfile is 1 else is 0
 	bool sketchByFile = stoi(line);
-	cerr << "the sketchByFile is: " << sketchByFile << endl;
-
-	vector<SketchInfo> sketches;
-
+	//cerr << "the sketchByFile is: " << sketchByFile << endl;
 	if(sketchByFile)
 	{
+		cerr << "The original input is a genome fileList(sketchByFile)." << endl;
 		while(1)
 		{
 			if(!getline(fs0, line)) break;
@@ -65,6 +63,7 @@ void MST2Cluster(string inputFile, string inputFile1, string outputFile, double 
 	}
 	else//sketch sequences
 	{
+		cerr << "The original input is a single genome(sketchBySequence)." << endl;
 		while(1)
 		{
 			if(!getline(fs0, line)) break;
@@ -82,8 +81,6 @@ void MST2Cluster(string inputFile, string inputFile1, string outputFile, double 
 			sketches.push_back(curSketch);
 		}
 	}
-
-	vector<EdgeInfo> mst;
 	//read the MSTInfo and GenomeInfo
 	getline(fs1, line);//sketchByFile or not
 	cerr << line << endl;
@@ -93,7 +90,6 @@ void MST2Cluster(string inputFile, string inputFile1, string outputFile, double 
 	cerr << line << endl;
 	getline(fs1, line);//kmerSize
 	cerr << line << endl;
-
 	while(getline(fs1, line)){
 		stringstream ss;
 		ss << line;
@@ -104,14 +100,7 @@ void MST2Cluster(string inputFile, string inputFile1, string outputFile, double 
 		EdgeInfo tmpEdge{preNode, sufNode, distance};
 		mst.push_back(tmpEdge);
 	}//end while
-
-
-	vector<EdgeInfo> forest = generateForest(mst, threshold);
-
-	vector<vector<int> > cluster = generateCluster(forest, mst.size()+1);
-
-	printResult(cluster, sketches, sketchByFile, outputFile);
-
+	return sketchByFile;
 }
 
 void printResult(vector< vector<int> > cluster, vector<SketchInfo> sketches, bool sketchByFile, string outputFile)

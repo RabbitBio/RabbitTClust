@@ -12,7 +12,7 @@ struct ClusterInfo{
 	uint64_t length;
 };
 
-void MST2Cluster(std::string inputFile, std::string inputFile1, std::string outputFile, double threshold);
+bool loadMSTs(string inputFile, string inputFile1, vector<SketchInfo>& sketches, vector<EdgeInfo>& mst);
 
 void printResult(std::vector< std::vector<int> > clusterOrigin, std::vector<SketchInfo> sketches, bool sketchByFile, string outputFile);
 

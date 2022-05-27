@@ -1,4 +1,3 @@
-#ifdef GREEDY_CLUST
 #include "Sketch_IO.h"
 #include <fstream>
 #include <sstream>
@@ -91,22 +90,19 @@ void saveSketches(vector<SketchInfo> sketches, string inputFile, string sketchFu
 
 }
 
-
 /* @brief										Get the sketches informations and hash values from the input files, corresponding to the saveSketches function.
- * @details									Thsi function is in corresponding to the function saveSketches;
+ * @details									This function is in corresponding to the function saveSketches;
  * @param[in] inputFile0		Genome information file including fileName, seqName, seqComment, seqStrand and totalSeqLength. 
  * 													The first line in inputFile0 is to determine sketchByFile or sketchBySequences(input as a fileList or a single genome file).
  * @param[in] inputFile1 		Sketch information file including isContainment, containCompress(sketchSize), kmerSize, sketchFunc and hashValues. 
  * 													The first four lines determine the isContainment, containCompress(sketchSize), kmerSize and sketch function. 
  * 													The remaining lines are sorted hash values one genome per line.
- * @param[in] threshold			Distance threshold for clustering.
  * @param[in] threads				Thread number of clustering.
+ * @param[out] sketches			Result SketchInfo arrays.
+ * return sketchByFile			The origin input genome is a file list or a single genome file.
  */
-void Sketch2Clust(string inputFile0, string inputFile1, string outputFile, double threshold, int threads)
+bool loadSketches(string inputFile0, string inputFile1, int threads, vector<SketchInfo>& sketches)
 {
-#ifdef Timer
-	double t0 = get_sec();
-#endif
 	fstream fs0(inputFile0);//Genome Info
 	fstream fs1(inputFile1);//Sketch Info
 	if(!fs0){
@@ -136,7 +132,7 @@ void Sketch2Clust(string inputFile0, string inputFile1, string outputFile, doubl
 	getline(fs1, line);
 	string sketchFunc = line;
 
-	vector<SketchInfo> sketches;
+	//vector<SketchInfo> sketches;
 	//int sketchId = 0;
 
 	vector<string> infoArr;
@@ -147,6 +143,8 @@ void Sketch2Clust(string inputFile0, string inputFile1, string outputFile, doubl
 		getline(fs1, line);
 		valueArr.push_back(line);
 	}
+	fs0.close();
+	fs1.close();
 
 	#pragma omp parallel for num_threads(threads)
 	for(int i = 0; i < infoArr.size(); i++){
@@ -211,21 +209,8 @@ void Sketch2Clust(string inputFile0, string inputFile1, string outputFile, doubl
 	vector<string>().swap(infoArr);
 	vector<string>().swap(valueArr);
 	std::sort(sketches.begin(), sketches.end(), cmpIndex);
-
-#ifdef Timer
-	double t1 = get_sec();
-	cerr << "========time of load genome Infos and sketch Infos is: " << t1 - t0 << endl;
-#endif
-
-	vector<vector<int> > cluster = greedyCluster(sketches, sketchFunc, threshold, threads);
-	printResult(cluster, sketches, sketchByFile, outputFile);
-#ifdef Timer
-	double t2 = get_sec();
-	cerr << "========time of greedy incremental cluster is: " << t2 - t1 << endl;
-#endif
-	
+	return sketchByFile;
 }
 
 
 
-#endif

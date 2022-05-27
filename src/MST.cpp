@@ -39,6 +39,11 @@ vector<EdgeInfo> generateMST(vector<SketchInfo>& sketches, string sketchFunc, in
 	int subSize = 8;
 	int id = 0;
 	int tailNum = sketches.size() % subSize;
+	int N = sketches.size();
+	uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
+	uint64_t percentNum = totalCompNum / 100;
+	cerr << "the percentNum is: " << percentNum << endl;
+	uint64_t percentId = 0;
 	#pragma omp parallel for num_threads(threads) schedule (dynamic)
 	for(id = 0; id < sketches.size() - tailNum; id+=subSize){
 		int thread_id = omp_get_thread_num();
@@ -73,7 +78,14 @@ vector<EdgeInfo> generateMST(vector<SketchInfo>& sketches, string sketchFunc, in
 				mstArr[thread_id].push_back(tmpE);
 			}
 		}
-		if(thread_id == 0 && id % 10000 < 50)	cerr << "finish MST: " << id << endl;
+		//if(thread_id == 0 && id % 10000 < 50)	cerr << "finish MST: " << id << endl;
+		if(thread_id == 0){
+			uint64_t computedNum = (uint64_t)(N - id) * (uint64_t)id + (uint64_t)id * (uint64_t)id / 2;
+			if(computedNum >= percentId * percentNum){
+				fprintf(stderr, "finish MST generation %d %\n", percentId);
+				percentId++;
+			}
+		}
 
 		sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
 		vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());

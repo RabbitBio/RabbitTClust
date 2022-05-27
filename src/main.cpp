@@ -28,9 +28,9 @@
 #include "parameter.h"
 #include "MST_IO.h"
 #include <math.h>
+#include "Sketch_IO.h"
 
 #ifdef GREEDY_CLUST
-#include "Sketch_IO.h"
 #include "greedy.h"
 #endif
 
@@ -52,6 +52,8 @@ int main(int argc, char * argv[]){
 	int kmerSize = 21;
 	int sketchSize = 1000;
 	int containCompress = 10000;
+	bool mstLoadSketch = false;
+	string mstSketchFile = "sketch.info";
 	while(argIndex < argc){
 		switch(argv[argIndex][1]){
 			case 't':
@@ -83,6 +85,10 @@ int main(int argc, char * argv[]){
 				threshold = stod(argv[++argIndex]);
 				fprintf(stderr, "set the threshold: %lf \n", threshold);
 				break;
+			case 'E':
+				mstLoadSketch = true;
+				fprintf(stderr, "clust-mst load sketches\n");
+				break;
 			case 'f':
 				useFile = true;
 				#ifdef GREEDY_CLUST
@@ -101,12 +107,12 @@ int main(int argc, char * argv[]){
 				break;
 			case 'i':
 			{
-				if(!useFile)
+				if(!useFile && !mstLoadSketch)
 				{
 					inputFile = argv[++argIndex];
 					fprintf(stderr, "the inputFile is: %s \n", inputFile.c_str());
 				}
-				else
+				else if(useFile)
 				{
 					inputFile = argv[++argIndex];
 					if(argIndex == argc)
@@ -121,6 +127,18 @@ int main(int argc, char * argv[]){
 					#else
 					fprintf(stderr, "the genomeInfo and MSTInfo are: %s and %s\n", inputFile.c_str(), inputFile1.c_str());
 					#endif
+				}
+				else if(mstLoadSketch)
+				{
+					inputFile = argv[++argIndex];
+					if(argIndex == argc)
+					{
+						fprintf(stderr, "error input File with -f options, exit\n");
+						printUsage();
+						return 1;
+					}
+					inputFile1 = argv[++argIndex];
+					fprintf(stderr, "the genomeInfo and SketchInfo are: %s and %s\n", inputFile.c_str(), inputFile1.c_str());
 				}
 				break;
 			}
@@ -140,22 +158,43 @@ int main(int argc, char * argv[]){
 	cerr << "use the MST cluster" << endl;
 #endif
 
+	vector<SketchInfo> sketches;
+	vector<vector<int> > cluster;
 
-	//input as GenomeInfo and MSTInfo or sketch informations
+	/* For clust-greedy, the input files are GenomeInfo and SketchInfo.
+	 * For clust-mst, the input files are GenomeInfo and MSTInfo.
+	 * Finished the clustering.
+	 */
 	if(useFile){
 #ifdef GREEDY_CLUST
-		Sketch2Clust(inputFile, inputFile1, outputFile, threshold, threads);
+	#ifdef Timer
+	double time0 = get_sec();
+	#endif
+		sketchByFile = loadSketches(inputFile, inputFile1, threads, sketches);
+	#ifdef Timer
+	double time1 = get_sec();
+	cerr << "========time of load genome Infos and sketch Infos is: " << time1 - time0 << endl;
+	#endif
+		cluster = greedyCluster(sketches, sketchFunc, threshold, threads);
+	#ifdef Timer
+	double time2 = get_sec();
+	cerr << "========time of greedy incremental cluster is: " << time2 - time1 << endl;
+	#endif
 #else
-		MST2Cluster(inputFile, inputFile1, outputFile, threshold);
+		vector<EdgeInfo> mst;
+		sketchByFile = loadMSTs(inputFile, inputFile1, sketches, mst);
+		vector<EdgeInfo> forest = generateForest(mst, threshold);
+		cluster = generateCluster(forest, mst.size()+1);
 #endif
+		printResult(cluster, sketches, sketchByFile, outputFile);
 		return 0;//end main 
 	}
 
-	if(sketchByFile) cout << "sketch by file!" << endl;
-	else cout << "sketch by sequence!" << endl;
+	if(sketchByFile) cerr << "sketch by file!" << endl;
+	else cerr << "sketch by sequence!" << endl;
 
 	
-#ifdef DEBUG
+	#ifdef DEBUG
 	cerr << "the kmerSize is: " << kmerSize << endl;
 	cerr << "the thread number is: " << threads << endl;
 	cerr << "the threshold is: " << threshold << endl;
@@ -163,83 +202,75 @@ int main(int argc, char * argv[]){
 		cerr << "the sketchSize is in proportion with 1/" << containCompress << endl;
 	else
 		cerr << "the sketchSize is: " << sketchSize << endl;
-#endif
+	#endif
 	
-	//section 2: read the files and create sketches.
-	vector<SketchInfo> sketches;
 
-#ifdef Timer
+	#ifdef Timer
 	double t0 = get_sec();
-#endif
+	#endif
+	//section 2: Sketch Generation, computing from genome file or loading sketches from saved file.
 
-	if(!sketchByFile){
-		if(!sketchSequences(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
-			printUsage();
-			return 1;
-		}
-	
-	}//end sketch by sequence
+	if(mstLoadSketch){
+		sketchByFile = loadSketches(inputFile, inputFile1, threads, sketches);
+	}
 	else{
-		if(!sketchFiles(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
-			printUsage();
-			return 1;
-		}
-	}//end sketch by file
-
+		if(!sketchByFile){
+			if(!sketchSequences(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
+				printUsage();
+				return 1;
+			}
+		
+		}//end sketch by sequence
+		else{
+			if(!sketchFiles(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
+				printUsage();
+				return 1;
+			}
+		}//end sketch by file
+	}
 	cerr << "the size of sketches(number of genomes or sequences) is: " << sketches.size() << endl;
-#ifdef Timer
+
+	#ifdef Timer
 	double t1 = get_sec();
-	cerr << "========time of sketch is: " << t1 - t0 << "========" << endl;
-#endif
-
-
-#ifdef GREEDY_CLUST
-	saveSketches(sketches, inputFile, sketchFunc, isContainment, containCompress, sketchByFile, sketchSize, kmerSize);
-#ifdef Timer
+	if(mstLoadSketch)
+		cerr << "========time of load sketches for clust-mst is: " << t1 - t0 << "========" << endl;
+	else
+		cerr << "========time of computing sketch is: " << t1 - t0 << "========" << endl;
+	#endif
+	if(!mstLoadSketch){
+		saveSketches(sketches, inputFile, sketchFunc, isContainment, containCompress, sketchByFile, sketchSize, kmerSize);
+	}
+	#ifdef Timer
 	double t2 = get_sec();
-	cerr << "========time of saveSketches is: " << t2 - t1 << "========" << endl;
-#endif
-	vector<vector<int> >cluster = greedyCluster(sketches, sketchFunc, threshold, threads);
-#ifdef Timer
+	if(!mstLoadSketch)
+		cerr << "========time of saveSketches is: " << t2 - t1 << "========" << endl;
+	#endif
+	//section 3: generating the clusters.
+#ifdef GREEDY_CLUST
+	cluster = greedyCluster(sketches, sketchFunc, threshold, threads);
+	#ifdef Timer
 	double t3 = get_sec();
 	cerr << "========time of greedyCluster is: " << t3 - t2 << "========" << endl;
-#endif
-	printResult(cluster, sketches, sketchByFile, outputFile);
-
+	#endif
 #else
-	//section 3: compute the distance matrix and generate MST
 	vector<EdgeInfo> mst = generateMST(sketches, sketchFunc, threads);
-#ifdef Timer
-	double t2 = get_sec();
-	cerr << "========time of generateMST is: " << t2 - t1 << "========" << endl;
-#endif
-
-	//save the matching of graph id and genomeInfo 
-	saveMST(inputFile, sketchFunc, isContainment, containCompress, sketches, mst, sketchByFile, sketchSize, kmerSize);
-
-#ifdef Timer
+	#ifdef Timer
 	double t3 = get_sec();
-	cerr << "========time of saveMST is: " << t3 - t2 << "========" << endl;
-#endif
-
-	//section 4: generate the clustering 
-	
-	vector<EdgeInfo> forest = generateForest(mst, threshold);
-
-	vector<vector<int> >cluster = generateCluster(forest, sketches.size());
-
-#ifdef Timer
+	cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
+	#endif
+	saveMST(inputFile, sketchFunc, isContainment, containCompress, sketches, mst, sketchByFile, sketchSize, kmerSize);
+	#ifdef Timer
 	double t4 = get_sec();
-	cerr << "========time of generator forest and cluster is: " << t4 - t3 << "========" << endl;
-#endif
-
-
-	printResult(cluster, sketches, sketchByFile, outputFile);
-#ifdef Timer
+	cerr << "========time of saveMST is: " << t4 - t3 << "========" << endl;
+	#endif
+	vector<EdgeInfo> forest = generateForest(mst, threshold);
+	cluster = generateCluster(forest, sketches.size());
+	#ifdef Timer
 	double t5 = get_sec();
-	cerr << "========time of save result is: " << t5 - t4 << "========" << endl;
-#endif
+	cerr << "========time of generator forest and cluster is: " << t5 - t4 << "========" << endl;
+	#endif
 #endif//endif GREEDY_CLUST
+	printResult(cluster, sketches, sketchByFile, outputFile);
 
 	return 0;
 }//end main

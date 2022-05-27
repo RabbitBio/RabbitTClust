@@ -1,4 +1,3 @@
-#ifdef GREEDY_CLUST
 #ifndef H_SKETCH_IO
 #define H_SKETCH_IO
 #include "SketchInfo.h"
@@ -6,6 +5,5 @@
 
 void saveSketches(vector<SketchInfo> sketches, string inputFile, string sketchFunc, bool isContainment, int containCompress, bool sketchByFile, int sketchSize, int kmerSize);
 
-void Sketch2Clust(string inputFile0, string inputFile1, string outputFile, double threshold, int threads);
-#endif
+bool loadSketches(string inputFile0, string inputFile1, int threads, vector<SketchInfo>& sketches);
 #endif
