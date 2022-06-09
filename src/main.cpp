@@ -34,6 +34,9 @@
 #include "greedy.h"
 #endif
 
+#include <fstream>
+#include <sstream>
+
 using namespace std;
 
 int main(int argc, char * argv[]){
@@ -183,8 +186,49 @@ int main(int argc, char * argv[]){
 #else
 		vector<EdgeInfo> mst;
 		sketchByFile = loadMSTs(inputFile, inputFile1, sketches, mst);
-		vector<EdgeInfo> forest = generateForest(mst, threshold);
-		cluster = generateCluster(forest, mst.size()+1);
+//==========================================================
+	int * densArr = new int[sketches.size()];;
+	cerr << "sketches.size is: " << sketches.size() << endl;
+	ifstream ifs0("denseDir/Dense_calculation5_375528.clust1000");
+	string line0;
+	while(getline(ifs0, line0)){
+		stringstream ss;
+		ss << line0;
+		int index, curDense;
+		ss >> index >> curDense;
+		densArr[index] = curDense;
+	}
+	ifs0.close();
+//==========================================================
+		//cluster = generateCluster(forest, mst.size()+1);
+//==========================================================
+	vector<EdgeInfo> forest = generateForest(mst, threshold);
+	cerr << "finished generate Forest" << endl;
+	vector< vector<int> > tmpClust = generateClusterWithBfs(forest, sketches.size());
+	printResult(tmpClust, sketches, sketchByFile, outputFile);
+	cerr << "finished generate tmpClust" << endl;
+	cerr << "the tmpClust size is: " << tmpClust.size() << endl;
+	double alpha = 0.0;
+	vector<int> totalNoiseArr;
+	for(int i = 0; i < tmpClust.size(); i++){
+		vector<PairInt> curDenseArr;
+		for(int j = 0; j < tmpClust[i].size(); j++){
+			int element = tmpClust[i][j];
+			PairInt p(element, densArr[element]);
+			curDenseArr.push_back(p);
+		}
+		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
+		fprintf(stdout, "the tmpClust[%d] size is: %d, and size of noiseArr is: %d\n", i, tmpClust[i].size(), curNoiseArr.size());
+		totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
+	}
+	cerr << "the total noiseArr size is: " << totalNoiseArr.size() << endl;
+	forest = modifyForest(forest, totalNoiseArr);
+	cluster = generateClusterWithBfs(forest, sketches.size());
+	string outputFileNew = outputFile + to_string(alpha) + "5";
+	printResult(cluster, sketches, sketchByFile, outputFileNew);
+
+	return 0;
+//==========================================================
 #endif
 		printResult(cluster, sketches, sketchByFile, outputFile);
 		return 0;//end main 
@@ -253,7 +297,10 @@ int main(int argc, char * argv[]){
 	cerr << "========time of greedyCluster is: " << t3 - t2 << "========" << endl;
 	#endif
 #else
-	vector<EdgeInfo> mst = generateMST(sketches, sketchFunc, threads);
+	//vector<EdgeInfo> mst = generateMST(sketches, sketchFunc, threads);
+	
+	int *dens1Arr, *dens2Arr, *dens3Arr, *dens4Arr, *dens5Arr;
+	vector<EdgeInfo> mst = modifyMST(sketches, sketchFunc, threads, dens1Arr, dens2Arr, dens3Arr, dens4Arr, dens5Arr, outputFile);
 	#ifdef Timer
 	double t3 = get_sec();
 	cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
@@ -263,14 +310,39 @@ int main(int argc, char * argv[]){
 	double t4 = get_sec();
 	cerr << "========time of saveMST is: " << t4 - t3 << "========" << endl;
 	#endif
+//=======================================================================================================================
+	
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
-	cluster = generateCluster(forest, sketches.size());
+	cerr << "finished generate Forest" << endl;
+	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
+	printResult(tmpClust, sketches, sketchByFile, outputFile);
+	cerr << "finished generate tmpClust" << endl;
+	//update cluster by noise cluster
+	double alpha = 0.05;
+	vector<int> totalNoiseArr;
+	for(int i = 0; i < tmpClust.size(); i++){
+		vector<PairInt> curDenseArr;
+		for(int j = 0; j < tmpClust[i].size(); j++){
+			int element = tmpClust[i][j];
+			PairInt p(element, dens5Arr[element]);
+			curDenseArr.push_back(p);
+		}
+		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
+		fprintf(stdout, "the tmpClust[%d] size is: %d, and size of noiseArr is: %d\n", i, tmpClust[i].size(), curNoiseArr.size());
+		totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
+	}
+	cerr << "the total noiseArr size is: " << totalNoiseArr.size() << endl;
+	forest = modifyForest(forest, totalNoiseArr);
+	cluster = generateClusterWithBfs(forest, sketches.size());
+	string outputFileNew = outputFile + to_string(alpha) + "5";
+	printResult(cluster, sketches, sketchByFile, outputFileNew);
+	
 	#ifdef Timer
 	double t5 = get_sec();
 	cerr << "========time of generator forest and cluster is: " << t5 - t4 << "========" << endl;
 	#endif
 #endif//endif GREEDY_CLUST
-	printResult(cluster, sketches, sketchByFile, outputFile);
+	//printResult(cluster, sketches, sketchByFile, outputFile);
 
 	return 0;
 }//end main
