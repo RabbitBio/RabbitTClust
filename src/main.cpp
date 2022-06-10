@@ -73,7 +73,7 @@ int main(int argc, char * argv[]){
 			case 'c':
 				isContainment = true;
 				containCompress = stoi(argv[++argIndex]);
-				threshold = 0.10;
+				threshold = 0.05;
 				fprintf(stderr, "compute containment, The sketchSize is in proportion with 1/%d \n", containCompress);
 				break;
 			case 'k':
@@ -292,6 +292,7 @@ int main(int argc, char * argv[]){
 	//section 3: generating the clusters.
 #ifdef GREEDY_CLUST
 	cluster = greedyCluster(sketches, sketchFunc, threshold, threads);
+	printResult(cluster, sketches, sketchByFile, outputFile);
 	#ifdef Timer
 	double t3 = get_sec();
 	cerr << "========time of greedyCluster is: " << t3 - t2 << "========" << endl;

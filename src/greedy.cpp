@@ -32,7 +32,8 @@ vector<vector<int> >greedyCluster(vector<SketchInfo> sketches, string sketchFunc
 			double dist;
 			if(sketchFunc == "MinHash"){
 				if(sketches[repId].isContainment)
-					dist = 1.0 - sketches[repId].minHash->containJaccard(sketches[j].minHash);
+					dist = sketches[repId].minHash->containDistance(sketches[j].minHash);
+					//dist = 1.0 - sketches[repId].minHash->containJaccard(sketches[j].minHash);
 				else
 					dist = sketches[repId].minHash->distance(sketches[j].minHash);
 			}
@@ -72,7 +73,6 @@ vector<vector<int> >greedyCluster(vector<SketchInfo> sketches, string sketchFunc
 		curClust.insert(curClust.end(), redundantArr.begin(), redundantArr.end());
 		cluster.push_back(curClust);
 	}
-
 	return cluster;
 }
 
