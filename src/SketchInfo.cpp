@@ -156,7 +156,8 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 
 			//tmpSketchInfo.minHash = mh1;
 			tmpSketchInfo.id = r.gid;
-			sketches->push_back(tmpSketchInfo);
+			if(length >= 10000)
+				sketches->push_back(tmpSketchInfo);
 
 		}
 		rabbit::fa::FastaDataChunk *tmp = faChunk->chunk;
@@ -515,8 +516,8 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 			tmpSketchInfo.fileName = fileList[i];
 			tmpSketchInfo.totalSeqLength = totalLength;
 			tmpSketchInfo.fileSeqs = curFileSeqs;
-			//if(totalLength >= 10000)//filter the poor quality genome assemblies whose length less than 10k bp(fastANI paper)
-			sketches.push_back(tmpSketchInfo);
+			if(totalLength >= 10000)//filter the poor quality genome assemblies whose length less than 10k bp(fastANI paper)
+				sketches.push_back(tmpSketchInfo);
 			if(i % 10000 == 0)	cerr << "finished sketching: " << i << " genomes" << endl;
 		}
 

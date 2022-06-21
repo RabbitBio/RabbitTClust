@@ -7,6 +7,39 @@ inline bool cmpSketchLength(ClusterInfo c1, ClusterInfo c2){
 	return c1.length > c2.length;
 }
 
+void loadDense(int** &denseArr, string inputFile, int denseSpan, vector<SketchInfo> sketches){
+	int N = sketches.size();
+	denseArr = new int*[denseSpan];
+	for(int i = 0; i < denseSpan; i++){
+		denseArr[i] = new int[N];
+		memset(denseArr[i], 0, N * sizeof(int));
+	}
+	int endPos = inputFile.find_last_of('.');
+	string filePrefix = inputFile.substr(0, endPos);
+	//cerr << "the filePrefix is: " << filePrefix << endl;
+	for(int i = 0; i < denseSpan; i++){
+		string curFile = filePrefix + to_string(i) + ".dense";
+		ifstream ifs(curFile);
+		if(!ifs){
+			cerr << "error open dense file: " << curFile << endl;
+			continue;
+		}
+		string line;
+		while(getline(ifs, line)){
+			stringstream ss;
+			int index, dense;
+			ss << line;
+			ss >> index >> dense;
+			denseArr[i][index] = dense;
+		}
+		ifs.close();
+	}
+	for(int i = 0; i< 10; i++){
+		cout << denseArr[0][i] << endl;
+	}
+
+}
+
 bool loadMSTs(string inputFile, string inputFile1, vector<SketchInfo>& sketches, vector<EdgeInfo>& mst)
 {
 	cerr << "input files is MST information and genome informations" << endl;
@@ -138,19 +171,16 @@ void printResult(vector< vector<int> > cluster, vector<SketchInfo> sketches, boo
 
 }
 
-void saveMST(string inputFile, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo> sketches, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize)
+void saveMST(string folderPath, string inputFile, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo> sketches, vector<EdgeInfo> mst, bool sketchByFile, int sketchSize, int kmerSize)
 {
 	//save the matching of graph id and genomeInfo 
-	string folderPath = currentDataTime();
-	string command = "mkdir -p " + folderPath;
-	system(command.c_str());
 	string prefixName = inputFile;
 	std::size_t found = prefixName.find_last_of('/');//if not found, return std::string::npos(-1);
 	prefixName = prefixName.substr(found+1);
 
-	cerr << "save the genomeInfo into: " << folderPath << '/' << prefixName+sketchFunc+"GenomeInfo" << endl;
+	cerr << "save the genomeInfo into: " << folderPath << '/' << prefixName+'.'+sketchFunc+"GenomeInfo" << endl;
 	ofstream ofile;
-	ofile.open(folderPath + '/' + prefixName+sketchFunc+"GenomeInfo");
+	ofile.open(folderPath + '/' + prefixName+'.'+sketchFunc+"GenomeInfo");
 	if(sketchByFile)
 		ofile << '1' << endl;
 	else
@@ -176,9 +206,9 @@ void saveMST(string inputFile, string sketchFunc, bool isContainment, int contai
 	ofile.close();
 
 	//save the mst
-	cerr << "save the MSTInfo into: " << folderPath << '/' << prefixName+sketchFunc+"MSTInfo" << endl;
+	cerr << "save the MSTInfo into: " << folderPath << '/' << prefixName+'.'+sketchFunc+"MSTInfo" << endl;
 	ofstream ofile1;
-	ofile1.open(folderPath + '/' + prefixName+sketchFunc+"MSTInfo");
+	ofile1.open(folderPath + '/' + prefixName+'.'+sketchFunc+"MSTInfo");
 
 	if(sketchByFile)
 		ofile1 << "sketch by File! " << endl;
@@ -206,3 +236,29 @@ void saveMST(string inputFile, string sketchFunc, bool isContainment, int contai
 	ofile1.close();
 
 }
+
+void saveDense(string folderPath, string prefixName, int** denseArr, int denseSpan, vector<SketchInfo> sketches){
+	int N = sketches.size();
+	for(int i = 0; i < denseSpan; i++){
+		string outputDenseFile = folderPath + '/' + prefixName + to_string(i) + ".dense";
+		ofstream ofs(outputDenseFile);
+		for(int j = 0; j < N; j++){
+			ofs << j << '\t' << denseArr[i][j] << endl;
+		}
+		ofs.close();
+		cerr << "finished save the dense file: " << outputDenseFile << endl;
+	}
+}
+
+void saveANI(string folderPath, string prefixName, uint64_t* aniArr, string sketchFunc){
+	if(sketchFunc != "MinHash")	return;
+	string outputFile = folderPath + '/' + prefixName + ".ani";
+	ofstream ofs(outputFile);
+	for(int i = 0; i < 101; i++){
+		ofs << i << '\t' << aniArr[i] << endl;
+	}
+	ofs.close();
+
+}
+
+

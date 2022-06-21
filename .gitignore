@@ -13,12 +13,22 @@ benchmark/evaluation/*.nmi.humanReadable
 benchmark/evaluation/*.purity
 benchmark/evaluation/*.label
 benchmark/evaluation/*.label.humanReadable
+benchmark/evaluation/*.humanReadable
+benchmark/evaluation/*.out
+benchmark/evaluation/*.new
+benchmark/evaluation/out*
+benchmark/evaluation/run.sh
 
 build/
 clust
 clust-mst
 clust-greedy
+*.list
+*List
+run.sh
 
 2022_*
 *.out
 *.clust
+*.clust.removeNoise
+*.clust.new

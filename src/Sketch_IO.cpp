@@ -18,6 +18,7 @@ bool cmpIndex(SketchInfo s1, SketchInfo s2){
  * 														kmerSize and sketchFunc. The remain lines are specific sketches hash values, each line a genome sketch.
  * 														
  * @param[in]	sketches				sketches array need to save
+ * @param[in]	folderPath			the filePath to save the sketches
  * @param[in] inputFile				input file name for the prefix name of output file
  * @param[in] sketchFunc			Sketch function, including MinHash and KSSD, used for output file name
  * @param[in] inContainment		whether is used for duplication detection
@@ -26,18 +27,14 @@ bool cmpIndex(SketchInfo s1, SketchInfo s2){
  * @param[in] sketchSize			the sketch size in the sketches
  * @param[in]	kmerSize				the kmer size in the sketches
  */
-void saveSketches(vector<SketchInfo> sketches, string inputFile, string sketchFunc, bool isContainment, int containCompress, bool sketchByFile, int sketchSize, int kmerSize)
+void saveSketches(vector<SketchInfo> sketches, string folderPath, string inputFile, string sketchFunc, bool isContainment, int containCompress, bool sketchByFile, int sketchSize, int kmerSize)
 {
-	string folderPath = currentDataTime();
-	string command = "mkdir -p " + folderPath;
-	system(command.c_str());
-	string prefixName = inputFile;
-	std::size_t found = prefixName.find_last_of('/');//if not found, return std::string::npos(-1);
-	prefixName = prefixName.substr(found+1);
+	std::size_t found = inputFile.find_last_of('/');//if not found, return std::string::npos(-1);
+	string prefixName = inputFile.substr(found+1);
 
-	cerr << "save the genomeInfo into: " << folderPath << '/' << prefixName+sketchFunc+"GenomeInfo" << endl;
+	cerr << "save the genomeInfo into: " << folderPath << '/' << prefixName+'.'+sketchFunc+"GenomeInfo" << endl;
 	ofstream ofile;
-	ofile.open(folderPath + '/' + prefixName+sketchFunc+"GenomeInfo");
+	ofile.open(folderPath + '/' + prefixName+'.'+sketchFunc+"GenomeInfo");
 	if(sketchByFile)
 		ofile << '1' << endl;
 	else
@@ -62,9 +59,9 @@ void saveSketches(vector<SketchInfo> sketches, string inputFile, string sketchFu
 	}
 	ofile.close();
 
-	cerr << "save the SketchInfo into: " << folderPath << '/' << prefixName+sketchFunc+"SketchInfo" << endl;
+	cerr << "save the SketchInfo into: " << folderPath << '/' << prefixName+'.'+sketchFunc+"SketchInfo" << endl;
 	ofstream ofile1;
-	ofile1.open(folderPath + '/' + prefixName + sketchFunc+"SketchInfo");
+	ofile1.open(folderPath + '/' + prefixName+'.'+sketchFunc+"SketchInfo");
 	if(isContainment){
 		ofile1 << '1' << endl;
 		ofile1 << containCompress << endl;
