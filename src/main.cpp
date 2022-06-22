@@ -41,6 +41,7 @@ using namespace std;
 
 int main(int argc, char * argv[]){
 
+
 	//section 1: init parameters
 	int argIndex = 1;
 	string inputFile = "genome.fna";
@@ -161,11 +162,7 @@ int main(int argc, char * argv[]){
 #else
 	cerr << "use the MST cluster" << endl;
 #endif
-	
 
-	string folderPath = currentDataTime();
-	string command = "mkdir -p " + folderPath;
-	system(command.c_str());
 
 	vector<SketchInfo> sketches;
 	vector<vector<int> > cluster;
@@ -278,6 +275,11 @@ int main(int argc, char * argv[]){
 	else
 		cerr << "========time of computing sketch is: " << t1 - t0 << "========" << endl;
 	#endif
+
+	string folderPath = currentDataTime();
+	string command = "mkdir -p " + folderPath;
+	system(command.c_str());
+
 	if(!mstLoadSketch){
 		saveSketches(sketches, folderPath, inputFile, sketchFunc, isContainment, containCompress, sketchByFile, sketchSize, kmerSize);
 	}
@@ -348,6 +350,7 @@ int main(int argc, char * argv[]){
 	cerr << "========time of generator forest and cluster is: " << t5 - t4 << "========" << endl;
 	#endif
 #endif//endif GREEDY_CLUST
+	cerr << "finished" << endl;
 
 	return 0;
 }//end main
