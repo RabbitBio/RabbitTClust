@@ -6,6 +6,7 @@ benchmark/evaluation/calNMI
 benchmark/evaluation/calF1
 benchmark/evaluation/calViral
 benchmark/evaluation/calLabel
+benchmark/evaluation/calPurity
 benchmark/evaluation/*.f1
 benchmark/evaluation/*.f1.humanReadable
 benchmark/evaluation/*.nmi
@@ -32,3 +33,4 @@ run.sh
 *.clust
 *.clust.removeNoise
 *.clust.new
+data
