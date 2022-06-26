@@ -30,63 +30,70 @@ cd RabbitTClust
 cd RabbitSketch
 mkdir build && cd build 
 cmake -DCXXAPI=ON -DCMAKE_INSTALL_PREFIX=. ..
-make && make install
+make -j8 && make install
 cd ../../
 
 #make rabbitFX library
 cd RabbitFX
 mkdir build && cd build
 cmake -DCMAKE_INSTALL_PREFIX=. ..
-make && make install
+make -j8 && make install
 cd ../../
 
 mkdir build && cd build
 cmake -DUSE_RABBITFX=ON ..
-make && make install
+make -j8 && make install
 cd ../
 
 ```
 
 ## Usage
 ```bash
-Usage: clust [-h] [-l] [-t] <int> [-d] <double> [-F] <string> [-i] <string> [-o] <string> 
-Usage: clust [-h] [-f] [-d] <double> [-i] <string> <string> [-o] <string>
--h          : this help message
--k <int>    : set kmer size, default <21>
--s <int>    : set sketch size, default <1000>
--l          : list input. Lines in each <input> specify paths to genome files, one per line.
--c <int>    : compute the containment of genomes, set proportion sketchSize = genomeSize/compress, ATTENTION with MinHash function. 
--d <double> : set the threshold cluster from the Minimum Spanning Tree, default 0.05 (0.1 for containment of duplication or redundancy detection)
--f          : generate cluster from the existing genomeInfo and MST content,
--F <string> : set the sketch function, including <MinHash>, <WMH>, <OMH>, <HLL>, default <MinHash>
--o <string> : path of result file
--i <strings>: path of input files. 
+usage: clust-mst [-h] [-l] [-t] <int> [-d] <double> -F <string> [-o] <string> -i <string>
+usage: clust-mst [-h] [-f] [-E] [-d] <double> -i <string> <string> -o <string>
+usage: clust-greedy [-h] [-l] [-t] <int> [-d] <double> -F <string> [-o] <string> -i <string>
+usage: clust-greedy [-h] [-f] [-d] <double> -i <string> <string> -o <string>
+-h         : this help message
+-k <int>   : set kmer size, default 21, for both clust-greedy and clust-mst
+-s <int>   : set sketch size, default 1000, for both clust-greedy and clust-mst
+-l         : cluster for genomes(not sequences), list input. Lines in each <input> specify paths to genome files, one per line. for both clust-greedy and clust-mst
+-c <int>   : compute the containment of genomes, set proportion sketchSize = genomeSize/compress, ATTENTION with MinHash function, for both clust-greedy and clust-mst
+-t <int>   : set the thread number, default 1, for both clust-greedy and clust-mst
+-d <double>: set the threshold of the clusters from the Minimum Spanning Tree and greedy cluster threshold, default 0.05(0.01) for clust-mst(clust-greedy)
+-f         : input files are genomeInfo and MST contents(sketch contents) for clust-mst(clust-greedy)
+-E         : input files are genomeInfo and sketch contents contents for clust-mst
+-F <string>: sketch function, includes MinHash, WMH, OMH, HLL, default MinHash, for both clust-greedy and clust-mst
+-o <string>: path of output file, for both clust-greedy and clust-mst
+-i <string>: path of input file, ATTENTION with -f and -E option
 
 ```
 
 ## Example:
 ```bash
+#for genomes clustering, input is a genome file list:
+./clust-mst -l -t 48 -i bacteriaList -o bacteria.clust
+./clust-greedy -l -t 48 -i bacteriaList -o bacteria.clust
 
-#The bacteria.fna is a single files for multi-genomes .
-./clust -t 48 -i data/bacteria.fna -o bacteria.clust
+#for genomes clustering, input is a single genome file:
+./clust-mst -d 0.05 -t 48 -i bacteria.fna -o bacteria.clust
+./clust-greedy -d 0.05 -t 48 -i bacteria.fna -o bacteria.clust
 
-#The refList is the list path of the RefSeq genome files.
-./clust -l -t 48 -i data/refList -o ref.clust
+#for redundancy detection with containment, input is a genome file list:
+./clust-mst -l -c 10000 -t 48 -i bacteriaList -o bacteria.out
+./clust-greedy -l -c 10000 -t 48 -i bacteriaList -o bacteria.out
 
-#For redundancy detection, run with containment:
-#input is a single file:
-./clust -c 1000 -t 48 -i data/data.fna -o data.out
+#for redundancy detection with containment, input is a single genome file:
+./clust-mst -c 10000 -t 48 -i bacteria.fna -o bacteria.out
+./clust-greedy -c 10000 -t 48 -i bacteria.fna -o bacteria.out
 
-#For redundancy detection, run with containment:
-#input is a file list:
-./clust -l -c 1000 -t 48 -i data/fileList -o file.out
+#for generator cluster from exist MST:
+./clust-mst -f -d 0.05 -t 48 -i bacteriaList.MinHashGenomeInfo bacteriaList.MinHashMSTInfo -o bacteria.clust
+ATTENTION: the -f must in front of the -i option
 
-#get the clustering result by inputing MST info.
-#ATTENTION the -f option must in front of the -i option
-./clust -f -d 0.05 -i refListMinHashGenomeInfo refListMinHashMSTInfo -o result.clust
-
-#get more help info.
-./clust -h
+#for generator cluster from exist sketches:
+./clust-mst -E -d 0.05 -t 48 -i bacteriaList.MinHashGenomeInfo bacteriaList.MinHashSketchInfo -o bacteria.clust
+./clust-greedy -f -d 0.05 -t 48 -i bacteriaList.MinHashGenomeInfo bacteriaList.MinHashSketchInfo -o bacteria.clust
+#ATTENTION: the -E and -f must in front of the -i option
 
 ```
 

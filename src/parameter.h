@@ -55,7 +55,7 @@ inline void printUsage(){
 	fprintf(stdout, "	-d <double>\t: set the threshold of the clusters from the Minimum Spanning Tree and greedy cluster threshold, default 0.05(0.01) for clust-mst(clust-greedy)\n");
 	fprintf(stdout, "	-f\t\t: input files are genomeInfo and MST contents(sketch contents) for clust-mst(clust-greedy)\n");
 	fprintf(stdout, "	-E\t\t: input files are genomeInfo and sketch contents contents for clust-mst\n");
-	fprintf(stdout, "	-F <string>\t: sketch function, includes MinHash, WMH, OMH, HLL, default MinHash, for both clust-greedy and clust-mst\n"); 
+	fprintf(stdout, "	-F <string>\t: sketch function, includes MinHash and KSSD default MinHash, for both clust-greedy and clust-mst\n"); 
 	fprintf(stdout, "	-o <string>\t: path of output file, for both clust-greedy and clust-mst\n"); 
 	fprintf(stdout, "	-i <string>\t: path of input file, ATTENTION with -f and -E option \n"); 
 
