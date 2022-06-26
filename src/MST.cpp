@@ -227,17 +227,10 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 					else
 					{
 						tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
-						for(int t = 0; t < denseSpan; t++){
-							if(tmpDist <= distRadius[t]){
-								denseLocalArr[t * threads + thread_id][i]++;
-								denseLocalArr[t * threads + thread_id][j]++;
-							}
-						}
-						double tmpANI = 1.0 - tmpDist;
-						int ANI = (int)(tmpANI / 0.01);
-						assert(ANI < 101);
-						threadsANI[thread_id][ANI]++;
 					}
+				}
+				else if(sketchFunc == "KSSD"){
+					tmpDist = sketches[i].KSSD->distance(sketches[j].KSSD);
 				}
 				else if(sketchFunc == "WMH"){
 					tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
@@ -250,6 +243,17 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 				}
 				else	
 					break;
+
+				for(int t = 0; t < denseSpan; t++){
+					if(tmpDist <= distRadius[t]){
+						denseLocalArr[t * threads + thread_id][i]++;
+						denseLocalArr[t * threads + thread_id][j]++;
+					}
+				}
+				double tmpANI = 1.0 - tmpDist;
+				int ANI = (int)(tmpANI / 0.01);
+				assert(ANI < 101);
+				threadsANI[thread_id][ANI]++;
 					
 				EdgeInfo tmpE{i, j, tmpDist};
 				mstArr[thread_id].push_back(tmpE);
@@ -302,17 +306,10 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 					else
 					{
 						tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
-						for(int t = 0; t < denseSpan; t++){
-							if(tmpDist <= distRadius[t]){
-								denseArr[t][i]++;
-								denseArr[t][j]++;
-							}
-						}
-						double tmpANI = 1.0 - tmpDist;
-						int ANI = (int)(tmpANI/0.01);
-						assert(ANI < 101);
-						aniArr[ANI]++;
 					}
+				}
+				else if(sketchFunc == "KSSD"){
+					tmpDist = sketches[i].KSSD->distance(sketches[j].KSSD);
 				}
 				else if(sketchFunc == "WMH")
 					tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
@@ -322,6 +319,17 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 					tmpDist = sketches[i].OMH->distance(*sketches[j].OMH);
 				else	
 					break;
+
+				for(int t = 0; t < denseSpan; t++){
+					if(tmpDist <= distRadius[t]){
+						denseArr[t][i]++;
+						denseArr[t][j]++;
+					}
+				}
+				double tmpANI = 1.0 - tmpDist;
+				int ANI = (int)(tmpANI/0.01);
+				assert(ANI < 101);
+				aniArr[ANI]++;
 
 				EdgeInfo tmpE{i, j, tmpDist};
 				mstArr[0].push_back(tmpE);
@@ -348,7 +356,6 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 	cerr << "finish the final mst " << endl;
 
 	return mst;
-
 }
 
 

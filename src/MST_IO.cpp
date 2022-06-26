@@ -34,9 +34,9 @@ void loadDense(int** &denseArr, string inputFile, int denseSpan, vector<SketchIn
 		}
 		ifs.close();
 	}
-	for(int i = 0; i< 10; i++){
-		cout << denseArr[0][i] << endl;
-	}
+	//for(int i = 0; i< 10; i++){
+	//	cout << denseArr[0][i] << endl;
+	//}
 
 }
 
@@ -216,7 +216,7 @@ void saveMST(string folderPath, string inputFile, string sketchFunc, bool isCont
 		ofile1 << "sketch by Sequence!" << endl;
 
 	string tmpFunc = sketchFunc;
-	if(sketchFunc == "MinHash")
+	if(tmpFunc == "MinHash")
 	{
 	if(isContainment)
 		tmpFunc += " containment";
@@ -232,7 +232,6 @@ void saveMST(string folderPath, string inputFile, string sketchFunc, bool isCont
 	for(int i = 0; i < mst.size(); i++){
 		ofile1 << mst[i].preNode << ' ' << mst[i].sufNode << ' ' << mst[i].dist << endl;
 	}
-	cout << endl;
 	ofile1.close();
 
 }
@@ -251,7 +250,10 @@ void saveDense(string folderPath, string prefixName, int** denseArr, int denseSp
 }
 
 void saveANI(string folderPath, string prefixName, uint64_t* aniArr, string sketchFunc){
-	if(sketchFunc != "MinHash")	return;
+	if(sketchFunc != "MinHash" && sketchFunc != "KSSD"){
+		cerr << "save ANI can only support MinHash and KSSD functions" << endl;
+		return;
+	}
 	string outputFile = folderPath + '/' + prefixName + ".ani";
 	ofstream ofs(outputFile);
 	for(int i = 0; i < 101; i++){

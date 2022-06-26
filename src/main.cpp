@@ -36,6 +36,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <sys/sysinfo.h>
 
 using namespace std;
 
@@ -49,6 +50,7 @@ int main(int argc, char * argv[]){
 	string sketchFunc = "MinHash";
 	string outputFile = "result.out";
 	int threads = 1;
+	threads = get_nprocs_conf();
 	bool sketchByFile = false;
 	bool isContainment = false;
 	bool useFile = false;
@@ -162,6 +164,7 @@ int main(int argc, char * argv[]){
 #else
 	cerr << "use the MST cluster" << endl;
 #endif
+	
 
 
 	vector<SketchInfo> sketches;
@@ -176,7 +179,7 @@ int main(int argc, char * argv[]){
 	#ifdef Timer
 	double time0 = get_sec();
 	#endif
-		sketchByFile = loadSketches(inputFile, inputFile1, threads, sketches);
+		sketchByFile = loadSketches(inputFile, inputFile1, threads, sketches, sketchFunc);
 	#ifdef Timer
 	double time1 = get_sec();
 	cerr << "========time of load genome Infos and sketch Infos is: " << time1 - time0 << endl;
@@ -249,7 +252,7 @@ int main(int argc, char * argv[]){
 	//section 2: Sketch Generation, computing from genome file or loading sketches from saved file.
 
 	if(mstLoadSketch){
-		sketchByFile = loadSketches(inputFile, inputFile1, threads, sketches);
+		sketchByFile = loadSketches(inputFile, inputFile1, threads, sketches, sketchFunc);
 	}
 	else{
 		if(!sketchByFile){

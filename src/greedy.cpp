@@ -37,8 +37,11 @@ vector<vector<int> >greedyCluster(vector<SketchInfo> sketches, string sketchFunc
 				else
 					dist = sketches[repId].minHash->distance(sketches[j].minHash);
 			}
+			else if(sketchFunc == "KSSD"){
+				dist = sketches[repId].KSSD->distance(sketches[j].KSSD);
+			}
 			else{
-				cerr << "can only support MinHash with greedy incremental clust" << endl;
+				cerr << "can only support MinHash and KSSD with greedy incremental clust" << endl;
 				exit(1);
 			}
 			if(dist < threshold){

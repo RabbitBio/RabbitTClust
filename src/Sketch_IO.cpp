@@ -62,17 +62,29 @@ void saveSketches(vector<SketchInfo> sketches, string folderPath, string inputFi
 	cerr << "save the SketchInfo into: " << folderPath << '/' << prefixName+'.'+sketchFunc+"SketchInfo" << endl;
 	ofstream ofile1;
 	ofile1.open(folderPath + '/' + prefixName+'.'+sketchFunc+"SketchInfo");
-	if(isContainment){
-		ofile1 << '1' << endl;
-		ofile1 << containCompress << endl;
-	}
-	else{
-		ofile1 << '0' << endl;
-		ofile1 << sketchSize << endl;
-	}
-	
-	ofile1 << kmerSize << endl;
+
 	ofile1 << sketchFunc << endl;
+	if(sketchFunc == "MinHash"){
+		if(isContainment){
+			ofile1 << '1' << endl;
+			ofile1 << containCompress << endl;
+		}
+		else{
+			ofile1 << '0' << endl;
+			ofile1 << sketchSize << endl;
+		}
+		ofile1 << kmerSize << endl;
+	}
+	else if(sketchFunc == "KSSD"){
+		int half_k, half_subk, drlevel;
+		half_k = sketches[0].KSSD->get_half_k();
+		half_subk = sketches[0].KSSD->get_half_subk();
+		drlevel = sketches[0].KSSD->get_drlevel();
+
+		ofile1 << half_k << endl;
+		ofile1 << half_subk << endl;
+		ofile1 << drlevel << endl;
+	}
 	
 	if(sketchFunc == "MinHash"){
 		for(int i = 0; i < sketches.size(); i++){
@@ -81,6 +93,17 @@ void saveSketches(vector<SketchInfo> sketches, string folderPath, string inputFi
 				ofile1 << hashArr[j] << '\t';
 			ofile1 << endl;
 		}
+	}
+	else if(sketchFunc == "KSSD"){
+		for(int i = 0; i < sketches.size(); i++){
+			vector<uint64_t> hashArr = sketches[i].KSSD->storeHashes();
+			for(int j = 0; j < hashArr.size(); j++)
+				ofile1 << hashArr[j] << '\t';
+			ofile1 << endl;
+		}
+	}
+	else{
+		cerr << "save sketches can only support MinHash and KSSD functions" << endl;
 	}
 
 	ofile1.close();
@@ -98,7 +121,7 @@ void saveSketches(vector<SketchInfo> sketches, string folderPath, string inputFi
  * @param[out] sketches			Result SketchInfo arrays.
  * return sketchByFile			The origin input genome is a file list or a single genome file.
  */
-bool loadSketches(string inputFile0, string inputFile1, int threads, vector<SketchInfo>& sketches)
+bool loadSketches(string inputFile0, string inputFile1, int threads, vector<SketchInfo>& sketches, string& sketchFunc)
 {
 	fstream fs0(inputFile0);//Genome Info
 	fstream fs1(inputFile1);//Sketch Info
@@ -116,18 +139,32 @@ bool loadSketches(string inputFile0, string inputFile1, int threads, vector<Sket
 	string line;
 	getline(fs0, line);
 	bool sketchByFile = stoi(line);//1 or 0
+
+	bool isContainment;
+	int containCompress(10000), sketchSize(1000), kmerSize(21);
+	int half_k(10), half_subk(6), drlevel(3);
+
 	getline(fs1, line);
-	bool isContainment = stoi(line);//1 or 0
-	getline(fs1, line);
-	int containCompress(10000), sketchSize(1000);
-	if(isContainment)
-		containCompress = stoi(line);
-	else
-		sketchSize = stoi(line);
-	getline(fs1, line);
-	int kmerSize = stoi(line);
-	getline(fs1, line);
-	string sketchFunc = line;
+	sketchFunc = line;
+	if(sketchFunc == "MinHash"){
+		getline(fs1, line);
+		isContainment = stoi(line);//1 or 0
+		getline(fs1, line);
+		if(isContainment)
+			containCompress = stoi(line);
+		else
+			sketchSize = stoi(line);
+		getline(fs1, line);
+		kmerSize = stoi(line);
+	}
+	else if(sketchFunc == "KSSD"){
+		getline(fs1, line);
+		half_k = stoi(line);
+		getline(fs1, line);
+		half_subk = stoi(line);
+		getline(fs1, line);
+		drlevel = stoi(line);
+	}
 
 	//vector<SketchInfo> sketches;
 	//int sketchId = 0;
@@ -143,10 +180,13 @@ bool loadSketches(string inputFile0, string inputFile1, int threads, vector<Sket
 	fs0.close();
 	fs1.close();
 
+	Sketch::KSSDParameters kssdPara(half_k, half_subk, drlevel);
+
 	#pragma omp parallel for num_threads(threads)
 	for(int i = 0; i < infoArr.size(); i++){
 		SketchInfo tmpSketchInfo;
 		Sketch::MinHash * mh1;
+		Sketch::KSSD * kssd;
 		string infoLine = infoArr[i];
 		stringstream ss;
 		ss << infoLine;
@@ -196,6 +236,11 @@ bool loadSketches(string inputFile0, string inputFile1, int threads, vector<Sket
 			}
 			mh1->loadMinHashes(hashArr);
 			tmpSketchInfo.minHash = mh1;
+		}
+		else if(sketchFunc == "KSSD"){
+			kssd = new Sketch::KSSD(kssdPara);
+			kssd->loadHashes(hashArr);
+			tmpSketchInfo.KSSD = kssd;
 		}
 		tmpSketchInfo.id = i;
 		#pragma omp critical

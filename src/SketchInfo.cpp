@@ -61,6 +61,9 @@ SketchOutput* sketchBySequence(SketchInput* input){
 	if(sketchFunc == "MinHash"){
 		sketchInfo.minHash->update(input->seq);
 	}
+	else if(sketchFunc == "KSSD"){
+		sketchInfo.KSSD->update(input->seq);
+	}
 	else if(sketchFunc == "WMH"){
 		//wmh->update(ks1->seq.s);
 		//wmh->computeHistoSketch();
@@ -90,7 +93,7 @@ void useThreadOutput(SketchOutput * output, vector<SketchInfo> &sketches){
 #ifdef RABBIT_FX
 typedef rabbit::core::TDataQueue<rabbit::fa::FastaChunk> FaChunkQueue;
 int producer_fasta_task(std::string file, rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq){
-	std::cout << "filename" << file << std::endl;
+	//std::cerr << "filename: " << file << std::endl;
 	rabbit::fa::FastaFileReader* faFileReader;
 	faFileReader = new rabbit::fa::FastaFileReader(file, *fastaPool, false);
 	int n_chunks = 0;
@@ -108,7 +111,7 @@ int producer_fasta_task(std::string file, rabbit::fa::FastaDataPool* fastaPool, 
 	return 0;
 }
 
-void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, Sketch::WMHParameters * parameters, vector<SketchInfo> *sketches){
+void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, Sketch::KSSDParameters *kssdPara, Sketch::WMHParameters * parameters, vector<SketchInfo> *sketches){
 	int line_num = 0;
 	rabbit::int64 id = 0;
 
@@ -136,6 +139,11 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 					mh1 = new Sketch::MinHash(kmerSize, sketchSize);
 				mh1->update((char*)r.seq.c_str());
 				tmpSketchInfo.minHash = mh1;
+			}
+			else if(sketchFunc == "KSSD"){
+				Sketch::KSSD * kssd = new Sketch::KSSD(*kssdPara);
+				kssd->update((char*)r.seq.c_str());
+				tmpSketchInfo.KSSD = kssd;
 			}
 			else if(sketchFunc == "WMH"){
 				Sketch::WMinHash * wmh = new Sketch::WMinHash(*parameters);
@@ -167,12 +175,9 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 			tmp = tmp->next;
 			}
 		}while(tmp!=NULL);
-
 	}
 
 }
-
-
 #endif
 
 bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
@@ -185,8 +190,13 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 		//printfUsage();
 		return false;
 	}
-	
 	ks1 = kseq_init(fp1);
+
+	int half_k = 10;
+	int half_subk = 6;
+	int drlevel = 3;
+	Sketch::KSSDParameters kssdPara(half_k, half_subk, drlevel);
+	
 	Sketch::WMHParameters parameters;
 	if(sketchFunc == "WMH"){
 		parameters.kmerSize = kmerSize;
@@ -229,6 +239,10 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 			else
 				mh1 = new Sketch::MinHash(kmerSize, sketchSize);
 			sketchInfo.minHash = mh1;
+		}
+		else if(sketchFunc == "KSSD"){
+			Sketch::KSSD * kssd = new Sketch::KSSD(kssdPara);
+			sketchInfo.KSSD = kssd;
 		}
 		else if(sketchFunc == "WMH"){
 			Sketch::WMinHash * wmh = new Sketch::WMinHash(parameters);
@@ -275,13 +289,12 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 	std::thread **threadArr = new std::thread* [th];
 
 	for(int t = 0; t < th; t++){
-		threadArr[t] = new std::thread(std::bind(consumer_fasta_task, fastaPool, std::ref(queue1), kmerSize, sketchSize, sketchFunc, isContainment, containCompress, &parameters, &sketchesArr[t]));
+		threadArr[t] = new std::thread(std::bind(consumer_fasta_task, fastaPool, std::ref(queue1), kmerSize, sketchSize, sketchFunc, isContainment, containCompress, &kssdPara, &parameters, &sketchesArr[t]));
 	}
 	producer.join();
 	for(int t = 0; t < th; t++){
 		threadArr[t]->join();
 	}
-
 
 	for(int i = 0; i < th; i++){
 		for(int j = 0; j < sketchesArr[i].size(); j++){
@@ -326,6 +339,11 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 			mh1->update(ks1->seq.s);
 			tmpSketchInfo.minHash = mh1;
 		}
+		else if(sketchFunc == "KSSD"){
+			Sketch::KSSD * kssd = new Sketch::KSSD(kssdPara);
+			kssd->update(ks1->seq.s);
+			tmpSketchInfo.KSSD = kssd;
+		}
 		else if(sketchFunc == "WMH"){
 			Sketch::WMinHash *wmh = new Sketch::WMinHash(parameters);
 			wmh->update(ks1->seq.s);
@@ -346,7 +364,6 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 		tmpSketchInfo.id = index;
 		sketches.push_back(tmpSketchInfo);
 		index++;
-
 	}//end while
 	#endif
 	#endif
@@ -372,6 +389,11 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 	while(getline(fs, fileName)){
 		fileList.push_back(fileName);
 	}
+
+	int half_k = 10;
+	int half_subk = 6;
+	int drlevel = 3;
+	Sketch::KSSDParameters kssdPara(half_k, half_subk, drlevel);
 
 	Sketch::WMHParameters parameter;
 	if(sketchFunc == "WMH"){
@@ -400,6 +422,7 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 		int fileLength = 0;
 
 		Sketch::MinHash * mh1;
+		Sketch::KSSD * kssd;
 		Sketch::WMinHash * wmh1;
 		Sketch::HyperLogLog * hll;
 		Sketch::OrderMinHash * omh;
@@ -440,6 +463,9 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 			else
 				mh1 = new Sketch::MinHash(kmerSize, sketchSize);
 		}
+		else if(sketchFunc == "KSSD"){
+			kssd = new Sketch::KSSD(kssdPara);
+		}
 		else if(sketchFunc == "WMH"){
 			wmh1 = new Sketch::WMinHash(parameter);
 		}
@@ -475,6 +501,9 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 			if(sketchFunc == "MinHash"){
 				mh1->update(ks1->seq.s);
 			}
+			else if(sketchFunc == "KSSD"){
+				kssd->update(ks1->seq.s);
+			}
 			else if(sketchFunc == "WMH"){
 				wmh1->update(ks1->seq.s);
 			}
@@ -501,6 +530,9 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 				if(isContainment)
 					tmpSketchInfo.isContainment = true;
 				tmpSketchInfo.minHash = mh1;
+			}
+			else if(sketchFunc == "KSSD"){
+				tmpSketchInfo.KSSD = kssd;
 			}
 			else if(sketchFunc == "WMH"){
 				tmpSketchInfo.WMinHash = wmh1;

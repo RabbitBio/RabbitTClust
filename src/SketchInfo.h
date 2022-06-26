@@ -28,6 +28,7 @@ struct SketchInfo{
 	bool isContainment = false;
 	
 	Sketch::MinHash* minHash;
+	Sketch::KSSD* KSSD;
 	Sketch::WMinHash* WMinHash;
 	Sketch::HyperLogLog* HLL;
 	Sketch::OrderMinHash * OMH;
