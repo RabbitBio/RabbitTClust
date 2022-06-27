@@ -44,7 +44,7 @@ vector<vector<int> >greedyCluster(vector<SketchInfo> sketches, string sketchFunc
 				cerr << "can only support MinHash and KSSD with greedy incremental clust" << endl;
 				exit(1);
 			}
-			if(dist < threshold){
+			if(dist <= threshold){
 				clustLabels[j] = 1;
 				#pragma omp critical
 				{

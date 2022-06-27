@@ -180,11 +180,15 @@ int main(int argc, char * argv[]){
 	double time0 = get_sec();
 	#endif
 		sketchByFile = loadSketches(inputFile, inputFile1, threads, sketches, sketchFunc);
+		cerr << "the size of sketches is: " << sketches.size() << endl;
 	#ifdef Timer
 	double time1 = get_sec();
 	cerr << "========time of load genome Infos and sketch Infos is: " << time1 - time0 << endl;
 	#endif
 		cluster = greedyCluster(sketches, sketchFunc, threshold, threads);
+		printResult(cluster, sketches, sketchByFile, outputFile);
+		cerr << "write the cluster result into: " << outputFile << endl;
+		cerr << "the size of " << outputFile << " is: " << cluster.size() << endl;
 	#ifdef Timer
 	double time2 = get_sec();
 	cerr << "========time of greedy incremental cluster is: " << time2 - time1 << endl;
@@ -223,11 +227,8 @@ int main(int argc, char * argv[]){
 	printResult(cluster, sketches, sketchByFile, outputFileNew);
 	cerr << "write the cluster without noise into: " << outputFileNew << endl;
 	cerr << "the size of: " << outputFileNew << " is: " << cluster.size() << endl;
-
-	return 0;
 //==========================================================
 #endif
-		printResult(cluster, sketches, sketchByFile, outputFile);
 		return 0;//end main 
 	}//end useFile
 
@@ -296,6 +297,7 @@ int main(int argc, char * argv[]){
 	cluster = greedyCluster(sketches, sketchFunc, threshold, threads);
 	printResult(cluster, sketches, sketchByFile, outputFile);
 	cerr << "write the cluster result into: " << outputFile << endl;
+	cerr << "the size of " << outputFile << " is: " << cluster.size() << endl;
 	#ifdef Timer
 	double t3 = get_sec();
 	cerr << "========time of greedyCluster is: " << t3 - t2 << "========" << endl;
@@ -345,7 +347,6 @@ int main(int argc, char * argv[]){
 	string outputFileNew = outputFile + ".removeNoise";
 	printResult(cluster, sketches, sketchByFile, outputFileNew);
 	cerr << "write the cluster without noise into: " << outputFileNew << endl;
-	cerr << "the cluster size is: " << cluster.size() << endl;
 	cerr << "the size of: " << outputFileNew << " is: " << cluster.size() << endl;
 	
 	#ifdef Timer
