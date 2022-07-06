@@ -151,16 +151,14 @@ vector<int> getNoiseNode(vector<PairInt> densePairArr, double alpha){
 	int clusterSize = densePairArr.size();
 	vector<int> noiseArr;
 	std::sort(densePairArr.begin(), densePairArr.end(), cmpPair);
-	vector<int> denseSet;
-	int curDense = densePairArr[0].second;
-	denseSet.push_back(curDense);
-	for(int i = 1; i < densePairArr.size(); i++){
-		if(densePairArr[i].second - curDense > curDense * alpha){
-			curDense = densePairArr[i].second;
-			denseSet.push_back(curDense);
-		}
-	}
+
+	int sizeDense = densePairArr.size();
+	int indexQ1 = sizeDense / 4;
+	int denseQ1 = densePairArr[indexQ1].second;
 	int thresholdDense = std::min((int)round(clusterSize*alpha), 2); 
+	thresholdDense = std::min(denseQ1-1, thresholdDense);
+	thresholdDense = std::max(thresholdDense, 0);
+
 	for(int i = 0; i < densePairArr.size(); i++){
 		if(densePairArr[i].second <= thresholdDense){
 			noiseArr.push_back(densePairArr[i].first);
