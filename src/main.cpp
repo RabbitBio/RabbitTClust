@@ -208,8 +208,8 @@ int main(int argc, char * argv[]){
 	double alpha = 0.05;
 	vector<int> totalNoiseArr;
 	for(int i = 0; i < tmpClust.size(); i++){
+		if(tmpClust[i].size() == 1) continue;
 		vector<PairInt> curDenseArr;
-		int clustSize = tmpClust[i].size();
 		set<int> denseSet;
 		for(int j = 0; j < tmpClust[i].size(); j++){
 			int element = tmpClust[i][j];
@@ -329,8 +329,8 @@ int main(int argc, char * argv[]){
 	double alpha = 0.05;
 	vector<int> totalNoiseArr;
 	for(int i = 0; i < tmpClust.size(); i++){
+		if(tmpClust[i].size() == 1) continue;
 		vector<PairInt> curDenseArr;
-		int clustSize = tmpClust[i].size();
 		set<int> denseSet;
 		for(int j = 0; j < tmpClust[i].size(); j++){
 			int element = tmpClust[i][j];
