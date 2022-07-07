@@ -61,6 +61,7 @@ int main(int argc, char * argv[]){
 	bool mstLoadSketch = false;
 	int denseSpan = 10;
 	string mstSketchFile = "sketch.info";
+	bool isSave = true;
 	while(argIndex < argc){
 		switch(argv[argIndex][1]){
 			case 't':
@@ -79,6 +80,9 @@ int main(int argc, char * argv[]){
 				containCompress = stoi(argv[++argIndex]);
 				threshold = 0.05;
 				fprintf(stderr, "compute containment, The sketchSize is in proportion with 1/%d \n", containCompress);
+				break;
+			case 'e':
+				isSave = false;
 				break;
 			case 'k':
 				kmerSize = stoi(argv[++argIndex]);
@@ -281,10 +285,12 @@ int main(int argc, char * argv[]){
 	#endif
 
 	string folderPath = currentDataTime();
-	string command = "mkdir -p " + folderPath;
-	system(command.c_str());
+	if(isSave){
+		string command = "mkdir -p " + folderPath;
+		system(command.c_str());
+	}
 
-	if(!mstLoadSketch){
+	if(!mstLoadSketch && isSave){
 		saveSketches(sketches, folderPath, inputFile, sketchFunc, isContainment, containCompress, sketchByFile, sketchSize, kmerSize);
 	}
 	#ifdef Timer
@@ -310,9 +316,11 @@ int main(int argc, char * argv[]){
 	double t3 = get_sec();
 	cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
 	#endif
-	saveANI(folderPath, inputFile, aniArr, sketchFunc);
-	saveDense(folderPath, inputFile, denseArr, denseSpan, sketches);
-	saveMST(folderPath, inputFile, sketchFunc, isContainment, containCompress, sketches, mst, sketchByFile, sketchSize, kmerSize);
+	if(isSave){
+		saveANI(folderPath, inputFile, aniArr, sketchFunc);
+		saveDense(folderPath, inputFile, denseArr, denseSpan, sketches);
+		saveMST(folderPath, inputFile, sketchFunc, isContainment, containCompress, sketches, mst, sketchByFile, sketchSize, kmerSize);
+	}
 	#ifdef Timer
 	double t4 = get_sec();
 	cerr << "========time of saveMST is: " << t4 - t3 << "========" << endl;
