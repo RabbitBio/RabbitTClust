@@ -53,6 +53,8 @@ int updateLabel(vector< vector<LabNum> > &labNumArr, unordered_map<int, GlobalLa
 
 void calLabelFile(string groundTruth, string clustFile, string labelFile);
 
+void calLabelSequence(string groundTruth, string clustFile, string labelFile);
+
 int main(int argc , char *argv[]){
 	string application = argv[0];
 	vector<string> args, descriptions;
@@ -103,10 +105,161 @@ int main(int argc , char *argv[]){
 		calLabelFile(groundTruth, clustFile, labelFile);
 	}
 	else{
-		//calLabelSequence(groundTruth, clustFile, labelFile);
+		calLabelSequence(groundTruth, clustFile, labelFile);
 	}
 
   return 0;
+}
+void calLabelSequence(string groundTruth, string clustFile, string labelFile){
+	//--------for groundTruth--------------
+	ifstream ifs0(groundTruth);
+	if(!ifs0){
+		cerr << "error open: " << groundTruth << endl;
+		exit(1);
+	}
+	unordered_map<string, int> seqName_taxid_map;
+	unordered_map<string, string> seqName_organismName_map;
+	string line;
+	getline(ifs0, line);//for the header line
+	while(getline(ifs0, line)){
+		stringstream ss;
+		string seqName, organismName(""), tmpStr;
+		int taxid;
+		ss << line;
+		ss >> seqName >> taxid;
+		while(ss >> tmpStr){
+			organismName += tmpStr + ' ';
+		}
+		organismName.substr(0, organismName.length()-1);
+		seqName_taxid_map.insert({seqName, taxid});
+		seqName_organismName_map.insert({seqName, organismName});
+	}
+	ifs0.close();
+	//for(auto x : seqName_taxid_map){
+	//	cerr << x.first << '\t' << x.second << endl;
+	//}
+	//exit(0);
+
+	//--------for cluster file--------------------------
+	vector<int> ourClust;
+	vector<int> standardClust;
+	unordered_map<string, int> standardMap;
+	unordered_map<int, int> curMap;
+	vector<vector<LabNum>> labNumArr;
+	vector<PosNum> posArr;
+	int startPos = 0;
+	
+	int numNotInGroundTruth = 0;
+	ifstream ifs1(clustFile);
+	if(!ifs1){
+		cerr << "error open: " << clustFile << endl;
+		exit(1);
+	}
+	while(getline(ifs1, line)){
+		if(line[0] != '\t'){
+			if(curMap.size() != 0){
+				int clustSize = 0;
+				vector<LabNum> curClustInfo;
+				for(auto x : curMap){
+					LabNum ln;
+					ln.label = x.first;
+					ln.number = x.second;
+					curClustInfo.push_back(ln);
+					clustSize += x.second;
+				}
+				std::sort(curClustInfo.begin(), curClustInfo.end(), cmpLabNum);
+				labNumArr.push_back(curClustInfo);
+				PosNum pn;
+				pn.startPos = startPos;
+				pn.clustSize = clustSize;
+				posArr.push_back(pn);
+				startPos += clustSize;
+				unordered_map<int, int>().swap(curMap);
+			}
+		}
+		else{
+			stringstream ss;
+			ss << line;
+			int curId, genomeId;
+			string genomeSize, fileName, genomeName;
+			ss >> curId >> genomeId >> genomeSize >> genomeName;
+			string key = genomeName;
+			if(seqName_taxid_map.find(key) == seqName_taxid_map.end()){
+				numNotInGroundTruth++;
+				continue;
+			}
+			else{
+				int curLabel = seqName_taxid_map[key];
+				standardClust.push_back(curLabel);
+				curMap.insert({curLabel, 0});
+				curMap[curLabel]++;
+			}
+		}
+	}
+	if(curMap.size() != 0){
+		int clustSize = 0;
+		vector<LabNum> curClustInfo;
+		for(auto x : curMap){
+			LabNum ln;
+			ln.label = x.first;
+			ln.number = x.second;
+			curClustInfo.push_back(ln);
+			clustSize += x.second;
+		}
+		std::sort(curClustInfo.begin(), curClustInfo.end(), cmpLabNum);
+		labNumArr.push_back(curClustInfo);
+		PosNum pn;
+		pn.startPos = startPos;
+		pn.clustSize = clustSize;
+		posArr.push_back(pn);
+		startPos += clustSize;
+		unordered_map<int, int>().swap(curMap);
+	}
+
+	//-------------for update labels------------------------------------
+	unordered_map<int, GlobalLabelInfo> globalMap;
+	int badLabel = -1;
+	int clustNumber = labNumArr.size();
+	vector<int> resLabelArr;
+	resLabelArr.resize(clustNumber); 
+	for(int i = 0; i < clustNumber; i++)
+	{
+		badLabel = updateLabel(labNumArr, globalMap, i, badLabel, resLabelArr); 
+	}
+	for(int i = 0; i < posArr.size(); i++)
+	{
+		int startPos = posArr[i].startPos;
+		int clustSize = posArr[i].clustSize;
+		for(int j = 0; j < clustSize; j++)
+		{
+			ourClust.push_back(resLabelArr[i]);
+		}
+	}
+	cerr << "the number of which not in the groundTruth is: " << numNotInGroundTruth << endl;
+	cerr << "the size of ourClust is: " << ourClust.size() << endl;
+	cerr << "the size of standardClust is: " << standardClust.size() << endl;
+	if(ourClust.size() != standardClust.size())
+	{
+		cerr << "the size of ourClust is not equal to the standardClust, exit()" << endl;
+		return;
+	}
+
+	//--------------------for output labels-------------------------------------
+	ofstream ofs(labelFile);
+	for(int i = 0; i < ourClust.size(); i++)
+		ofs << ourClust[i] << ' ';
+	ofs << endl;
+	for(int i = 0; i < standardClust.size(); i++)
+		ofs << standardClust[i] << ' ';
+	ofs << endl;
+	ofs.close();
+
+	ofstream ofs1(labelFile+".humanReadable");
+	for(int i = 0; i < ourClust.size(); i++)
+	{
+		ofs1 << ourClust[i] << '\t' << standardClust[i] << endl;
+	}
+	ofs1.close();
 }
 
 void calLabelFile(string groundTruth, string clustFile, string labelFile){
