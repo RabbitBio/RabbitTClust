@@ -37,8 +37,28 @@
 #include <fstream>
 #include <sstream>
 #include <sys/sysinfo.h>
+#include <sys/stat.h>
 
 using namespace std;
+
+//int getKerSize(bool sketchByFile, string inputFile, double warning_rate){
+//	uint64_t maxSize = 1;
+//	if(sketchByFile){
+//		ifstream ifs(inputFile);
+//		string line;
+//		
+//		while(getline(ifs, line)){
+//			struct stat statbuf;
+//			stat(line.c_str(), &statbuf);
+//			uint64_t curSize = statbuf.st_size;
+//			maxSize = std::max(maxSize, curSize);
+//		}
+//		ifs.close();
+//	}
+//	int recommandKmerSize = ceil(log(maxSize * (1.0 - warning_rate) / warning_rate) / log(4));
+//
+//	return recommandKmerSize;
+//}
 
 int main(int argc, char * argv[]){
 
@@ -62,6 +82,7 @@ int main(int argc, char * argv[]){
 	int denseSpan = 10;
 	string mstSketchFile = "sketch.info";
 	bool isSave = true;
+	bool isSetKmer = false;
 	while(argIndex < argc){
 		switch(argv[argIndex][1]){
 			case 't':
@@ -85,6 +106,7 @@ int main(int argc, char * argv[]){
 				isSave = false;
 				break;
 			case 'k':
+				isSetKmer = true;
 				kmerSize = stoi(argv[++argIndex]);
 				fprintf(stderr, "set kmerSize: %d\n", kmerSize);
 				break;
@@ -169,7 +191,28 @@ int main(int argc, char * argv[]){
 	cerr << "use the MST cluster" << endl;
 #endif
 	
-
+	uint64_t maxSize = getMaxSize(sketchByFile, inputFile, threads);
+	cerr << "the maxSize of " << inputFile << " is: " << maxSize << endl;
+	double warning_rate = 0.01;
+	double recommend_rate = 0.0001;
+	int alphabetSize = 4;//for "AGCT"
+	int recommendedKmerSize = ceil(log(maxSize * (1 - recommend_rate) / recommend_rate) / log(4));
+	int warningKmerSize = ceil(log(maxSize * (1 - warning_rate) / warning_rate) / log(4));
+	if(!isSetKmer){
+		kmerSize = recommendedKmerSize;
+	}
+	else{
+		if(kmerSize < warningKmerSize){
+			cerr << "the kmerSize " << kmerSize << " is too small for the maximum genome size of " << maxSize << endl;
+			cerr << "replace the kmerSize to the: " << recommendedKmerSize << " for reducing the random collision of kmers" << endl;
+			kmerSize = recommendedKmerSize;
+		}
+		else if(kmerSize > recommendedKmerSize + 3){
+			cerr << "the kmerSize " << kmerSize << " maybe too large for the maximum genome size of " << maxSize << endl;
+			cerr << "replace the kmerSize to the " << recommendedKmerSize << " for increasing the sensitivity of genome comparison" << endl;
+			kmerSize = recommendedKmerSize;
+		}
+	}
 
 	vector<SketchInfo> sketches;
 	vector<vector<int> > cluster;

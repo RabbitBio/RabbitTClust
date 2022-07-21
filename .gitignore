@@ -25,6 +25,7 @@ clust
 clust-mst
 clust-greedy
 *.list
+*.fna
 *List
 run.sh
 

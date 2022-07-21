@@ -36,6 +36,7 @@ struct SketchInfo{
 
 
 
+uint64_t getMaxSize(bool sketchByFile, string inputFile, int threads);
 bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads);
 bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads);
 bool cmpSketch(SketchInfo s1, SketchInfo s2);

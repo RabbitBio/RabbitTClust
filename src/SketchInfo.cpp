@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sstream>
 #include <zlib.h>
+#include <sys/stat.h>
 
 #ifdef THREADPOOL_MINHASH
 #include "ThreadPool.h"
@@ -111,6 +112,28 @@ int producer_fasta_task(std::string file, rabbit::fa::FastaDataPool* fastaPool, 
 	return 0;
 }
 
+//void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, vector<uint64_t> * sizeArr){
+void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, uint64_t * maxSize){
+	rabbit::int64 id = 0;
+	rabbit::fa::FastaChunk *faChunk;
+	while(dq.Pop(id, faChunk)){
+		std::vector<Reference> data;
+		int ref_num = rabbit::fa::chunkListFormat(*faChunk, data);
+		for(Reference &r: data){
+			uint64_t length = (uint64_t)r.length;
+			*maxSize = std::max(*maxSize, length);
+			//sizeArr->push_back(length);
+		}
+		rabbit::fa::FastaDataChunk *tmp = faChunk->chunk;
+		do{
+			if(tmp != NULL){
+			fastaPool->Release(tmp);
+			tmp = tmp->next;
+			}
+		}while(tmp!=NULL);
+	}
+}
+
 void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, Sketch::KSSDParameters *kssdPara, Sketch::WMHParameters * parameters, vector<SketchInfo> *sketches){
 	int line_num = 0;
 	rabbit::int64 id = 0;
@@ -180,10 +203,73 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 }
 #endif
 
+uint64_t getMaxSize(bool sketchByFile, string inputFile, int threads){
+	uint64_t maxSize = 1;
+	if(sketchByFile){
+		ifstream ifs(inputFile);
+		string line;
+		while(getline(ifs, line)){
+			struct stat statbuf;
+			stat(line.c_str(), &statbuf);
+			uint64_t curSize = statbuf.st_size;
+			maxSize = std::max(maxSize, curSize);
+		}
+		ifs.close();
+	}
+	else{//sketch by sequence
+	#ifdef RABBIT_FX
+	int th = std::max(threads-1, 1);
+	uint64_t sizeArr[th];
+	for(int i = 0; i < th; i++)
+		sizeArr[i] = 1;
+
+	rabbit::fa::FastaDataPool *fastaPool = new rabbit::fa::FastaDataPool(256, 1<< 24);
+	FaChunkQueue queue1(128, 1);
+	std::thread producer(producer_fasta_task, inputFile, fastaPool, std::ref(queue1));
+	std::thread **threadArr = new std::thread* [th];
+	for(int t = 0; t < th; t++){
+		threadArr[t] = new std::thread(std::bind(consumer_fasta_seqSize, fastaPool, std::ref(queue1), &sizeArr[t]));
+	}
+	producer.join();
+
+	for(int t = 0; t < th; t++){
+		threadArr[t]->join();
+	}
+	for(int i = 0; i < th; i++){
+		maxSize = std::max(maxSize, sizeArr[i]);
+	}
+	#else 
+		gzFile fp1 = gzopen(inputFile.c_str(), "r");
+		if(!fp1){
+			fprintf(stderr, "cannot open the genome file, %s\n", inputFile.c_str());
+			exit(1);
+		}
+		kseq_t * ks1 = kseq_init(fp1);
+		while(1){
+			int length = kseq_read(ks1);
+			if(length < 0) break;
+			maxSize = std::max(maxSize, (uint64_t)length);
+		}
+	#endif
+	}
+
+	return maxSize;
+}
+
+
+
 bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
+	cerr << "input File is: " << inputFile << endl;
+	int sufIndex = inputFile.find_last_of('.');
+	string sufName = inputFile.substr(sufIndex+1);
+	if(sufName != "fasta" && sufName != "fna" && sufName != "fa")
+	{
+		cerr << "error input format file: " << inputFile << endl;
+		cerr << "Only support FASTA files" << endl;
+		exit(0);
+	}
 	gzFile fp1;
 	kseq_t * ks1;
-	cerr << "input File is: " << inputFile << endl;
 	fp1 = gzopen(inputFile.c_str(), "r");
 	if(fp1 == NULL){
 		fprintf(stderr, "cannot open the genome file, %s\n", inputFile.c_str());
@@ -273,14 +359,6 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 	int th = std::max(threads - 1, 1);//consumer threads number;
 	vector<SketchInfo>  sketchesArr[th];
 	//vector<SimilarityInfo>  similarityInfosArr[th];
-	int sufIndex = inputFile.find_last_of('.');
-	string sufName = inputFile.substr(sufIndex+1);
-	if(sufName != "fasta" && sufName != "fna" && sufName != "fa")
-	{
-		cerr << "error input format file: " << inputFile << endl;
-		cerr << "Only support FASTA files" << endl;
-		exit(0);
-	}
 	
 	rabbit::fa::FastaDataPool *fastaPool = new rabbit::fa::FastaDataPool(256, 1<< 24);
 	FaChunkQueue queue1(128, 1);
