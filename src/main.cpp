@@ -9,7 +9,7 @@
  * The program includes several sections:
  * section 1: read the input arguments and init the parameters.
  * section 2: read genome files and create the sketches.
- * section 3: compute the distance matrix and generate the Minimum Spanning Tree(MST).
+ * section 3: compute the distance matrix and generate the Minimum Spanning Tree(MST) or greedy incremental clustering.
  * section 4: generate the clusters with the MST using different distance threshold.
  *
  * Author: Xiaoming Xu
@@ -77,7 +77,7 @@ int main(int argc, char * argv[]){
 	double threshold = 0.05;
 	int kmerSize = 21;
 	int sketchSize = 1000;
-	int containCompress = 10000;
+	int containCompress = 1000;
 	bool mstLoadSketch = false;
 	int denseSpan = 10;
 	string mstSketchFile = "sketch.info";
@@ -184,15 +184,26 @@ int main(int argc, char * argv[]){
 		++argIndex;
 	}//end while argument parse;
 
+	uint64_t maxSize, minSize, averageSize;
+	calSize(sketchByFile, inputFile, threads, maxSize, minSize, averageSize);
 
 #ifdef GREEDY_CLUST
 	cerr << "use the Greedy cluster" << endl;
+	if(!isContainment){
+		containCompress = averageSize / 1000;
+		isContainment = true;
+	}
+	else{
+		if(averageSize / containCompress < 10){
+			cerr << "the containCompress " << containCompress << " is too large and the sketch size is too small" << endl;
+			containCompress = averageSize / 1000;
+			cerr << "set the containCompress to: " << containCompress << endl;
+		}
+	}
 #else
 	cerr << "use the MST cluster" << endl;
 #endif
 	
-	uint64_t maxSize = getMaxSize(sketchByFile, inputFile, threads);
-	cerr << "the maxSize of " << inputFile << " is: " << maxSize << endl;
 	double warning_rate = 0.01;
 	double recommend_rate = 0.0001;
 	int alphabetSize = 4;//for "AGCT"

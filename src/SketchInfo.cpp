@@ -112,8 +112,7 @@ int producer_fasta_task(std::string file, rabbit::fa::FastaDataPool* fastaPool, 
 	return 0;
 }
 
-//void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, vector<uint64_t> * sizeArr){
-void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, uint64_t * maxSize){
+void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, uint64_t* maxSize, uint64_t* minSize, uint64_t* totalSize,	uint64_t* number){
 	rabbit::int64 id = 0;
 	rabbit::fa::FastaChunk *faChunk;
 	while(dq.Pop(id, faChunk)){
@@ -122,6 +121,9 @@ void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &
 		for(Reference &r: data){
 			uint64_t length = (uint64_t)r.length;
 			*maxSize = std::max(*maxSize, length);
+			*minSize = std::min(*minSize, length);
+			*totalSize += length;
+			*number = *number + 1;
 			//sizeArr->push_back(length);
 		}
 		rabbit::fa::FastaDataChunk *tmp = faChunk->chunk;
@@ -203,8 +205,12 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 }
 #endif
 
-uint64_t getMaxSize(bool sketchByFile, string inputFile, int threads){
-	uint64_t maxSize = 1;
+void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize, uint64_t& minSize, uint64_t& averageSize){
+	maxSize = 0;
+	minSize = 1 << 31;
+	averageSize = 0;
+	uint64_t totalSize = 0;
+	int number = 0;
 	if(sketchByFile){
 		ifstream ifs(inputFile);
 		string line;
@@ -213,47 +219,67 @@ uint64_t getMaxSize(bool sketchByFile, string inputFile, int threads){
 			stat(line.c_str(), &statbuf);
 			uint64_t curSize = statbuf.st_size;
 			maxSize = std::max(maxSize, curSize);
+			minSize = std::min(minSize, curSize);
+			totalSize += curSize;
+			number++;
 		}
 		ifs.close();
 	}
 	else{//sketch by sequence
-	#ifdef RABBIT_FX
-	int th = std::max(threads-1, 1);
-	uint64_t sizeArr[th];
-	for(int i = 0; i < th; i++)
-		sizeArr[i] = 1;
-
-	rabbit::fa::FastaDataPool *fastaPool = new rabbit::fa::FastaDataPool(256, 1<< 24);
-	FaChunkQueue queue1(128, 1);
-	std::thread producer(producer_fasta_task, inputFile, fastaPool, std::ref(queue1));
-	std::thread **threadArr = new std::thread* [th];
-	for(int t = 0; t < th; t++){
-		threadArr[t] = new std::thread(std::bind(consumer_fasta_seqSize, fastaPool, std::ref(queue1), &sizeArr[t]));
-	}
-	producer.join();
-
-	for(int t = 0; t < th; t++){
-		threadArr[t]->join();
-	}
-	for(int i = 0; i < th; i++){
-		maxSize = std::max(maxSize, sizeArr[i]);
-	}
-	#else 
-		gzFile fp1 = gzopen(inputFile.c_str(), "r");
-		if(!fp1){
-			fprintf(stderr, "cannot open the genome file, %s\n", inputFile.c_str());
-			exit(1);
+		#ifdef RABBIT_FX
+		int th = std::max(threads-1, 1);
+		uint64_t maxSizeArr[th];
+		uint64_t minSizeArr[th];
+		uint64_t totalSizeArr[th];
+		uint64_t numArr[th];
+		for(int i = 0; i < th; i++){
+			maxSizeArr[i] = 1;
+			minSizeArr[i] = 1 << 31;
+			totalSizeArr[i] = 0;
+			numArr[i] = 0;
 		}
-		kseq_t * ks1 = kseq_init(fp1);
-		while(1){
-			int length = kseq_read(ks1);
-			if(length < 0) break;
-			maxSize = std::max(maxSize, (uint64_t)length);
-		}
-	#endif
-	}
 
-	return maxSize;
+		rabbit::fa::FastaDataPool *fastaPool = new rabbit::fa::FastaDataPool(256, 1<< 24);
+		FaChunkQueue queue1(128, 1);
+		std::thread producer(producer_fasta_task, inputFile, fastaPool, std::ref(queue1));
+		std::thread **threadArr = new std::thread* [th];
+		for(int t = 0; t < th; t++){
+			threadArr[t] = new std::thread(std::bind(consumer_fasta_seqSize, fastaPool, std::ref(queue1), &maxSizeArr[t], &minSizeArr[t], &totalSizeArr[t], &numArr[t]));
+		}
+		producer.join();
+
+		for(int t = 0; t < th; t++){
+			threadArr[t]->join();
+		}
+		for(int i = 0; i < th; i++){
+			maxSize = std::max(maxSize, maxSizeArr[i]);
+			minSize = std::min(minSize, minSizeArr[i]);
+			totalSize += totalSizeArr[i];
+			number += numArr[i];
+		}
+		#else 
+			gzFile fp1 = gzopen(inputFile.c_str(), "r");
+			if(!fp1){
+				fprintf(stderr, "cannot open the genome file, %s\n", inputFile.c_str());
+				exit(1);
+			}
+			kseq_t * ks1 = kseq_init(fp1);
+			while(1){
+				int length = kseq_read(ks1);
+				if(length < 0) break;
+				maxSize = std::max(maxSize, (uint64_t)length);
+				minSize = std::min(minSize, (uint64_t)length);
+				totalSize += (uint64_t)length;
+				number++;
+			}
+		#endif
+	}
+	averageSize = totalSize / number;
+	cerr << "the number is: " << number << endl;
+	cerr << "the totalSize is: " << totalSize << endl;
+	cerr << "the maxSize is: " << maxSize << endl;
+	cerr << "the minSize is: " << minSize << endl;
+	cerr << "the averageSize is: " << averageSize << endl;
 }
 
 
