@@ -112,7 +112,7 @@ int producer_fasta_task(std::string file, rabbit::fa::FastaDataPool* fastaPool, 
 	return 0;
 }
 
-void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, uint64_t* maxSize, uint64_t* minSize, uint64_t* totalSize,	uint64_t* number){
+void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, uint64_t* maxSize, uint64_t* minSize, uint64_t* totalSize,	uint64_t* number, uint64_t* badNumber){
 	rabbit::int64 id = 0;
 	rabbit::fa::FastaChunk *faChunk;
 	while(dq.Pop(id, faChunk)){
@@ -120,6 +120,10 @@ void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &
 		int ref_num = rabbit::fa::chunkListFormat(*faChunk, data);
 		for(Reference &r: data){
 			uint64_t length = (uint64_t)r.length;
+			if(length < 10000){
+				*badNumber = *badNumber + 1;
+				continue;
+			}
 			*maxSize = std::max(*maxSize, length);
 			*minSize = std::min(*minSize, length);
 			*totalSize += length;
@@ -211,6 +215,7 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 	averageSize = 0;
 	uint64_t totalSize = 0;
 	int number = 0;
+	int badNumber = 0;
 	if(sketchByFile){
 		ifstream ifs(inputFile);
 		string line;
@@ -218,6 +223,10 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 			struct stat statbuf;
 			stat(line.c_str(), &statbuf);
 			uint64_t curSize = statbuf.st_size;
+			if(curSize < 10000){
+				badNumber++;
+				continue;
+			}
 			maxSize = std::max(maxSize, curSize);
 			minSize = std::min(minSize, curSize);
 			totalSize += curSize;
@@ -232,11 +241,13 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 		uint64_t minSizeArr[th];
 		uint64_t totalSizeArr[th];
 		uint64_t numArr[th];
+		uint64_t badNumArr[th];
 		for(int i = 0; i < th; i++){
 			maxSizeArr[i] = 1;
 			minSizeArr[i] = 1 << 31;
 			totalSizeArr[i] = 0;
 			numArr[i] = 0;
+			badNumArr[i] = 0;
 		}
 
 		rabbit::fa::FastaDataPool *fastaPool = new rabbit::fa::FastaDataPool(256, 1<< 24);
@@ -244,7 +255,7 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 		std::thread producer(producer_fasta_task, inputFile, fastaPool, std::ref(queue1));
 		std::thread **threadArr = new std::thread* [th];
 		for(int t = 0; t < th; t++){
-			threadArr[t] = new std::thread(std::bind(consumer_fasta_seqSize, fastaPool, std::ref(queue1), &maxSizeArr[t], &minSizeArr[t], &totalSizeArr[t], &numArr[t]));
+			threadArr[t] = new std::thread(std::bind(consumer_fasta_seqSize, fastaPool, std::ref(queue1), &maxSizeArr[t], &minSizeArr[t], &totalSizeArr[t], &numArr[t], &badNumArr[t]));
 		}
 		producer.join();
 
@@ -256,6 +267,7 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 			minSize = std::min(minSize, minSizeArr[i]);
 			totalSize += totalSizeArr[i];
 			number += numArr[i];
+			badNumber += badNumArr[i];
 		}
 		#else 
 			gzFile fp1 = gzopen(inputFile.c_str(), "r");
@@ -267,6 +279,10 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 			while(1){
 				int length = kseq_read(ks1);
 				if(length < 0) break;
+				if(length < 10000){
+					badNumber++;
+					continue;
+				}
 				maxSize = std::max(maxSize, (uint64_t)length);
 				minSize = std::min(minSize, (uint64_t)length);
 				totalSize += (uint64_t)length;
@@ -275,11 +291,19 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 		#endif
 	}
 	averageSize = totalSize / number;
-	cerr << "the number is: " << number << endl;
-	cerr << "the totalSize is: " << totalSize << endl;
-	cerr << "the maxSize is: " << maxSize << endl;
-	cerr << "the minSize is: " << minSize << endl;
-	cerr << "the averageSize is: " << averageSize << endl;
+	int totalNumber = number + badNumber;
+	cerr << "\t===the number is: " << number << endl;
+	cerr << "\t===the badNumber is: " << badNumber << endl;
+	cerr << "\t===the totalNumber is: " << totalNumber << endl;
+	
+	if((double)badNumber / totalNumber >= 0.2)
+	{
+		fprintf(stderr, "Warning: there are %d poor quality (length < 10000) genome assemblies in the total %d genome assemblied.\n", badNumber, totalNumber);
+	}
+	cerr << "\t===the totalSize is: " << totalSize << endl;
+	cerr << "\t===the maxSize is: " << maxSize << endl;
+	cerr << "\t===the minSize is: " << minSize << endl;
+	cerr << "\t===the averageSize is: " << averageSize << endl;
 }
 
 
