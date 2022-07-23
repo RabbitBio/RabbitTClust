@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <sys/sysinfo.h>
 #include <omp.h>
+#include "groundTruth.h"
 
 
 using namespace std;
@@ -112,33 +113,9 @@ int main(int argc , char *argv[]){
 }
 void calLabelSequence(string groundTruth, string clustFile, string labelFile){
 	//--------for groundTruth--------------
-	ifstream ifs0(groundTruth);
-	if(!ifs0){
-		cerr << "error open: " << groundTruth << endl;
-		exit(1);
-	}
 	unordered_map<string, int> seqName_taxid_map;
-	unordered_map<string, string> seqName_organismName_map;
-	string line;
-	getline(ifs0, line);//for the header line
-	while(getline(ifs0, line)){
-		stringstream ss;
-		string seqName, organismName(""), tmpStr;
-		int taxid;
-		ss << line;
-		ss >> seqName >> taxid;
-		while(ss >> tmpStr){
-			organismName += tmpStr + ' ';
-		}
-		organismName.substr(0, organismName.length()-1);
-		seqName_taxid_map.insert({seqName, taxid});
-		seqName_organismName_map.insert({seqName, organismName});
-	}
-	ifs0.close();
-	//for(auto x : seqName_taxid_map){
-	//	cerr << x.first << '\t' << x.second << endl;
-	//}
-	//exit(0);
+	unordered_map<int, string> taxid_organismName_map;
+	getGroundTruthBySequence(groundTruth, seqName_taxid_map, taxid_organismName_map);
 
 	//--------for cluster file--------------------------
 	vector<int> ourClust;
@@ -148,6 +125,7 @@ void calLabelSequence(string groundTruth, string clustFile, string labelFile){
 	vector<vector<LabNum>> labNumArr;
 	vector<PosNum> posArr;
 	int startPos = 0;
+	string line;
 	
 	int numNotInGroundTruth = 0;
 	ifstream ifs1(clustFile);
@@ -264,29 +242,9 @@ void calLabelSequence(string groundTruth, string clustFile, string labelFile){
 
 void calLabelFile(string groundTruth, string clustFile, string labelFile){
 	//--------for groundTruth--------------
-	ifstream ifs0(groundTruth);
-	if(!ifs0){
-		cerr << "error open: " << groundTruth << endl;
-		exit(1);
-	}
 	unordered_map<string, int> accession_taxid_map;
-	unordered_map<string, string> accession_organismName_map;
-	string line;
-	getline(ifs0, line);//for the header line
-	while(getline(ifs0, line)){
-		stringstream ss;
-		string accession, organismName(""), tmpStr;
-		int taxid;
-		ss << line;
-		ss >> accession >> taxid;
-		while(ss >> tmpStr){
-			organismName += tmpStr + ' ';
-		}
-		organismName.substr(0, organismName.length()-1);
-		accession_taxid_map.insert({accession, taxid});
-		accession_organismName_map.insert({accession, organismName});
-	}
-	ifs0.close();
+	unordered_map<int, string> taxid_organismName_map;
+	getGroundTruthByFile(groundTruth, accession_taxid_map, taxid_organismName_map);
 
 	//--------for cluster file--------------------------
 	vector<int> ourClust;
@@ -303,6 +261,7 @@ void calLabelFile(string groundTruth, string clustFile, string labelFile){
 		cerr << "error open: " << clustFile << endl;
 		exit(1);
 	}
+	string line;
 	while(getline(ifs1, line)){
 		if(line[0] != '\t'){
 			if(curMap.size() != 0){
