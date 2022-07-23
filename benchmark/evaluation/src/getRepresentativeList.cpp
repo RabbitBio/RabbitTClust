@@ -18,8 +18,6 @@
 #include <omp.h>
 #include <set>
 #include <math.h>
-#include <boost/algorithm/string/classification.hpp>
-#include <boost/algorithm/string/split.hpp>
 #include <zlib.h>
 
 
