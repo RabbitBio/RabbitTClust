@@ -183,6 +183,13 @@ int main(int argc, char * argv[]){
 		//}
 		++argIndex;
 	}//end while argument parse;
+	
+	if(argc == 1){
+		printUsage();
+		return 1;
+	}
+
+
 
 	uint64_t maxSize, minSize, averageSize;
 	calSize(sketchByFile, inputFile, threads, maxSize, minSize, averageSize);
