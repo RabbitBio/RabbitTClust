@@ -99,7 +99,6 @@ int main(int argc, char * argv[]){
 			case 'c':
 				isContainment = true;
 				containCompress = stoi(argv[++argIndex]);
-				threshold = 0.05;
 				fprintf(stderr, "compute containment, The sketchSize is in proportion with 1/%d \n", containCompress);
 				break;
 			case 'e':
