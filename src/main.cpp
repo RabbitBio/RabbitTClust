@@ -190,46 +190,6 @@ int main(int argc, char * argv[]){
 
 
 
-	uint64_t maxSize, minSize, averageSize;
-	calSize(sketchByFile, inputFile, threads, maxSize, minSize, averageSize);
-
-#ifdef GREEDY_CLUST
-	cerr << "use the Greedy cluster" << endl;
-	if(!isContainment){
-		containCompress = averageSize / 1000;
-		isContainment = true;
-	}
-	else{
-		if(averageSize / containCompress < 10){
-			cerr << "the containCompress " << containCompress << " is too large and the sketch size is too small" << endl;
-			containCompress = averageSize / 1000;
-			cerr << "set the containCompress to: " << containCompress << endl;
-		}
-	}
-#else
-	cerr << "use the MST cluster" << endl;
-#endif
-	
-	double warning_rate = 0.01;
-	double recommend_rate = 0.0001;
-	int alphabetSize = 4;//for "AGCT"
-	int recommendedKmerSize = ceil(log(maxSize * (1 - recommend_rate) / recommend_rate) / log(4));
-	int warningKmerSize = ceil(log(maxSize * (1 - warning_rate) / warning_rate) / log(4));
-	if(!isSetKmer){
-		kmerSize = recommendedKmerSize;
-	}
-	else{
-		if(kmerSize < warningKmerSize){
-			cerr << "the kmerSize " << kmerSize << " is too small for the maximum genome size of " << maxSize << endl;
-			cerr << "replace the kmerSize to the: " << recommendedKmerSize << " for reducing the random collision of kmers" << endl;
-			kmerSize = recommendedKmerSize;
-		}
-		else if(kmerSize > recommendedKmerSize + 3){
-			cerr << "the kmerSize " << kmerSize << " maybe too large for the maximum genome size of " << maxSize << endl;
-			cerr << "replace the kmerSize to the " << recommendedKmerSize << " for increasing the sensitivity of genome comparison" << endl;
-			kmerSize = recommendedKmerSize;
-		}
-	}
 
 	vector<SketchInfo> sketches;
 	vector<vector<int> > cluster;
@@ -295,6 +255,47 @@ int main(int argc, char * argv[]){
 #endif
 		return 0;//end main 
 	}//end useFile
+
+	uint64_t maxSize, minSize, averageSize;
+	calSize(sketchByFile, inputFile, threads, maxSize, minSize, averageSize);
+
+#ifdef GREEDY_CLUST
+	cerr << "use the Greedy cluster" << endl;
+	if(!isContainment){
+		//containCompress = averageSize / 1000;
+		//isContainment = true;
+	}
+	else{
+		if(averageSize / containCompress < 10){
+			cerr << "the containCompress " << containCompress << " is too large and the sketch size is too small" << endl;
+			containCompress = averageSize / 1000;
+			cerr << "set the containCompress to: " << containCompress << endl;
+		}
+	}
+#else
+	cerr << "use the MST cluster" << endl;
+#endif
+	
+	double warning_rate = 0.01;
+	double recommend_rate = 0.0001;
+	int alphabetSize = 4;//for "AGCT"
+	int recommendedKmerSize = ceil(log(maxSize * (1 - recommend_rate) / recommend_rate) / log(4));
+	int warningKmerSize = ceil(log(maxSize * (1 - warning_rate) / warning_rate) / log(4));
+	if(!isSetKmer){
+		kmerSize = recommendedKmerSize;
+	}
+	else{
+		if(kmerSize < warningKmerSize){
+			cerr << "the kmerSize " << kmerSize << " is too small for the maximum genome size of " << maxSize << endl;
+			cerr << "replace the kmerSize to the: " << recommendedKmerSize << " for reducing the random collision of kmers" << endl;
+			kmerSize = recommendedKmerSize;
+		}
+		else if(kmerSize > recommendedKmerSize + 3){
+			cerr << "the kmerSize " << kmerSize << " maybe too large for the maximum genome size of " << maxSize << endl;
+			cerr << "replace the kmerSize to the " << recommendedKmerSize << " for increasing the sensitivity of genome comparison" << endl;
+			kmerSize = recommendedKmerSize;
+		}
+	}
 
 	if(sketchByFile) cerr << "sketch by file!" << endl;
 	else cerr << "sketch by sequence!" << endl;

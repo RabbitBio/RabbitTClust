@@ -46,8 +46,14 @@ struct IdNameNum{
 };
 
 
-bool cmpPurity(PurityInfo p1, PurityInfo p2){
+bool cmpPurityNumber(PurityInfo p1, PurityInfo p2){
 	return p1.totalNumber > p2.totalNumber;
+}
+bool cmpPurityPurity(PurityInfo p1, PurityInfo p2){
+	if(p1.purity < p2.purity) return true;
+	else if(p1.purity > p2.purity) return false;
+	else return p1.totalNumber > p2.totalNumber;
+
 }
 bool cmpIdNum(IdNameNum id1, IdNameNum id2){
 	return id1.number > id2.number;
@@ -202,7 +208,7 @@ void calPuritySequence(string groundTruth, string clustFile, string outputFile){
 		PurityInfo curPur(totalArr[i], dominantArr[i].number, curPurity, curDominantSpeciesId, curDominantOrganism);
 		partPurity.push_back(curPur);
 	}
-	std::sort(partPurity.begin(), partPurity.end(), cmpPurity);
+	std::sort(partPurity.begin(), partPurity.end(), cmpPurityNumber);
 
 	assert(totalArr.size() == partPurity.size());
 	ofstream ofs(outputFile);
@@ -314,14 +320,17 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 		PurityInfo curPur(totalArr[i], dominantArr[i].number, curPurity, curDominantSpeciesId, curDominantOrganism);
 		partPurity.push_back(curPur);
 	}
-	std::sort(partPurity.begin(), partPurity.end(), cmpPurity);
+	std::sort(partPurity.begin(), partPurity.end(), cmpPurityNumber);
+	//std::sort(partPurity.begin(), partPurity.end(), cmpPurityPurity);
 
+	double minPurity = 1.0;
 	assert(totalArr.size() == partPurity.size());
 	ofstream ofs(outputFile);
 	FILE* fp = fopen(outputFile.c_str(), "w");
 	fprintf(fp, "Purity\ttotalNumber\tdominateNumber\tdominateSpeciesId\tdominateOriganism\n");
 	for(int i = 0; i < totalArr.size(); i++)
 	{
+		minPurity = std::min(minPurity, partPurity[i].purity);
 		fprintf(fp, "%8lf\t%8d\t%8d\t\t%8d\t%s\n", partPurity[i].purity, partPurity[i].totalNumber, partPurity[i].dominateNumber, partPurity[i].dominateSpeciesId, partPurity[i].dominateOrganism.c_str());
 	}
 	fclose(fp);
@@ -332,6 +341,7 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 	cerr << "the final purity is: " << totalPurity << endl;
 	cerr << "the total genome number of " << clustFile << " is: " << totalGenomeNumber << endl;
 	cerr << "the total dominant genome number of " << clustFile << " is: " << totalDominantNumber << endl;
+	cerr << "the minimum purity of cluster is: " << minPurity << endl;
 
 }
 
