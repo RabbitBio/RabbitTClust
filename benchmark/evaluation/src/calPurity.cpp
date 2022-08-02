@@ -19,6 +19,7 @@
 #include <math.h>
 #include <zlib.h>
 #include "groundTruth.h"
+#include <utility>
 
 using namespace std;
 
@@ -59,6 +60,9 @@ bool cmpIdNum(IdNameNum id1, IdNameNum id2){
 	return id1.number > id2.number;
 }
 
+bool cmpVecStr(pair<int, vector<string>> pvs1, pair<int, vector<string>> pvs2){
+	return pvs1.second.size() > pvs2.second.size();
+}
 void calPurityFile(string groundTruth, string clustFile, string outputFile);
 void calPuritySequence(string groundTruth, string clustFile, string outputFile);
 
@@ -237,6 +241,9 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 
 	//--------for cluster file--------------------------
 	unordered_map<int, int> curMap;
+	unordered_map<int, vector<string>> curIdAccessionsMap;
+	vector<vector<pair<string, int>>> badAccessionTaxidArr;
+	vector<pair<string, int>> representAccessionTaxidArr;
 	vector<int> totalArr;
 	vector<SpeciesIdNumInfo> dominantArr;
 	int numNotIngroundTruth = 0;
@@ -260,6 +267,24 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 			SpeciesIdNumInfo id_num(maxSpeciesId, maxNum);
 			dominantArr.push_back(id_num);
 			unordered_map<int, int>().swap(curMap);
+		
+			vector<pair<int, vector<string>>> curAccessionsArr;
+			for(auto x : curIdAccessionsMap){
+				curAccessionsArr.push_back(std::make_pair(x.first, x.second));
+			}
+			std::sort(curAccessionsArr.begin(), curAccessionsArr.end(), cmpVecStr);
+			vector<pair<string, int>> curBadAccessionTaxidArr;//out
+			representAccessionTaxidArr.push_back(std::make_pair(curAccessionsArr[0].second[0], curAccessionsArr[0].first));
+			for(int i = 1; i < curAccessionsArr.size(); i++){
+				int curId = curAccessionsArr[i].first;
+				for(auto x : curAccessionsArr[i].second){
+					curBadAccessionTaxidArr.push_back(std::make_pair(x, curId));
+				}
+			}
+			badAccessionTaxidArr.push_back(curBadAccessionTaxidArr);
+			vector<pair<string,int>>().swap(curBadAccessionTaxidArr);
+			vector<pair<int, vector<string>>>().swap(curAccessionsArr);
+			unordered_map<int, vector<string>>().swap(curIdAccessionsMap);
 		}
 		else{
 			stringstream ss;
@@ -281,6 +306,8 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 				int curLabel = accession_taxid_map[key];
 				curMap.insert({curLabel, 0});
 				curMap[curLabel]++;
+				curIdAccessionsMap.insert({curLabel, vector<string>()});
+				curIdAccessionsMap[curLabel].push_back(key);
 			}
 		}
 	}//end while getline
@@ -300,6 +327,24 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 		SpeciesIdNumInfo id_num(maxSpeciesId, maxNum);
 		dominantArr.push_back(id_num);
 		unordered_map<int, int>().swap(curMap);
+
+		vector<pair<int, vector<string>>> curAccessionsArr;
+		for(auto x : curIdAccessionsMap){
+			curAccessionsArr.push_back(std::make_pair(x.first, x.second));
+		}
+		std::sort(curAccessionsArr.begin(), curAccessionsArr.end(), cmpVecStr);
+		representAccessionTaxidArr.push_back(std::make_pair(curAccessionsArr[0].second[0], curAccessionsArr[0].first));
+		vector<pair<string, int>> curBadAccessionTaxidArr;//out
+		for(int i = 1; i < curAccessionsArr.size(); i++){
+			int curId = curAccessionsArr[i].first;
+			for(auto x : curAccessionsArr[i].second){
+				curBadAccessionTaxidArr.push_back(std::make_pair(x, curId));
+			}
+		}
+		badAccessionTaxidArr.push_back(curBadAccessionTaxidArr);
+		vector<pair<string,int>>().swap(curBadAccessionTaxidArr);
+		vector<pair<int, vector<string>>>().swap(curAccessionsArr);
+		unordered_map<int, vector<string>>().swap(curIdAccessionsMap);
 	}
 
 	vector<PurityInfo> partPurity;
@@ -325,7 +370,6 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 
 	double minPurity = 1.0;
 	assert(totalArr.size() == partPurity.size());
-	ofstream ofs(outputFile);
 	FILE* fp = fopen(outputFile.c_str(), "w");
 	fprintf(fp, "Purity\ttotalNumber\tdominateNumber\tdominateSpeciesId\tdominateOriganism\n");
 	for(int i = 0; i < totalArr.size(); i++)
@@ -334,6 +378,21 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 		fprintf(fp, "%8lf\t%8d\t%8d\t\t%8d\t%s\n", partPurity[i].purity, partPurity[i].totalNumber, partPurity[i].dominateNumber, partPurity[i].dominateSpeciesId, partPurity[i].dominateOrganism.c_str());
 	}
 	fclose(fp);
+	string outputFile2 = outputFile + ".name";
+	ofstream ofs(outputFile2);
+	//cerr << badAccessionTaxidArr.size() << endl;
+	//cerr << representAccessionTaxidArr.size() << endl;
+	assert(badAccessionTaxidArr.size() == representAccessionTaxidArr.size());
+	for(int i = 0; i < representAccessionTaxidArr.size(); i++){
+		string repAccId = representAccessionTaxidArr[i].first + '\t' + to_string(representAccessionTaxidArr[i].second);
+		if(badAccessionTaxidArr[i].size() != 0){
+			ofs << repAccId << endl;
+			for(auto y : badAccessionTaxidArr[i]){
+				ofs << '\t' << y.first << '\t' << y.second << endl;
+			}
+			ofs << endl;
+		}
+	}
 
 	double totalPurity = (double)totalDominantNumber / (double)totalGenomeNumber;
 	double totalCoverageRate = (double)totalCoverageNumber / (double)totalGenomeNumber;
