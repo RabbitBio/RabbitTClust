@@ -262,8 +262,8 @@ int main(int argc, char * argv[]){
 #ifdef GREEDY_CLUST
 	cerr << "use the Greedy cluster" << endl;
 	if(!isContainment){
-		//containCompress = averageSize / 1000;
-		//isContainment = true;
+		containCompress = averageSize / 1000;
+		isContainment = true;
 	}
 	else{
 		if(averageSize / containCompress < 10){
