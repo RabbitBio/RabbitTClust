@@ -172,9 +172,11 @@ vector<int> getNoiseNode(vector<PairInt> densePairArr, double alpha){
 
 vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, string prefixName, double threshold){
 	//int denseSpan = 10;
+	double step = 1.0 / denseSpan;
 	
-	double step = threshold / denseSpan;
-	cerr << "the threshold is: " << threshold << endl;
+	
+	//double step = threshold / denseSpan;
+	//cerr << "the threshold is: " << threshold << endl;
 	cerr << "the step is: " << step << endl;
 	int N = sketches.size();
 	denseArr = new int*[denseSpan];
@@ -182,7 +184,8 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 	double distRadius[denseSpan];
 	for(int i = 0; i < denseSpan; i++){
 		//distRadius[i] = 0.05 - 0.005 * i;
-		distRadius[i] = threshold - step * i;
+		//distRadius[i] = threshold - step * i;
+		distRadius[i] = step * i;
 		denseArr[i] = new int[N];
 		memset(denseArr[i], 0, N * sizeof(int));
 		for(int j = 0; j < threads; j++){

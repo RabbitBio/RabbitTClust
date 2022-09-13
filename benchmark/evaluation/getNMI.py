@@ -33,5 +33,6 @@ if __name__ == "__main__":
         originFile = np.loadtxt(file)
         F1 = getF1(originFile)
         NMI = getNMI(originFile)
-        print("result F1 of {} is: {} \n".format(file, F1))
-        print("result NMI of {} is: {} \n".format(file, NMI))
+        #print("result F1 of {} is: {} \n".format(file, F1))
+        #print("result NMI of {} is: {} \n".format(file, NMI))
+        print("{}:\t{}".format(file, NMI))

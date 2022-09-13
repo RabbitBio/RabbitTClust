@@ -79,7 +79,7 @@ int main(int argc, char * argv[]){
 	int sketchSize = 1000;
 	int containCompress = 1000;
 	bool mstLoadSketch = false;
-	int denseSpan = 10;
+	int denseSpan = 100;
 	string mstSketchFile = "sketch.info";
 	bool isSave = true;
 	bool isSetKmer = false;
@@ -230,6 +230,7 @@ int main(int argc, char * argv[]){
 	cerr << "the size of: " << outputFile << " is: " << tmpClust.size() << endl;
 
 	double alpha = 0.05;
+	int denseIndex = threshold / 0.01;
 	vector<int> totalNoiseArr;
 	for(int i = 0; i < tmpClust.size(); i++){
 		if(tmpClust[i].size() == 1) continue;
@@ -237,8 +238,8 @@ int main(int argc, char * argv[]){
 		set<int> denseSet;
 		for(int j = 0; j < tmpClust[i].size(); j++){
 			int element = tmpClust[i][j];
-			PairInt p(element, denseArr[0][element]);
-			denseSet.insert(denseArr[0][element]);
+			PairInt p(element, denseArr[denseIndex][element]);
+			denseSet.insert(denseArr[denseIndex][element]);
 			curDenseArr.push_back(p);
 		}
 		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
@@ -396,6 +397,7 @@ int main(int argc, char * argv[]){
 	cerr << "the size of: " << outputFile << " is: " << tmpClust.size() << endl;
 	//update cluster by noise cluster
 	double alpha = 0.05;
+	int denseIndex = threshold / 0.01;
 	vector<int> totalNoiseArr;
 	for(int i = 0; i < tmpClust.size(); i++){
 		if(tmpClust[i].size() == 1) continue;
@@ -403,8 +405,8 @@ int main(int argc, char * argv[]){
 		set<int> denseSet;
 		for(int j = 0; j < tmpClust[i].size(); j++){
 			int element = tmpClust[i][j];
-			PairInt p(element, denseArr[0][element]);
-			denseSet.insert(denseArr[0][element]);
+			PairInt p(element, denseArr[denseIndex][element]);
+			denseSet.insert(denseArr[denseIndex][element]);
 			curDenseArr.push_back(p);
 		}
 		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);

@@ -17,27 +17,31 @@ void loadDense(int** &denseArr, string inputFile, int denseSpan, vector<SketchIn
 	int endPos = inputFile.find_last_of('.');
 	string filePrefix = inputFile.substr(0, endPos);
 	//cerr << "the filePrefix is: " << filePrefix << endl;
-	for(int i = 0; i < denseSpan; i++){
-		string curFile = filePrefix + to_string(i) + ".dense";
-		ifstream ifs(curFile);
-		if(!ifs){
-			cerr << "error open dense file: " << curFile << endl;
-			continue;
-		}
-		string line;
-		while(getline(ifs, line)){
-			stringstream ss;
-			int index, dense;
-			ss << line;
-			ss >> index >> dense;
-			denseArr[i][index] = dense;
-		}
-		ifs.close();
+	string denseFile = filePrefix + ".dense";
+	ifstream ifs(denseFile);
+	if(!ifs){
+		cerr << "error open dense file: " << denseFile << endl;
+		exit(1);
 	}
-	//for(int i = 0; i< 10; i++){
-	//	cout << denseArr[0][i] << endl;
+	string line;
+	int i = 0;
+	while(getline(ifs, line)){
+		stringstream ss;
+		ss << line;
+		int curDense;
+		int j = 0;
+		while(ss >> curDense){
+			denseArr[i][j++] = curDense;
+		}
+		i++;
+	}
+	ifs.close();
+	//for(int i = 0; i < denseSpan; i++){
+	//	for(int j = 0; j < N; j++){
+	//		cout << denseArr[i][j] << '\t';
+	//	}
+	//	cout << endl;
 	//}
-
 }
 
 bool loadMSTs(string inputFile, string inputFile1, vector<SketchInfo>& sketches, vector<EdgeInfo>& mst)
@@ -237,16 +241,18 @@ void saveMST(string folderPath, string inputFile, string sketchFunc, bool isCont
 }
 
 void saveDense(string folderPath, string prefixName, int** denseArr, int denseSpan, vector<SketchInfo> sketches){
+	//denseSpan = 100;
 	int N = sketches.size();
+	string outputDenseFile = folderPath + '/' + prefixName + + ".dense";
+	ofstream ofs(outputDenseFile);
 	for(int i = 0; i < denseSpan; i++){
-		string outputDenseFile = folderPath + '/' + prefixName + to_string(i) + ".dense";
-		ofstream ofs(outputDenseFile);
 		for(int j = 0; j < N; j++){
-			ofs << j << '\t' << denseArr[i][j] << endl;
+			ofs << denseArr[i][j] << '\t';
 		}
-		ofs.close();
-		cerr << "finished save the dense file: " << outputDenseFile << endl;
+		ofs << endl;
 	}
+	ofs.close();
+	cerr << "finished save the dense file: " << outputDenseFile << endl;
 }
 
 void saveANI(string folderPath, string prefixName, uint64_t* aniArr, string sketchFunc){

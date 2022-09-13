@@ -364,12 +364,12 @@ void calLabelFile(string groundTruth, string clustFile, string labelFile){
 	ofs << endl;
 	ofs.close();
 
-	ofstream ofs1(labelFile+".humanReadable");
-	for(int i = 0; i < ourClust.size(); i++)
-	{
-		ofs1 << ourClust[i] << '\t' << standardClust[i] << endl;
-	}
-	ofs1.close();
+	//ofstream ofs1(labelFile+".humanReadable");
+	//for(int i = 0; i < ourClust.size(); i++)
+	//{
+	//	ofs1 << ourClust[i] << '\t' << standardClust[i] << endl;
+	//}
+	//ofs1.close();
 
 }
 
