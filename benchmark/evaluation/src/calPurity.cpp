@@ -23,6 +23,8 @@
 
 using namespace std;
 
+//bool reserveAllRepresentativeGenome = true;
+bool reserveAllRepresentativeGenome = false;
 
 struct PurityInfo{
 	int totalNumber;
@@ -78,17 +80,17 @@ int main(int argc , char *argv[]){
 	//========= parameters need changing ========
 	//The example is with parameters of specific numbers.
 	//args is the tutorial names.
-	string pwd = "RabbitTClust/benchmark/evaluation/src";
+	string pwd = "RabbitTClust/benchmark/evaluation/src/calPurity.cpp";
 	string dependency = "None";
-	string example = application + " -l bacteria.groundTruth bacteria.clust partPurity.out";
+	string example = application + " -l bacteria.groundTruth bacteria.clust bacteria.purity";
 	args.push_back("options(-l, -i)");
 	args.push_back("groundTruth");
 	args.push_back("clustFile");
-	args.push_back("outputPurityFile");
+	args.push_back("bacteria.purity");
 	descriptions.push_back("input option, sketch option for clust, -l or -i");
 	descriptions.push_back("input file, the groundTruth file, <assembly_accession, species_taxid, genomeName> per line");
 	descriptions.push_back("input file, cluster result file from RabbitTClust");
-	descriptions.push_back("output file, output purity info file");
+	descriptions.push_back("output file, output purity info file, including total result file(bacteria.purity) and accession file(<accession, taxid> per line)");
 
 	//-------- no changing -----------
 	assert(args.size() == descriptions.size());
@@ -244,6 +246,7 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 	unordered_map<int, vector<string>> curIdAccessionsMap;
 	vector<vector<pair<string, int>>> badAccessionTaxidArr;
 	vector<pair<string, int>> representAccessionTaxidArr;
+	vector<vector<vector<pair<string, int>>>> allAccessionTaxidArr;
 	vector<int> totalArr;
 	vector<SpeciesIdNumInfo> dominantArr;
 	int numNotIngroundTruth = 0;
@@ -273,16 +276,20 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 				curAccessionsArr.push_back(std::make_pair(x.first, x.second));
 			}
 			std::sort(curAccessionsArr.begin(), curAccessionsArr.end(), cmpVecStr);
-			vector<pair<string, int>> curBadAccessionTaxidArr;//out
-			representAccessionTaxidArr.push_back(std::make_pair(curAccessionsArr[0].second[0], curAccessionsArr[0].first));
-			for(int i = 1; i < curAccessionsArr.size(); i++){
+
+			vector<vector<pair<string, int>>> curClustArr;
+			for(int i = 0; i < curAccessionsArr.size(); i++){
 				int curId = curAccessionsArr[i].first;
+				vector<pair<string, int>> curClustLabelArr;
 				for(auto x : curAccessionsArr[i].second){
-					curBadAccessionTaxidArr.push_back(std::make_pair(x, curId));
+					curClustLabelArr.push_back(std::make_pair(x, curId));
 				}
+				curClustArr.push_back(curClustLabelArr);
+				vector<pair<string, int>>().swap(curClustLabelArr);
 			}
-			badAccessionTaxidArr.push_back(curBadAccessionTaxidArr);
-			vector<pair<string,int>>().swap(curBadAccessionTaxidArr);
+			allAccessionTaxidArr.push_back(curClustArr);
+			vector<vector<pair<string, int>>>().swap(curClustArr);
+			
 			vector<pair<int, vector<string>>>().swap(curAccessionsArr);
 			unordered_map<int, vector<string>>().swap(curIdAccessionsMap);
 		}
@@ -333,16 +340,20 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 			curAccessionsArr.push_back(std::make_pair(x.first, x.second));
 		}
 		std::sort(curAccessionsArr.begin(), curAccessionsArr.end(), cmpVecStr);
-		representAccessionTaxidArr.push_back(std::make_pair(curAccessionsArr[0].second[0], curAccessionsArr[0].first));
-		vector<pair<string, int>> curBadAccessionTaxidArr;//out
-		for(int i = 1; i < curAccessionsArr.size(); i++){
+
+		vector<vector<pair<string, int>>> curClustArr;
+		for(int i = 0; i < curAccessionsArr.size(); i++){
 			int curId = curAccessionsArr[i].first;
+			vector<pair<string, int>> curClustLabelArr;
 			for(auto x : curAccessionsArr[i].second){
-				curBadAccessionTaxidArr.push_back(std::make_pair(x, curId));
+				curClustLabelArr.push_back(std::make_pair(x, curId));
 			}
+			curClustArr.push_back(curClustLabelArr);
+			vector<pair<string, int>>().swap(curClustLabelArr);
 		}
-		badAccessionTaxidArr.push_back(curBadAccessionTaxidArr);
-		vector<pair<string,int>>().swap(curBadAccessionTaxidArr);
+		allAccessionTaxidArr.push_back(curClustArr);
+		vector<vector<pair<string, int>>>().swap(curClustArr);
+		
 		vector<pair<int, vector<string>>>().swap(curAccessionsArr);
 		unordered_map<int, vector<string>>().swap(curIdAccessionsMap);
 	}
@@ -378,21 +389,75 @@ void calPurityFile(string groundTruth, string clustFile, string outputFile){
 		fprintf(fp, "%8lf\t%8d\t%8d\t\t%8d\t%s\n", partPurity[i].purity, partPurity[i].totalNumber, partPurity[i].dominateNumber, partPurity[i].dominateSpeciesId, partPurity[i].dominateOrganism.c_str());
 	}
 	fclose(fp);
-	string outputFile2 = outputFile + ".name";
-	ofstream ofs(outputFile2);
-	//cerr << badAccessionTaxidArr.size() << endl;
-	//cerr << representAccessionTaxidArr.size() << endl;
-	assert(badAccessionTaxidArr.size() == representAccessionTaxidArr.size());
-	for(int i = 0; i < representAccessionTaxidArr.size(); i++){
-		string repAccId = representAccessionTaxidArr[i].first + '\t' + to_string(representAccessionTaxidArr[i].second);
-		if(badAccessionTaxidArr[i].size() != 0){
-			ofs << repAccId << endl;
-			for(auto y : badAccessionTaxidArr[i]){
-				ofs << '\t' << y.first << '\t' << y.second << endl;
+
+	string outputFile2 = outputFile + ".accession.unpurity";
+	ofstream ofs0(outputFile2);
+	if(!reserveAllRepresentativeGenome){
+		for(auto x : allAccessionTaxidArr){
+			if(x.size() > 1){
+				string repAccId = x[0][0].first + '\t' + to_string(x[0][0].second);
+				ofs0 << repAccId << endl;
+				for(int i = 1; i < x.size(); i++){
+					for(auto y : x[i])
+						ofs0 << '\t' << y.first << '\t' << y.second << endl;
+				}
+				ofs0 << endl;
 			}
-			ofs << endl;
 		}
 	}
+	else{
+		for(auto x : allAccessionTaxidArr){
+			if(x.size() > 1){
+				for(auto y : x[0])
+					ofs0 << y.first << '\t' << y.second << endl;
+				for(int i = 1; i < x.size(); i++){
+					for(auto y : x[i])
+						ofs0 << '\t' << y.first << '\t' << y.second << endl;
+				}
+				ofs0 << endl;
+			}
+		}
+	}
+	ofs0.close();
+
+	string outputFile3 = outputFile + ".accession.purity";
+	ofstream ofs1(outputFile3);
+	if(!reserveAllRepresentativeGenome){
+		for(auto x : allAccessionTaxidArr){
+			if(x.size() == 1){
+				string repAccId = x[0][0].first + '\t' + to_string(x[0][0].second);
+				ofs1 << repAccId << endl;
+			}
+		}
+	}
+	else{
+		for(auto x : allAccessionTaxidArr){
+			if(x.size() == 1){
+				for(auto y : x[0])
+					ofs1 << y.first << '\t' << y.second << endl;
+				ofs1 << endl;
+			}
+		}
+	}
+	ofs0.close();
+
+
+	//if(!reserveAllRepresentativeGenome){
+	//assert(badAccessionTaxidArr.size() == representAccessionTaxidArr.size());
+	//	for(int i = 0; i < representAccessionTaxidArr.size(); i++){
+	//		string repAccId = representAccessionTaxidArr[i].first + '\t' + to_string(representAccessionTaxidArr[i].second);
+	//		if(badAccessionTaxidArr[i].size() != 0){
+	//			ofs << repAccId << endl;
+	//			for(auto y : badAccessionTaxidArr[i]){
+	//				ofs << '\t' << y.first << '\t' << y.second << endl;
+	//			}
+	//			ofs << endl;
+	//		}
+	//	}
+	//}
+	//else{
+
+	//}
 
 	double totalPurity = (double)totalDominantNumber / (double)totalGenomeNumber;
 	double totalCoverageRate = (double)totalCoverageNumber / (double)totalGenomeNumber;
