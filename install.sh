@@ -14,13 +14,13 @@ cmake -DCMAKE_INSTALL_PREFIX=. .. &&
 make -j8 && make install && 
 cd ../../ &&
 
-#compile the RabbitTClust
+#compile the clust-greedy
 mkdir -p build && cd build &&
 cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=ON .. && 
 make -j8 && make install &&
 cd ../ &&
 
-#mkdir -p build && cd build &&
+#compile the clust-mst
 cd build &&
 cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF .. &&
 make -j8 && make install &&

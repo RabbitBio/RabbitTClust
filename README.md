@@ -1,9 +1,8 @@
 ![RabbitTClust](rabbittclust.png)
 
-RabbitTClust is an efficient sketch-based genome clustering application 
-using minimum spanning trees. It enables processing of large-scale 
-datasets by combining dimensionality reduction techniques with streaming 
-and parallelization on modern multi-core platforms. 
+RabbitTClust is a fast and memory-efficient genome clustering tool based on sketch-based distance estimations.
+It enables processing of large-scale datasets by combining dimensionality reduction techniques with streaming and parallelization on modern multi-core platforms.
+RabbitTClust supports classical single-linkage hierarchical (clust-mst) and greedy incremental clustering (clust-greedy) algorithms for different scenarios. 
 
 ## Installation
 RabbitTClust version 1.0 can only support 64-bit Linux Systems.
@@ -27,73 +26,80 @@ git clone --recursive https://github.com/RabbitBio/RabbitTClust.git
 cd RabbitTClust
 
 #make rabbitSketch library
-cd RabbitSketch
-mkdir build && cd build 
-cmake -DCXXAPI=ON -DCMAKE_INSTALL_PREFIX=. ..
-make -j8 && make install
-cd ../../
+cd RabbitSketch &&
+mkdir -p build && cd build &&
+cmake -DCXXAPI=ON -DCMAKE_INSTALL_PREFIX=. .. &&
+make -j8 && make install &&
+cd ../../ &&
 
 #make rabbitFX library
-cd RabbitFX
-mkdir build && cd build
-cmake -DCMAKE_INSTALL_PREFIX=. ..
-make -j8 && make install
-cd ../../
+cd RabbitFX && 
+mkdir -p build && cd build &&
+cmake -DCMAKE_INSTALL_PREFIX=. .. &&
+make -j8 && make install && 
+cd ../../ &&
 
-mkdir build && cd build
-cmake -DUSE_RABBITFX=ON ..
-make -j8 && make install
-cd ../
+#compile the clust-greedy
+mkdir -p build && cd build &&
+cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=ON .. && 
+make -j8 && make install &&
+cd ../ &&
+
+#compile the clust-mst
+cd build &&
+cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF .. &&
+make -j8 && make install &&
+cd ../ 
+
 
 ```
 
 ## Usage
 ```bash
-usage: clust-mst [-h] [-l] [-t] <int> [-d] <double> -F <string> [-o] <string> -i <string>
-usage: clust-mst [-h] [-f] [-E] [-d] <double> -i <string> <string> -o <string>
-usage: clust-greedy [-h] [-l] [-t] <int> [-d] <double> -F <string> [-o] <string> -i <string>
-usage: clust-greedy [-h] [-f] [-d] <double> -i <string> <string> -o <string>
+usage: clust-mst [-h] [-l] [-t] <int> [-d] <double> [-F] <string> [-i] <string> [-o] <string>
+usage: clust-mst [-h] [-f] [-E] [-d] <double> [-i] <string> <string> [-o] <string>
+usage: clust-greedy [-h] [-l] [-t] <int> [-d] <double> [-F] <string> [-i] <string> [-o] <string>
+usage: clust-greedy [-h] [-f] [-d] <double> [-i] <string> <string> [-o] <string>
 -h         : this help message
--k <int>   : set kmer size, default 21, for both clust-greedy and clust-mst
--s <int>   : set sketch size, default 1000, for both clust-greedy and clust-mst
--l         : cluster for genomes(not sequences), list input. Lines in each <input> specify paths to genome files, one per line. for both clust-greedy and clust-mst
--c <int>   : compute the containment of genomes, set proportion sketchSize = genomeSize/compress, ATTENTION with MinHash function, for both clust-greedy and clust-mst
--t <int>   : set the thread number, default 1, for both clust-greedy and clust-mst
--d <double>: set the threshold of the clusters from the Minimum Spanning Tree and greedy cluster threshold, default 0.05(0.01) for clust-mst(clust-greedy)
--f         : input files are genomeInfo and MST contents(sketch contents) for clust-mst(clust-greedy)
--E         : input files are genomeInfo and sketch contents contents for clust-mst
--F <string>: sketch function, includes MinHash, WMH, OMH, HLL, default MinHash, for both clust-greedy and clust-mst
--o <string>: path of output file, for both clust-greedy and clust-mst
--i <string>: path of input file, ATTENTION with -f and -E option
+-k <int>   : set kmer size, default 21, for both clust-mst and clust-greedy
+-s <int>   : set sketch size, default 1000, for both clust-mst and clust-greedy
+-c <int>   : set sampling ratio to compute variable sketchSize, sketchSize = genomeSize/samplingRatio, only support with MinHash sketch function, for clust-greedy
+-d <double>: set the distance threshold, default 0.05 for both clust-mst and clust-greedy
+-t <int>   : set the thread number, default take full usage of platform cores number, for both clust-mst and clust-greedy
+-l         : input is a file list, not a single genome file. Lines in the input file list specify paths to genome files, one per line, for both clust-mst and clust-greedy
+-i <string>: path of input file. One file list or single genome file. Two input file with -f and -E option
+-f         : two input files, genomeInfo and MSTInfo files for clust-mst; genomeInfo and sketchInfo files for clust-greedy 
+-E         : two input files, genomeInfo and sketchInfo for clust-mst
+-F <string>: set the sketch function, including MinHash and KSSD, default MinHash, for both clust-mst and clust-greedy
+-o <string>: path of output file, for both clust-mst and clust-greedy
+-e         : not save the intermediate file generated from the origin genome file, such as the GenomeInfo, MSTInfo, and SketchInfo files, for both clust-mst and clust-greedy
 
 ```
 
 ## Example:
 ```bash
-#for genomes clustering, input is a genome file list:
-./clust-mst -l -t 48 -i bacteriaList -o bacteria.clust
-./clust-greedy -l -t 48 -i bacteriaList -o bacteria.clust
+#input is a file list, one genome path per line:
+./clust-mst -l -i bact_refseq.list -o bact_refseq.mst.clust
+./clust-greedy -l -i bact_genbank.list -o bact_genbank.greedy.clust
 
-#for genomes clustering, input is a single genome file:
-./clust-mst -d 0.05 -t 48 -i bacteria.fna -o bacteria.clust
-./clust-greedy -d 0.05 -t 48 -i bacteria.fna -o bacteria.clust
+#input is a single genome file in FASTA format, one genome as a sequence:
+./clust-mst -i bacteria.fna -o bacteria.mst.clust
+./clust-greedy -i bacteria.fna -o bacteria.greedy.clust
 
-#for redundancy detection with containment, input is a genome file list:
-./clust-mst -l -c 10000 -t 48 -i bacteriaList -o bacteria.out
-./clust-greedy -l -c 10000 -t 48 -i bacteriaList -o bacteria.out
+#the sketch size, kmer size, and distance threshold can be specified by -s, -k, and -d options.
 
-#for redundancy detection with containment, input is a single genome file:
-./clust-mst -c 10000 -t 48 -i bacteria.fna -o bacteria.out
-./clust-greedy -c 10000 -t 48 -i bacteria.fna -o bacteria.out
 
-#for generator cluster from exist MST:
-./clust-mst -f -d 0.05 -t 48 -i bacteriaList.MinHashGenomeInfo bacteriaList.MinHashMSTInfo -o bacteria.clust
-ATTENTION: the -f must in front of the -i option
+#for redundancy detection with clust-greedy, input is a genome file list:
+#use -d to specify the distance threshold corresponding to various degrees of redundancy.
+./clust-greedy -d 0.001 -l -i bacteriaList -o bacteria.out
 
-#for generator cluster from exist sketches:
-./clust-mst -E -d 0.05 -t 48 -i bacteriaList.MinHashGenomeInfo bacteriaList.MinHashSketchInfo -o bacteria.clust
-./clust-greedy -f -d 0.05 -t 48 -i bacteriaList.MinHashGenomeInfo bacteriaList.MinHashSketchInfo -o bacteria.clust
-#ATTENTION: the -E and -f must in front of the -i option
+#for generator cluster from exist MST with a distance threshold of 0.045:
+#ATTENTION: the -f must in front of the -i option
+./clust-mst -d 0.05 -f -i bact_refseq.list.MinHashGenomeInfo bact_refseq.list.MinHashMSTInfo -o bact_refseq.mst.d.045.clust
+
+#for generator cluster from exist sketches of clust-greedy with a distance threshold of 0.001:
+#ATTENTION: the -f must in front of the -i option
+./clust-greedy -d 0.001 -f -i bact_genbank.list.MinHashGenomeInfo bact_genbank.list.MinHashSketchInfo -o bact_genbank.greedy.d.001.clust
 
 ```
 
