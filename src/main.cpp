@@ -298,6 +298,25 @@ int main(int argc, char * argv[]){
 		}
 	}
 
+	//get the vaild distance threshold range
+	double minJaccard = 0.001;
+	if(!isContainment){
+		minJaccard = 1.0 / sketchSize;
+	}
+	else{
+		minJaccard = 1.0 / (averageSize / containCompress);
+		//minJaccard = 1.0 / (minSize / containCompress);
+	}
+
+	double maxDist = -1.0 / kmerSize * log(2*minJaccard / (1.0 + minJaccard));
+	cerr << "the max recommand distance threshold is: " << maxDist << endl;
+	if(threshold > maxDist){
+		cerr << "the threshold: " << threshold << " is out of the valid distance range estimated by Mash distance or Aaf distance" << endl;
+		return 1;
+	}
+
+
+
 	if(sketchByFile) cerr << "sketch by file!" << endl;
 	else cerr << "sketch by sequence!" << endl;
 
