@@ -147,7 +147,7 @@ bool cmpPair(PairInt p1, PairInt p2){
 	return p1.second < p2.second;
 }
 
-vector<int> getNoiseNode(vector<PairInt> densePairArr, double alpha){
+vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha){
 	int clusterSize = densePairArr.size();
 	vector<int> noiseArr;
 	std::sort(densePairArr.begin(), densePairArr.end(), cmpPair);
@@ -155,7 +155,8 @@ vector<int> getNoiseNode(vector<PairInt> densePairArr, double alpha){
 	int sizeDense = densePairArr.size();
 	int indexQ1 = sizeDense / 4;
 	int denseQ1 = densePairArr[indexQ1].second;
-	int thresholdDense = std::min((int)round(clusterSize*alpha), 2); 
+	//int thresholdDense = std::min((int)round(clusterSize*alpha), 2); 
+	int thresholdDense = alpha;
 	thresholdDense = std::min(denseQ1-1, thresholdDense);
 	thresholdDense = std::max(thresholdDense, 0);
 

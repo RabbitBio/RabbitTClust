@@ -55,6 +55,6 @@ vector<vector<int>> generateClusterWithBfs(vector<EdgeInfo> forest, int vertices
 vector<EdgeInfo> modifyForest(vector<EdgeInfo> forset, vector<int> noiseArr, int threads);
 
 typedef pair<int, int> PairInt;
-vector<int> getNoiseNode(vector<PairInt> densePairArr, double alpha);
+vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha);
 
 #endif

@@ -41,28 +41,7 @@
 
 using namespace std;
 
-//int getKerSize(bool sketchByFile, string inputFile, double warning_rate){
-//	uint64_t maxSize = 1;
-//	if(sketchByFile){
-//		ifstream ifs(inputFile);
-//		string line;
-//		
-//		while(getline(ifs, line)){
-//			struct stat statbuf;
-//			stat(line.c_str(), &statbuf);
-//			uint64_t curSize = statbuf.st_size;
-//			maxSize = std::max(maxSize, curSize);
-//		}
-//		ifs.close();
-//	}
-//	int recommandKmerSize = ceil(log(maxSize * (1.0 - warning_rate) / warning_rate) / log(4));
-//
-//	return recommandKmerSize;
-//}
-
 int main(int argc, char * argv[]){
-
-
 	//section 1: init parameters
 	int argIndex = 1;
 	string inputFile = "genome.fna";
@@ -188,9 +167,6 @@ int main(int argc, char * argv[]){
 		return 1;
 	}
 
-
-
-
 	vector<SketchInfo> sketches;
 	vector<vector<int> > cluster;
 
@@ -229,7 +205,8 @@ int main(int argc, char * argv[]){
 	cerr << "write the cluster result into: " << outputFile << endl;
 	cerr << "the size of: " << outputFile << " is: " << tmpClust.size() << endl;
 
-	double alpha = 0.05;
+	//double alpha = 0.05;
+	int alpha = 2;
 	int denseIndex = threshold / 0.01;
 	vector<int> totalNoiseArr;
 	for(int i = 0; i < tmpClust.size(); i++){
@@ -304,8 +281,8 @@ int main(int argc, char * argv[]){
 		minJaccard = 1.0 / sketchSize;
 	}
 	else{
-		minJaccard = 1.0 / (averageSize / containCompress);
-		//minJaccard = 1.0 / (minSize / containCompress);
+		//minJaccard = 1.0 / (averageSize / containCompress);
+		minJaccard = 1.0 / (minSize / containCompress);
 	}
 
 	double maxDist = -1.0 / kmerSize * log(2*minJaccard / (1.0 + minJaccard));
@@ -314,7 +291,6 @@ int main(int argc, char * argv[]){
 		cerr << "the threshold: " << threshold << " is out of the valid distance range estimated by Mash distance or Aaf distance" << endl;
 		return 1;
 	}
-
 
 
 	if(sketchByFile) cerr << "sketch by file!" << endl;
@@ -415,7 +391,8 @@ int main(int argc, char * argv[]){
 	cerr << "write the cluster result into: " << outputFile << endl;
 	cerr << "the size of: " << outputFile << " is: " << tmpClust.size() << endl;
 	//update cluster by noise cluster
-	double alpha = 0.05;
+	//double alpha = 0.05;
+	int alpha = 2;
 	int denseIndex = threshold / 0.01;
 	vector<int> totalNoiseArr;
 	for(int i = 0; i < tmpClust.size(); i++){

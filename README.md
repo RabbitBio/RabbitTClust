@@ -86,7 +86,9 @@ usage: clust-greedy [-h] [-f] [-d] <double> [-i] <string> <string> [-o] <string>
 ./clust-mst -i bacteria.fna -o bacteria.mst.clust
 ./clust-greedy -i bacteria.fna -o bacteria.greedy.clust
 
-#the sketch size, kmer size, and distance threshold can be specified by -s, -k, and -d options.
+#the sketch size (reciprocal of sampling proportion), kmer size, and distance threshold can be specified by -s (-c), -k, and -d options.
+./clust-mst -l -k 21 -s 1000 -d 0.05 -i bact_refseq.list -o bact_refseq.mst.clust
+./clust-greedy -l -k 21 -c 1000 -d 0.05 -i bact_genbank.list -o bact_genbank.greedy.clust
 
 
 #for redundancy detection with clust-greedy, input is a genome file list:
