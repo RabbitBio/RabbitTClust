@@ -52,6 +52,7 @@ int main(int argc, char * argv[]){
 	threads = get_nprocs_conf();
 	bool sketchByFile = false;
 	bool isContainment = false;
+	bool isJaccard = false;
 	bool useFile = false;
 	double threshold = 0.05;
 	int kmerSize = 21;
@@ -89,6 +90,7 @@ int main(int argc, char * argv[]){
 				fprintf(stderr, "set kmerSize: %d\n", kmerSize);
 				break;
 			case 's':
+				isJaccard = true;
 				sketchSize = stoi(argv[++argIndex]);
 				fprintf(stderr, "set sketchSize:  %d\n", sketchSize);
 				break;
@@ -236,12 +238,19 @@ int main(int argc, char * argv[]){
 
 	uint64_t maxSize, minSize, averageSize;
 	calSize(sketchByFile, inputFile, threads, maxSize, minSize, averageSize);
+	
+	if(isContainment && isJaccard){
+		cerr << "conflict distance measurement of Mash distance (fixed-sketch-size) and AAF distance (variable-sketch-size) " << endl;
+		return 1;
+	}
 
 #ifdef GREEDY_CLUST
 	cerr << "use the Greedy cluster" << endl;
-	if(!isContainment){
+	if(!isContainment && !isJaccard){
 		containCompress = averageSize / 1000;
 		isContainment = true;
+	}
+	else if(!isContainment && isJaccard){
 	}
 	else{
 		if(averageSize / containCompress < 10){
@@ -302,9 +311,9 @@ int main(int argc, char * argv[]){
 	cerr << "the thread number is: " << threads << endl;
 	cerr << "the threshold is: " << threshold << endl;
 	if(isContainment)
-		cerr << "the sketchSize is in proportion with 1/" << containCompress << endl;
+		cerr << "use the AAF distance (variable-sketch-size), the sketchSize is in proportion with 1/" << containCompress << endl;
 	else
-		cerr << "the sketchSize is: " << sketchSize << endl;
+		cerr << "use the Mash distance (fixed-sketch-size), the sketchSize is: " << sketchSize << endl;
 	#endif
 	
 

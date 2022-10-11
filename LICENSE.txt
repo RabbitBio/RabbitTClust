@@ -1,10 +1,10 @@
 PURPOSE
 
-RabbitTClust is an efficient sketch-based genome clustering application 
-using minimum spanning trees. It enables processing of large-scale 
-datasets by combining dimensionality reduction techniques with streaming
-and parallelization on modern multi-core platforms. It is implemented in 
-C++ and is distributed with:
+RabbitTClust is a fast and memory-efficient genoem clustering tool based
+on sketch-based distance estimation. Our approach enables efficient processing
+of large-scale datasets by combining dimensionality reduction techniques with
+streaming and parallelization on modern multi-core platforms. It is implemented
+in C++ and is distributed with:
 
 KSeq
 	https://github.com/attractivechaos/klib

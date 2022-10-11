@@ -1,9 +1,5 @@
-all: mapGenome calGenome calLabel calPurity getRepresentativeList analysisPurity checkTaxonomyStatus
+all: calLabel calPurity getRepresentativeList analysisPurity checkTaxonomyStatus
 
-mapGenome: src/mapGenome.cpp
-	g++ -O3 ./src/mapGenome.cpp -lz -o mapGenome
-calGenome: src/calGenome.cpp
-	g++ -O3 ./src/calGenome.cpp -lz -o calGenome
 calLabel: src/calLabel.cpp src/groundTruth.cpp
 	g++ -O3 ./src/calLabel.cpp ./src/groundTruth.cpp -o calLabel
 calPurity: src/calPurity.cpp src/groundTruth.cpp
@@ -16,5 +12,5 @@ checkTaxonomyStatus: src/checkTaxonomyStatus.cpp
 	g++ -O3 ./src/checkTaxonomyStatus.cpp -o checkTaxonomyStatus
 
 clean:
-	rm mapGenome calGenome calLabel calPurity getRepresentativeList analysisPurity checkTaxonomyStatus
+	rm calLabel calPurity getRepresentativeList analysisPurity checkTaxonomyStatus
 

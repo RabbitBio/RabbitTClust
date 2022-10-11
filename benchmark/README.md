@@ -1,16 +1,10 @@
-# benchmark of cluster evaluation and simulate databese
+# benchmarking path
 
-* sub-directory evaluation is used for cluster evaluation.
-* sub-directory simulateData is used for simulating genome databases with very different size for containment evaluation.
+## [sub-directory simulate](./simulate/README.md)
+The script for simulating genome sequence.
 
-# download genomes from RefSeq
-The download script is from [Bonsai](https://github.com/dnbaker/bonsai/tree/ac6f8c7ee1b2ae1128970a8f6dc01ddad19fdb37).
+## [sub-directory download](./download/README.md)
+The script for downloading the genomes from NCBI RefSeq and GenBank.
 
-RefSeq genomes can be downloaded by download_genomes.py as follows:
-
-`python3 download_genomes.py all`
-
-Parameter `all` includes ***archaea***, ***bacteria***, ***fungi***, ***viral***, ***plant***, ***protozoa***, ***human***, ***vertebrate_mammalian*** and ***vertebrate_other***.
-
- Use `python3 download_genomes.py -h` for more details.
-	
+## [sub-directory evaluation](./evaluation/README.md)
+The script for evaluating the clustering quality.

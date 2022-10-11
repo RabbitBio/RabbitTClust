@@ -278,6 +278,6 @@ void printInfo(string pwd, string dependency, string example, vector<string> arg
 	}
 	cerr << endl;
 	for(int i = 0; i < args.size(); i++){
-		fprintf(stderr, "\tThe %d paramter(%s) is %s\n", i, args[i].c_str(), descriptions[i].c_str());
+		fprintf(stderr, "\tThe %d parameter(%s) is %s\n", i, args[i].c_str(), descriptions[i].c_str());
 	}
 }

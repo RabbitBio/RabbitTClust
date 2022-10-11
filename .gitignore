@@ -15,11 +15,17 @@
 !benchmark/download_genomes.py
 !benchmark/generateList.sh
 
-!benchmark/simulateData/
-!benchmark/simulateData/README.md
-!benchmark/simulateData/Makefile
-!benchmark/simulateData/src/
-!benchmark/simulateData/src/*
+!benchmark/download/
+!benchmark/download/README.md
+!benchmark/download/download_genbank.sh
+!benchmark/download/download_refseq.py
+!benchmark/download/bact_GenBank.list.gz
+
+!benchmark/simulate/
+!benchmark/simulate/README.md
+!benchmark/simulate/Makefile
+!benchmark/simulate/src/
+!benchmark/simulate/src/*
 
 !benchmark/evaluation/
 !benchmark/evaluation/Makefile
