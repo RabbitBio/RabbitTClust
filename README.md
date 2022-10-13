@@ -18,11 +18,6 @@ git clone --recursive https://github.com/RabbitBio/RabbitTClust.git
 cd RabbitTClust
 ./install.sh
 ```
-```bash
-git clone --recursive https://github.com/RabbitBio/RabbitTClust.git
-cd RabbitTClust
-./install.sh
-```
 
 ### Compile and install manually 
 ```bash
