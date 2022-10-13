@@ -5,7 +5,7 @@ It enables processing of large-scale datasets by combining dimensionality reduct
 RabbitTClust supports classical single-linkage hierarchical (clust-mst) and greedy incremental clustering (clust-greedy) algorithms for different scenarios. 
 
 ## Installation
-RabbitTClust version 1.0 can only support 64-bit Linux Systems.
+RabbitTClust version 2.0 can only support 64-bit Linux Systems.
 
 ### Dependancy
 * cmake v.3.0 or later
@@ -17,7 +17,11 @@ RabbitTClust version 1.0 can only support 64-bit Linux Systems.
 git clone --recursive https://github.com/RabbitBio/RabbitTClust.git
 cd RabbitTClust
 ./install.sh
-
+```
+```bash
+git clone --recursive https://github.com/RabbitBio/RabbitTClust.git
+cd RabbitTClust
+./install.sh
 ```
 
 ### Compile and install manually 
@@ -50,8 +54,6 @@ cd build &&
 cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF .. &&
 make -j8 && make install &&
 cd ../ 
-
-
 ```
 
 ## Usage
