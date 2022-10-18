@@ -106,4 +106,5 @@ usage: clust-greedy [-h] [-f] [-d] <double> [-i] <string> <string> [-o] <string>
 All bug reports, comments and suggestions are welcome.
 
 ## Cite
-RabbitTClust paper is under review now.
+[Xu, X. et al. (2022). RabbitTClust: enabling fast clustering analysis of
+millions bacteria genomes with minhash sketches. bioRxiv.](https://doi.org/10.1101/2022.10.13.512052)
