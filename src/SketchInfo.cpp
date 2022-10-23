@@ -220,9 +220,24 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 		ifstream ifs(inputFile);
 		string line;
 		while(getline(ifs, line)){
-			struct stat statbuf;
-			stat(line.c_str(), &statbuf);
-			uint64_t curSize = statbuf.st_size;
+			uint64_t curSize;
+			string fileSuffix = line.substr(line.length()-2);
+			if(fileSuffix == "gz")//gz file
+			{ 
+				FILE *fp = fopen(line.c_str(), "r");
+				fseek(fp, -4, SEEK_END);
+				int nUnCompress = 0;
+				fread(&nUnCompress, sizeof(int), 1, fp);
+				curSize = nUnCompress;
+				fclose(fp);
+				//cerr << "compressed fileLength is: " << fileLength << endl;
+			}
+			else
+			{
+				struct stat statbuf;
+				stat(line.c_str(), &statbuf);
+				curSize = statbuf.st_size;
+			}
 			if(curSize < 10000){
 				badNumber++;
 				continue;
