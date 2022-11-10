@@ -101,8 +101,59 @@ usage: clust-greedy [-h] [-f] [-d] <double> [-i] <string> <string> [-o] <string>
 ./clust-greedy -d 0.001 -f -i bact_genbank.list.MinHashGenomeInfo bact_genbank.list.MinHashSketchInfo -o bact_genbank.greedy.d.001.clust
 
 ```
+## Output
+The output file is in a CD-HIT output format and is slightly different when running with varying input options (*-l* and *-i*).  
+Option *-l* means input as a FASTA file list, one file per genome, and *-i* means input as a single FASTA file, one sequence per genome.
 
-## Bug Report
+#### Output format for a FASTA file list input
+With *-l* option, the tab-delimited values in the lines beginning with tab delimiters are:
+* local index in a cluster
+* global index of the genome
+* genome length
+* genome file name (including genome assembly accession number)
+* sequence name (first sequence in the genome file)
+* sequence comment (remaining part of the line)
+
+**Example:**
+```txt
+the cluster 0 is:
+    0   0   14782125nt  bacteria/GCF_000418325.1_ASM41832v1_genomic.fna     NC_021658.1     Sorangium cellulosum So0157-2, complete sequence
+    1   1   14598830nt  bacteria/GCF_004135755.1_ASM413575v1_genomic.fna    NZ_CP012672.1   Sorangium cellulosum strain So ce836 chromosome, complete genome
+
+the cluster 1 is:
+    0   2   14557589nt  bacteria/GCF_002950945.1_ASM295094v1_genomic.fna    NZ_CP012673.1   Sorangium cellulosum strain So ce26 chromosome, complete genome
+
+the cluster 2 is:
+    0   3   13673866nt  bacteria/GCF_019396345.1_ASM1939634v1_genomic.fna   NZ_JAHKRM010000001.1    Nonomuraea guangzhouensis strain CGMCC 4.7101 NODE_1, whole genome shotgun sequence
+
+......
+```
+
+#### Output format for a single FASTA file input
+With *-i* option, the tab-delimited values in the lines beginning with tab delimiters are:
+* local index in a cluster
+* global index of the genome
+* genome length
+* sequence name 
+* sequence comment (remaining part of this line)
+
+**Example:**
+```txt
+the cluster 0 is:
+    0   0   11030030nt  NZ_GG657755.1   Streptomyces  himastatinicus ATCC 53653 supercont1.2, whole genome shotgun sequence
+    1   1   11008137nt  NZ_RIBZ01000339.1   Streptomyces  sp. NEAU-LD23 C2041, whole genome shotgun sequence
+
+the cluster 1 is:
+    0   2   11006208nt  NZ_KL647031.1   Nonomuraea  candida strain NRRL B-24552 Doro1_scaffold1, whole genome shotgun sequence
+    
+the cluster 2 is:
+    0   3   10940472nt  NZ_VTHK01000001.1   Amycolatopsis anabasis strain EGI 650086 RDPYD18112716_A.Scaf1, whole genome shotgun sequence
+
+......
+```
+
+
+# Bug Report
 All bug reports, comments and suggestions are welcome.
 
 ## Cite
