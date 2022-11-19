@@ -63,7 +63,7 @@ int main(int argc, char * argv[]){
 	string mstSketchFile = "sketch.info";
 	bool isSave = true;
 	bool isSetKmer = false;
-	uint64_t minLen = 0;
+	uint64_t minLen = 10000;
 	while(argIndex < argc){
 		switch(argv[argIndex][1]){
 			case 't':
