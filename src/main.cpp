@@ -63,6 +63,7 @@ int main(int argc, char * argv[]){
 	string mstSketchFile = "sketch.info";
 	bool isSave = true;
 	bool isSetKmer = false;
+	uint64_t minLen = 0;
 	while(argIndex < argc){
 		switch(argv[argIndex][1]){
 			case 't':
@@ -83,6 +84,10 @@ int main(int argc, char * argv[]){
 				break;
 			case 'e':
 				isSave = false;
+				break;
+			case 'm':
+				minLen = stoi(argv[++argIndex]);
+				fprintf(stderr, "set the filter minimum length: %ld\n", minLen);
 				break;
 			case 'k':
 				isSetKmer = true;
@@ -237,7 +242,7 @@ int main(int argc, char * argv[]){
 	}//end useFile
 
 	uint64_t maxSize, minSize, averageSize;
-	calSize(sketchByFile, inputFile, threads, maxSize, minSize, averageSize);
+	calSize(sketchByFile, inputFile, threads, minLen, maxSize, minSize, averageSize);
 	
 	if(isContainment && isJaccard){
 		cerr << "conflict distance measurement of Mash distance (fixed-sketch-size) and AAF distance (variable-sketch-size) " << endl;
@@ -334,7 +339,7 @@ int main(int argc, char * argv[]){
 		
 		}//end sketch by sequence
 		else{
-			if(!sketchFiles(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
+			if(!sketchFiles(inputFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
 				printUsage();
 				return 1;
 			}

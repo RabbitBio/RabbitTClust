@@ -112,7 +112,7 @@ int producer_fasta_task(std::string file, rabbit::fa::FastaDataPool* fastaPool, 
 	return 0;
 }
 
-void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, uint64_t* maxSize, uint64_t* minSize, uint64_t* totalSize,	uint64_t* number, uint64_t* badNumber){
+void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, uint64_t minLen, uint64_t* maxSize, uint64_t* minSize, uint64_t* totalSize,	uint64_t* number, uint64_t* badNumber){
 	rabbit::int64 id = 0;
 	rabbit::fa::FastaChunk *faChunk;
 	while(dq.Pop(id, faChunk)){
@@ -120,7 +120,7 @@ void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &
 		int ref_num = rabbit::fa::chunkListFormat(*faChunk, data);
 		for(Reference &r: data){
 			uint64_t length = (uint64_t)r.length;
-			if(length < 10000){
+			if(length < minLen){
 				*badNumber = *badNumber + 1;
 				continue;
 			}
@@ -209,7 +209,7 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 }
 #endif
 
-void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize, uint64_t& minSize, uint64_t& averageSize){
+void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, uint64_t &maxSize, uint64_t& minSize, uint64_t& averageSize){
 	maxSize = 0;
 	minSize = 1 << 31;
 	averageSize = 0;
@@ -238,7 +238,7 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 				stat(line.c_str(), &statbuf);
 				curSize = statbuf.st_size;
 			}
-			if(curSize < 10000){
+			if(curSize < minLen){
 				badNumber++;
 				continue;
 			}
@@ -270,7 +270,7 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 		std::thread producer(producer_fasta_task, inputFile, fastaPool, std::ref(queue1));
 		std::thread **threadArr = new std::thread* [th];
 		for(int t = 0; t < th; t++){
-			threadArr[t] = new std::thread(std::bind(consumer_fasta_seqSize, fastaPool, std::ref(queue1), &maxSizeArr[t], &minSizeArr[t], &totalSizeArr[t], &numArr[t], &badNumArr[t]));
+			threadArr[t] = new std::thread(std::bind(consumer_fasta_seqSize, fastaPool, std::ref(queue1), minLen, &maxSizeArr[t], &minSizeArr[t], &totalSizeArr[t], &numArr[t], &badNumArr[t]));
 		}
 		producer.join();
 
@@ -294,7 +294,7 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 			while(1){
 				int length = kseq_read(ks1);
 				if(length < 0) break;
-				if(length < 10000){
+				if(length < minLen){
 					badNumber++;
 					continue;
 				}
@@ -313,7 +313,7 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t &maxSize
 	
 	if((double)badNumber / totalNumber >= 0.2)
 	{
-		fprintf(stderr, "Warning: there are %d poor quality (length < 10000) genome assemblies in the total %d genome assemblied.\n", badNumber, totalNumber);
+		fprintf(stderr, "Warning: there are %d poor quality (length < %ld) genome assemblies in the total %d genome assemblied.\n", badNumber, minLen, totalNumber);
 	}
 	cerr << "\t===the totalSize is: " << totalSize << endl;
 	cerr << "\t===the maxSize is: " << maxSize << endl;
@@ -520,7 +520,7 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 	return true;
 }
 
-bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
+bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
 	fprintf(stderr, "input fileList, sketch by file\n");
 	fstream fs(inputFile);
 	if(!fs){
@@ -691,7 +691,7 @@ bool sketchFiles(string inputFile, int kmerSize, int sketchSize, string sketchFu
 			tmpSketchInfo.fileName = fileList[i];
 			tmpSketchInfo.totalSeqLength = totalLength;
 			tmpSketchInfo.fileSeqs = curFileSeqs;
-			if(totalLength >= 10000)//filter the poor quality genome assemblies whose length less than 10k bp(fastANI paper)
+			if(totalLength >= minLen)//filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
 				sketches.push_back(tmpSketchInfo);
 			if(i % 10000 == 0)	cerr << "finished sketching: " << i << " genomes" << endl;
 		}

@@ -47,6 +47,7 @@ inline void printUsage(){
 	fprintf(stdout, "usage: clust-greedy [-h] [-l] [-t] <int> [-d] <double> [-F] <string> [-i] <string> [-o] <string> \n");
 	fprintf(stdout, "usage: clust-greedy [-h] [-f] [-d] <double> [-i] <string> <string> [-o] <string>\n");
 	fprintf(stdout, "	-h\t\t: this help message\n");
+	fprintf(stdout, "	-m <int>\t: set the filter minimum genome length (minLen), genome with total length less the minLen will be ignore, for both clust-mst and clust-greedy\n");
 	fprintf(stdout, "	-k <int>\t: set kmer size, automatically calculate the kmer size without -k option, for both clust-mst and clust-greedy\n");
 	fprintf(stdout, "	-s <int>\t: set sketch size, default 1000, for both clust-mst and clust-greedy\n");
 	fprintf(stdout, "	-c <int>\t: set sampling ratio to compute viriable sketchSize, sketchSize = genomeSize/samplingRatio, only support with MinHash sketch function of clust-greedy\n");
