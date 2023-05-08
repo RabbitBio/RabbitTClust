@@ -19,7 +19,7 @@
 #include <unordered_map>
 #endif
 
-#include "parameter.h"
+#include "common.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 using namespace std;
@@ -140,7 +140,7 @@ void consumer_fasta_seqSize(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &
 	}
 }
 
-void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, Sketch::KSSDParameters *kssdPara, Sketch::WMHParameters * parameters, vector<SketchInfo> *sketches){
+void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int kmerSize, int sketchSize, int minLen, string sketchFunc, bool isContainment, int containCompress, Sketch::KSSDParameters *kssdPara, Sketch::WMHParameters * parameters, vector<SketchInfo> *sketches){
 	int line_num = 0;
 	rabbit::int64 id = 0;
 
@@ -152,6 +152,7 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 			string name = r.name;
 			string comment = r.comment;
 			int length = r.length;
+			if(length < minLen) continue;
 			SequenceInfo curSeq{name, comment, 0, length};
 
 			SketchInfo tmpSketchInfo; 
@@ -193,8 +194,8 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 
 			//tmpSketchInfo.minHash = mh1;
 			tmpSketchInfo.id = r.gid;
-			if(length >= 10000)
-				sketches->push_back(tmpSketchInfo);
+			//if(length >= 10000)
+			sketches->push_back(tmpSketchInfo);
 
 		}
 		rabbit::fa::FastaDataChunk *tmp = faChunk->chunk;
@@ -323,8 +324,9 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, 
 
 
 
-bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
-	cerr << "input File is: " << inputFile << endl;
+bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
+	//cerr << "input File is: " << inputFile << endl;
+	//cerr << "in sketchSequences(), the minLen is: " << minLen << endl;
 	int sufIndex = inputFile.find_last_of('.');
 	string sufName = inputFile.substr(sufIndex+1);
 	if(sufName != "fasta" && sufName != "fna" && sufName != "fa")
@@ -337,7 +339,7 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 	kseq_t * ks1;
 	fp1 = gzopen(inputFile.c_str(), "r");
 	if(fp1 == NULL){
-		fprintf(stderr, "cannot open the genome file, %s\n", inputFile.c_str());
+		fprintf(stderr, "ERROR: sketchSequences(), cannot open the genome file, %s\n", inputFile.c_str());
 		//printfUsage();
 		return false;
 	}
@@ -432,7 +434,7 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 	std::thread **threadArr = new std::thread* [th];
 
 	for(int t = 0; t < th; t++){
-		threadArr[t] = new std::thread(std::bind(consumer_fasta_task, fastaPool, std::ref(queue1), kmerSize, sketchSize, sketchFunc, isContainment, containCompress, &kssdPara, &parameters, &sketchesArr[t]));
+		threadArr[t] = new std::thread(std::bind(consumer_fasta_task, fastaPool, std::ref(queue1), kmerSize, sketchSize, minLen, sketchFunc, isContainment, containCompress, &kssdPara, &parameters, &sketchesArr[t]));
 	}
 	producer.join();
 	for(int t = 0; t < th; t++){
@@ -446,13 +448,12 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 		}
 	}
 
-	cerr << "the size of sketches is: " << sketches.size() << endl;
+	//cerr << "-----the size of sketches is: " << sketches.size() << endl;
 	//cerr << "the size of similarityInfos is: " << similarityInfos.size() << endl;
 //	exit(0);
 
 	#else 
 	//for single thread sketch
-	cerr << "start read the file " << endl;
 	while(1){
 		int length = kseq_read(ks1);
 		if(length < 0) break;
@@ -521,7 +522,7 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, string sket
 }
 
 bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
-	fprintf(stderr, "input fileList, sketch by file\n");
+	fprintf(stderr, "-----input fileList, sketch by file\n");
 	fstream fs(inputFile);
 	if(!fs){
 		fprintf(stderr, "error open the inputFile: %s\n", inputFile.c_str());
@@ -620,7 +621,7 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 		}
 		else{
 			fprintf(stderr, "Invaild sketch function: %s\n", sketchFunc.c_str());
-			exit(0);
+			exit(1);
 			//return false;
 		}
 
@@ -693,7 +694,7 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 			tmpSketchInfo.fileSeqs = curFileSeqs;
 			if(totalLength >= minLen)//filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
 				sketches.push_back(tmpSketchInfo);
-			if(i % 10000 == 0)	cerr << "finished sketching: " << i << " genomes" << endl;
+			if(i % 10000 == 0)	cerr << "---finished sketching: " << i << " genomes" << endl;
 		}
 
 		gzclose(fp1);

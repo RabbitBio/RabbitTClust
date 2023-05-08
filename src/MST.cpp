@@ -102,9 +102,9 @@ vector<vector<int>> generateClusterWithBfs(vector<EdgeInfo> forest, int vertices
   return res;
 }
 
-vector < vector<int> > generateCluster(vector<EdgeInfo> forest, int vertices){
+vector<vector<int>> generateCluster(vector<EdgeInfo> forest, int vertices){
 	UnionFind uf(vertices);
-	vector< vector<int> > cluster;
+	vector<vector<int>> cluster;
 	for(int i = 0; i < forest.size(); i++){
 		uf.merge(forest[i].preNode, forest[i].sufNode);
 	}
@@ -171,14 +171,14 @@ vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha){
 	return noiseArr;
 }
 
-vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, string prefixName, double threshold){
+vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int sketch_func_id, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, string prefixName, double threshold){
 	//int denseSpan = 10;
 	double step = 1.0 / denseSpan;
 	
 	
 	//double step = threshold / denseSpan;
 	//cerr << "the threshold is: " << threshold << endl;
-	cerr << "the step is: " << step << endl;
+	//cerr << "the step is: " << step << endl;
 	int N = sketches.size();
 	denseArr = new int*[denseSpan];
 	int** denseLocalArr = new int*[denseSpan * threads];
@@ -211,7 +211,7 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 	//int N = sketches.size();
 	uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
 	uint64_t percentNum = totalCompNum / 100;
-	cerr << "the percentNum is: " << percentNum << endl;
+	//cerr << "the percentNum is: " << percentNum << endl;
 	uint64_t percentId = 0;
 	#pragma omp parallel for num_threads(threads) schedule (dynamic)
 	for(id = 0; id < sketches.size() - tailNum; id+=subSize){
@@ -219,7 +219,7 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 		for(int i = id; i < id+subSize; i++){
 			for(int j = i+1; j < sketches.size(); j++){
 				double tmpDist;
-				if(sketchFunc == "MinHash")
+				if(sketch_func_id == 0)
 				{
 					if(sketches[i].isContainment)
 					{
@@ -231,16 +231,16 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 						tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
 					}
 				}
-				else if(sketchFunc == "KSSD"){
+				else if(sketch_func_id == 1){
 					tmpDist = sketches[i].KSSD->distance(sketches[j].KSSD);
 				}
-				else if(sketchFunc == "WMH"){
+				else if(sketch_func_id == 2){
 					tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
 				}
-				else if(sketchFunc == "HLL"){
+				else if(sketch_func_id == 3){
 					tmpDist = sketches[i].HLL->distance(*sketches[j].HLL);
 				}
-				else if(sketchFunc == "OMH"){
+				else if(sketch_func_id == 4){
 					tmpDist = sketches[i].OMH->distance(*sketches[j].OMH);
 				}
 				else	
@@ -264,7 +264,7 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 		if(thread_id == 0){
 			uint64_t computedNum = (uint64_t)(N - id) * (uint64_t)id + (uint64_t)id * (uint64_t)id / 2;
 			if(computedNum >= percentId * percentNum){
-				fprintf(stderr, "finish MST generation %d %\n", percentId);
+				fprintf(stderr, "---finish MST generation %d %\n", percentId);
 				percentId++;
 			}
 		}
@@ -274,7 +274,7 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 		mstArr[thread_id].swap(tmpMst);
 		vector<EdgeInfo>().swap(tmpMst);
 	}
-	cerr << "finish the multiThreads mst generate" << endl;
+	cerr << "-----finish the 100 % multiThreads mst generate" << endl;
 
 	for(int i = 0; i < 101; i++){
 		for(int j = 0; j < threads; j++){
@@ -301,7 +301,7 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 			for(int j = i+1; j < sketches.size(); j++){
 				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
 				double tmpDist;
-				if(sketchFunc == "MinHash"){
+				if(sketch_func_id == 0){
 					if(sketches[i].isContainment)
 						//tmpDist = 1.0 - sketches[i].minHash->containJaccard(sketches[j].minHash);
 						tmpDist = sketches[i].minHash->containDistance(sketches[j].minHash);
@@ -310,14 +310,13 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 						tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
 					}
 				}
-				else if(sketchFunc == "KSSD"){
+				else if(sketch_func_id == 1)
 					tmpDist = sketches[i].KSSD->distance(sketches[j].KSSD);
-				}
-				else if(sketchFunc == "WMH")
+				else if(sketch_func_id == 2) 
 					tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
-				else if(sketchFunc == "HLL")
+				else if(sketch_func_id == 3)
 					tmpDist = sketches[i].HLL->distance(*sketches[j].HLL);
-				else if(sketchFunc == "OMH")
+				else if(sketch_func_id == 4)
 					tmpDist = sketches[i].OMH->distance(*sketches[j].OMH);
 				else	
 					break;
@@ -355,7 +354,6 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, string sketchFunc, int 
 
 	vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
 	vector<EdgeInfo>().swap(finalGraph);
-	cerr << "finish the final mst " << endl;
 
 	return mst;
 }

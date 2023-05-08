@@ -16,7 +16,6 @@
  * Mar 5, 2021
  *
  */
-
 #include <iostream>
 #include "SketchInfo.h"
 #include "Sketch.h"// need to add the include path in Makefile.
@@ -25,7 +24,7 @@
 #include <omp.h>
 #include "UnionFind.h"
 #include <algorithm>
-#include "parameter.h"
+#include "common.hpp"
 #include "MST_IO.h"
 #include <math.h>
 #include "Sketch_IO.h"
@@ -39,9 +38,22 @@
 #include <sys/sysinfo.h>
 #include <sys/stat.h>
 
+#include "CLI11.hpp"
+#include "sub_command.h"
+
+#ifdef GREEDY_CLUST
+#else
+#endif
+
+
 using namespace std;
 
 int main(int argc, char * argv[]){
+	#ifdef GREEDY_CLUST
+		CLI::App app{"clust-greedy, greedy incremental clustering module for RabbitTClust"};
+	#else
+		CLI::App app{"clust-mst, minimum-spanning-tree-based module for RabbitTClust"};
+	#endif
 	//section 1: init parameters
 	int argIndex = 1;
 	string inputFile = "genome.fna";
@@ -59,386 +71,95 @@ int main(int argc, char * argv[]){
 	int sketchSize = 1000;
 	int containCompress = 1000;
 	bool mstLoadSketch = false;
-	int denseSpan = 100;
 	string mstSketchFile = "sketch.info";
-	bool isSave = true;
 	bool isSetKmer = false;
 	uint64_t minLen = 10000;
-	while(argIndex < argc){
-		switch(argv[argIndex][1]){
-			case 't':
-				threads = atoi(argv[++argIndex]);
-				if(threads < 1 || threads > 128){
-					fprintf(stderr, "Invalid thread number %d\n", threads);
-					return 1;
-				}
-				break;
-			case 'l':
-				sketchByFile = true;
-				fprintf(stderr, "sketch by file: \n");
-				break;
-			case 'c':
-				isContainment = true;
-				containCompress = stoi(argv[++argIndex]);
-				fprintf(stderr, "compute containment, The sketchSize is in proportion with 1/%d \n", containCompress);
-				break;
-			case 'e':
-				isSave = false;
-				break;
-			case 'm':
-				minLen = stoi(argv[++argIndex]);
-				fprintf(stderr, "set the filter minimum length: %ld\n", minLen);
-				break;
-			case 'k':
-				isSetKmer = true;
-				kmerSize = stoi(argv[++argIndex]);
-				fprintf(stderr, "set kmerSize: %d\n", kmerSize);
-				break;
-			case 's':
-				isJaccard = true;
-				sketchSize = stoi(argv[++argIndex]);
-				fprintf(stderr, "set sketchSize:  %d\n", sketchSize);
-				break;
-			case 'd':
-				threshold = stod(argv[++argIndex]);
-				fprintf(stderr, "set the threshold: %lf \n", threshold);
-				break;
-			case 'E':
-				mstLoadSketch = true;
-				fprintf(stderr, "clust-mst load sketches\n");
-				break;
-			case 'f':
-				useFile = true;
-				#ifdef GREEDY_CLUST
-				fprintf(stderr, "input as sketches informations for greedy incremental cluster\n");
-				#else
-				fprintf(stderr, "input as MST for Minimum Spanning Tree cluster\n");
-				#endif
-				break;
-			case 'F':
-				sketchFunc = argv[++argIndex];
-				fprintf(stderr, "the sketch function is: %s \n", sketchFunc.c_str());
-				break;
-			case 'o':
-				outputFile = argv[++argIndex];
-				fprintf(stderr, "set output file: %s \n", outputFile.c_str());
-				break;
-			case 'i':
-			{
-				if(!useFile && !mstLoadSketch)
-				{
-					inputFile = argv[++argIndex];
-					fprintf(stderr, "the inputFile is: %s \n", inputFile.c_str());
-				}
-				else if(useFile)
-				{
-					inputFile = argv[++argIndex];
-					if(argIndex == argc)
-					{
-						fprintf(stderr, "error input File with -f options, exit\n");
-						printUsage();
-						return 1;
-					}
-					inputFile1 = argv[++argIndex];
-					#ifdef GREEDY_CLUST
-					fprintf(stderr, "the genomeInfo and SketchInfo are: %s and %s\n", inputFile.c_str(), inputFile1.c_str());
-					#else
-					fprintf(stderr, "the genomeInfo and MSTInfo are: %s and %s\n", inputFile.c_str(), inputFile1.c_str());
-					#endif
-				}
-				else if(mstLoadSketch)
-				{
-					inputFile = argv[++argIndex];
-					if(argIndex == argc)
-					{
-						fprintf(stderr, "error input File with -f options, exit\n");
-						printUsage();
-						return 1;
-					}
-					inputFile1 = argv[++argIndex];
-					fprintf(stderr, "the genomeInfo and SketchInfo are: %s and %s\n", inputFile.c_str(), inputFile1.c_str());
-				}
-				break;
-			}
-			default:
-				fprintf(stderr, "Invalid option %s\n", argv[argIndex]);
-				printUsage();
-				return 1;
-		}
-		//}
-		++argIndex;
-	}//end while argument parse;
-	
-	if(argc == 1){
-		printUsage();
-		return 1;
-	}
+	string folder_path;
 
-	vector<SketchInfo> sketches;
-	vector<vector<int> > cluster;
+	bool noSave = false;
 
-	/* For clust-greedy, the input files are GenomeInfo and SketchInfo.
-	 * For clust-mst, the input files are GenomeInfo and MSTInfo.
-	 * Finished the clustering.
-	 */
-	if(useFile){
-#ifdef GREEDY_CLUST
-	#ifdef Timer
-	double time0 = get_sec();
-	#endif
-		sketchByFile = loadSketches(inputFile, inputFile1, threads, sketches, sketchFunc);
-		cerr << "the size of sketches is: " << sketches.size() << endl;
-	#ifdef Timer
-	double time1 = get_sec();
-	cerr << "========time of load genome Infos and sketch Infos is: " << time1 - time0 << endl;
-	#endif
-		cluster = greedyCluster(sketches, sketchFunc, threshold, threads);
-		printResult(cluster, sketches, sketchByFile, outputFile);
-		cerr << "write the cluster result into: " << outputFile << endl;
-		cerr << "the size of " << outputFile << " is: " << cluster.size() << endl;
-	#ifdef Timer
-	double time2 = get_sec();
-	cerr << "========time of greedy incremental cluster is: " << time2 - time1 << endl;
-	#endif
-#else
-	vector<EdgeInfo> mst;
-	sketchByFile = loadMSTs(inputFile, inputFile1, sketches, mst);
-	int **denseArr;
-	loadDense(denseArr, inputFile, denseSpan, sketches);
-	vector<EdgeInfo> forest = generateForest(mst, threshold);
-	cerr << "finished generate Forest" << endl;
-	vector< vector<int> > tmpClust = generateClusterWithBfs(forest, sketches.size());
-	printResult(tmpClust, sketches, sketchByFile, outputFile);
-	cerr << "write the cluster result into: " << outputFile << endl;
-	cerr << "the size of: " << outputFile << " is: " << tmpClust.size() << endl;
+	auto option_threads = app.add_option("-t, --threads", threads,  "set the thread number, default all CPUs of the platform");
+	auto option_min_len = app.add_option("-m, --min-length", minLen, "set the filter minimum length (minLen), genome length less than minLen will be ignore, default 10,000");
 
-	//double alpha = 0.05;
-	int alpha = 2;
-	int denseIndex = threshold / 0.01;
-	vector<int> totalNoiseArr;
-	for(int i = 0; i < tmpClust.size(); i++){
-		if(tmpClust[i].size() == 1) continue;
-		vector<PairInt> curDenseArr;
-		set<int> denseSet;
-		for(int j = 0; j < tmpClust[i].size(); j++){
-			int element = tmpClust[i][j];
-			PairInt p(element, denseArr[denseIndex][element]);
-			denseSet.insert(denseArr[denseIndex][element]);
-			curDenseArr.push_back(p);
-		}
-		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
-		totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
-	}
-	cerr << "the total noiseArr size is: " << totalNoiseArr.size() << endl;
-	forest = modifyForest(forest, totalNoiseArr, threads);
-	cluster = generateClusterWithBfs(forest, sketches.size());
-	string outputFileNew = outputFile + ".removeNoise";
-	printResult(cluster, sketches, sketchByFile, outputFileNew);
-	cerr << "write the cluster without noise into: " << outputFileNew << endl;
-	cerr << "the size of: " << outputFileNew << " is: " << cluster.size() << endl;
-//==========================================================
+	auto option_containment = app.add_option("-c, --containment", containCompress, "use AAF distance with containment coefficient, set the containCompress, the sketch size is in proportion with 1/containCompress");
+	auto option_kmer_size = app.add_option("-k, --kmer-size", kmerSize, "set the kmer size");
+	auto option_sketch_size = app.add_option("-s, --sketch-size", sketchSize, "set the sketch size for Jaccard Index and Mash distance, default 1000");
+
+	auto flag_input_list = app.add_flag("-l, --list", sketchByFile, "input is genome list, one genome per line");
+	auto flag_no_save = app.add_flag("-e, --no-save", noSave, "not save the intermediate files, such as sketches or MST");
+	auto option_threshold = app.add_option("-d, --threshold", threshold, "set the distance threshold for clustering");
+	auto option_function = app.add_option("-F, --function", sketchFunc, "set the sketch function, such as MinHash, KSSD, default MinHash");
+	auto option_output = app.add_option("-o, --output", outputFile, "set the output name of cluster result");
+	auto option_input = app.add_option("-i, --input", inputFile, "set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)");
+	auto option_presketched = app.add_option("--presketched", folder_path, "clustering by the pre-generated sketch files rather than genomes");
+#ifndef GREEDY_CLUST
+	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
 #endif
-		return 0;//end main 
-	}//end useFile
 
-	uint64_t maxSize, minSize, averageSize;
-	calSize(sketchByFile, inputFile, threads, minLen, maxSize, minSize, averageSize);
-	
-	if(isContainment && isJaccard){
-		cerr << "conflict distance measurement of Mash distance (fixed-sketch-size) and AAF distance (variable-sketch-size) " << endl;
+	option_output->required();
+
+	CLI11_PARSE(app, argc, argv);
+
+	if(*option_function){
+		fprintf(stderr, "-----set the sketch function: %s\n", sketchFunc.c_str());
+	}
+	if(threads < 1){
+		fprintf(stderr, "-----Invalid thread number %d\n", threads);
 		return 1;
 	}
-
-#ifdef GREEDY_CLUST
-	cerr << "use the Greedy cluster" << endl;
-	if(!isContainment && !isJaccard){
-		containCompress = averageSize / 1000;
+	if(option_threads){
+		fprintf(stderr, "-----set the thread number %d\n", threads);
+	}
+	if(*option_min_len){
+		fprintf(stderr, "-----set the filter minimum length: %ld\n", minLen);
+	}
+	if(*option_containment){
 		isContainment = true;
+		fprintf(stderr, "-----use AAF distance with containment coefficient, the sketch size is in porportion with 1/%d\n", containCompress);
 	}
-	else if(!isContainment && isJaccard){
+	if(*option_kmer_size){
+		isSetKmer = true;
+		fprintf(stderr, "-----set kmerSize: %d\n", kmerSize);
 	}
-	else{
-		if(averageSize / containCompress < 10){
-			cerr << "the containCompress " << containCompress << " is too large and the sketch size is too small" << endl;
-			containCompress = averageSize / 1000;
-			cerr << "set the containCompress to: " << containCompress << endl;
-		}
+	if(*option_sketch_size){
+		isJaccard = true;
+		fprintf(stderr, "-----set sketchSize:  %d\n", sketchSize);
 	}
-#else
-	cerr << "use the MST cluster" << endl;
+	if(*option_threshold){
+		fprintf(stderr, "-----set threshold:  %d\n", threshold);
+	}
+
+
+#ifndef GREEDY_CLUST
+//======clust-mst=========================================================================
+	if(*option_premsted){
+		clust_from_mst(folder_path, outputFile, threshold, threads);
+		return 0;
+	}
+//======clust-mst=========================================================================
 #endif
 	
-	double warning_rate = 0.01;
-	double recommend_rate = 0.0001;
-	int alphabetSize = 4;//for "AGCT"
-	int recommendedKmerSize = ceil(log(maxSize * (1 - recommend_rate) / recommend_rate) / log(4));
-	int warningKmerSize = ceil(log(maxSize * (1 - warning_rate) / warning_rate) / log(4));
-	if(!isSetKmer){
-		kmerSize = recommendedKmerSize;
-	}
-	else{
-		if(kmerSize < warningKmerSize){
-			cerr << "the kmerSize " << kmerSize << " is too small for the maximum genome size of " << maxSize << endl;
-			cerr << "replace the kmerSize to the: " << recommendedKmerSize << " for reducing the random collision of kmers" << endl;
-			kmerSize = recommendedKmerSize;
-		}
-		else if(kmerSize > recommendedKmerSize + 3){
-			cerr << "the kmerSize " << kmerSize << " maybe too large for the maximum genome size of " << maxSize << endl;
-			cerr << "replace the kmerSize to the " << recommendedKmerSize << " for increasing the sensitivity of genome comparison" << endl;
-			kmerSize = recommendedKmerSize;
-		}
+	if(*option_presketched){
+		clust_from_sketches(folder_path, outputFile, threshold, threads);
+		return 0;
 	}
 
-	//get the vaild distance threshold range
-	double minJaccard = 0.001;
-	if(!isContainment){
-		minJaccard = 1.0 / sketchSize;
-	}
-	else{
-		//minJaccard = 1.0 / (averageSize / containCompress);
-		minJaccard = 1.0 / (minSize / containCompress);
-	}
-
-	double maxDist = -1.0 / kmerSize * log(2*minJaccard / (1.0 + minJaccard));
-	cerr << "the max recommand distance threshold is: " << maxDist << endl;
-	if(threshold > maxDist){
-		cerr << "the threshold: " << threshold << " is out of the valid distance range estimated by Mash distance or Aaf distance" << endl;
+	if(!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, isJaccard, kmerSize, threshold, containCompress, sketchSize)){
 		return 1;
 	}
 
-
-	if(sketchByFile) cerr << "sketch by file!" << endl;
-	else cerr << "sketch by sequence!" << endl;
-
-	
-	#ifdef DEBUG
-	cerr << "the kmerSize is: " << kmerSize << endl;
-	cerr << "the thread number is: " << threads << endl;
-	cerr << "the threshold is: " << threshold << endl;
-	if(isContainment)
-		cerr << "use the AAF distance (variable-sketch-size), the sketchSize is in proportion with 1/" << containCompress << endl;
-	else
-		cerr << "use the Mash distance (fixed-sketch-size), the sketchSize is: " << sketchSize << endl;
-	#endif
-	
-
-	#ifdef Timer
-	double t0 = get_sec();
-	#endif
-	//section 2: Sketch Generation, computing from genome file or loading sketches from saved file.
-
-	if(mstLoadSketch){
-		sketchByFile = loadSketches(inputFile, inputFile1, threads, sketches, sketchFunc);
-	}
-	else{
-		if(!sketchByFile){
-			if(!sketchSequences(inputFile, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
-				printUsage();
-				return 1;
-			}
-		
-		}//end sketch by sequence
-		else{
-			if(!sketchFiles(inputFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
-				printUsage();
-				return 1;
-			}
-		}//end sketch by file
-	}
-	cerr << "the size of sketches(number of genomes or sequences) is: " << sketches.size() << endl;
-
-	#ifdef Timer
-	double t1 = get_sec();
-	if(mstLoadSketch)
-		cerr << "========time of load sketches for clust-mst is: " << t1 - t0 << "========" << endl;
-	else
-		cerr << "========time of computing sketch is: " << t1 - t0 << "========" << endl;
-	#endif
-
-	string folderPath = currentDataTime();
-	if(isSave){
-		string command = "mkdir -p " + folderPath;
-		system(command.c_str());
-	}
-
-	if(!mstLoadSketch && isSave){
-		saveSketches(sketches, folderPath, inputFile, sketchFunc, isContainment, containCompress, sketchByFile, sketchSize, kmerSize);
-	}
-	#ifdef Timer
-	double t2 = get_sec();
-	if(!mstLoadSketch)
-		cerr << "========time of saveSketches is: " << t2 - t1 << "========" << endl;
-	#endif
-	//section 3: generating the clusters.
-#ifdef GREEDY_CLUST
-	cluster = greedyCluster(sketches, sketchFunc, threshold, threads);
-	printResult(cluster, sketches, sketchByFile, outputFile);
-	cerr << "write the cluster result into: " << outputFile << endl;
-	cerr << "the size of " << outputFile << " is: " << cluster.size() << endl;
-	#ifdef Timer
-	double t3 = get_sec();
-	cerr << "========time of greedyCluster is: " << t3 - t2 << "========" << endl;
-	#endif
-#else
-	int **denseArr;
-	uint64_t* aniArr; //= new uint64_t[101];
-	vector<EdgeInfo> mst = modifyMST(sketches, sketchFunc, threads, denseArr, denseSpan, aniArr, outputFile, threshold);
-	#ifdef Timer
-	double t3 = get_sec();
-	cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
-	#endif
-	if(isSave){
-		saveANI(folderPath, inputFile, aniArr, sketchFunc);
-		saveDense(folderPath, inputFile, denseArr, denseSpan, sketches);
-		saveMST(folderPath, inputFile, sketchFunc, isContainment, containCompress, sketches, mst, sketchByFile, sketchSize, kmerSize);
-	}
-	#ifdef Timer
-	double t4 = get_sec();
-	cerr << "========time of saveMST is: " << t4 - t3 << "========" << endl;
-	#endif
-//=======================================================================================================================
-	
-	vector<EdgeInfo> forest = generateForest(mst, threshold);
-	cerr << "finished generate Forest" << endl;
-	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
-	printResult(tmpClust, sketches, sketchByFile, outputFile);
-	cerr << "write the cluster result into: " << outputFile << endl;
-	cerr << "the size of: " << outputFile << " is: " << tmpClust.size() << endl;
-	//update cluster by noise cluster
-	//double alpha = 0.05;
-	int alpha = 2;
-	int denseIndex = threshold / 0.01;
-	vector<int> totalNoiseArr;
-	for(int i = 0; i < tmpClust.size(); i++){
-		if(tmpClust[i].size() == 1) continue;
-		vector<PairInt> curDenseArr;
-		set<int> denseSet;
-		for(int j = 0; j < tmpClust[i].size(); j++){
-			int element = tmpClust[i][j];
-			PairInt p(element, denseArr[denseIndex][element]);
-			denseSet.insert(denseArr[denseIndex][element]);
-			curDenseArr.push_back(p);
-		}
-		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
-		totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
-	}
-	cerr << "the total noiseArr size is: " << totalNoiseArr.size() << endl;
-	forest = modifyForest(forest, totalNoiseArr, threads);
-	cluster = generateClusterWithBfs(forest, sketches.size());
-	string outputFileNew = outputFile + ".removeNoise";
-	printResult(cluster, sketches, sketchByFile, outputFileNew);
-	cerr << "write the cluster without noise into: " << outputFileNew << endl;
-	cerr << "the size of: " << outputFileNew << " is: " << cluster.size() << endl;
-	
-	#ifdef Timer
-	double t5 = get_sec();
-	cerr << "========time of generator forest and cluster is: " << t5 - t4 << "========" << endl;
-	#endif
-#endif//endif GREEDY_CLUST
-	cerr << "finished" << endl;
+	clust_from_genomes(inputFile, outputFile, sketchByFile, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads);
 
 	return 0;
 }//end main
+
+
+
+
+
+
+
+
 
 
 

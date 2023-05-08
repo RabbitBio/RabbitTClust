@@ -1,14 +1,6 @@
-![RabbitTClust](rabbittclust.png)
-
-# `RabbitTClust v.2.1.0`
-RabbitTClust is a fast and memory-efficient genome clustering tool based on sketch-based distance estimations.
-It enables processing of large-scale datasets by combining dimensionality reduction techniques with streaming and parallelization on modern multi-core platforms.
-RabbitTClust supports classical single-linkage hierarchical (clust-mst) and greedy incremental clustering (clust-greedy) algorithms for different scenarios. 
-
+# `v.2.0.0`
 ## Installation
-RabbitTClust version 2.1.0 can only support 64-bit Linux Systems.
-
-The detailed update information for this version, as well as the version history, can be found in the [`version_history`](version_history/history.md) document.
+RabbitTClust version 2.0 can only support 64-bit Linux Systems.
 
 ### Dependancy
 * cmake v.3.0 or later
@@ -56,40 +48,24 @@ cd ../
 
 ## Usage
 ```bash
-# clust-mst, minimum-spanning-tree-based module for RabbitTClust
-Usage: ./clust-mst [OPTIONS]
-Options:
-  -h,--help                   Print this help message and exit
-  -t,--threads INT            set the thread number, default all CPUs of the platform
-  -m,--min-length UINT        set the filter minimum length (minLen), genome length less than minLen will be ignore, default 10,000
-  -c,--containment INT        use AAF distance with containment coefficient, set the containCompress, the sketch size is in proportion with 1/containCompress
-  -k,--kmer-size INT          set the kmer size
-  -s,--sketch-size INT        set the sketch size for Jaccard Index and Mash distance, default 1000
-  -l,--inputlist              input is genome list, one genome per line
-  -e,--no-save                not save the intermediate files, such as sketches or MST
-  -d,--threshold FLOAT        set the distance threshold for clustering
-  -F,--function TEXT          set the sketch function, such as MinHash, KSSD, default MinHash
-  -o,--output TEXT REQUIRED   set the output name of cluster result
-  -i,--input TEXT             set the input file
-  --presketched TEXT          clustering by the pre-generated sketch files rather than genomes
-  --premsted TEXT             clustering by the pre-generated mst files rather than genomes for clust-mst
+usage: clust-mst [-h] [-l] [-t] <int> [-d] <double> [-F] <string> [-i] <string> [-o] <string>
+usage: clust-mst [-h] [-f] [-E] [-d] <double> [-i] <string> <string> [-o] <string>
+usage: clust-greedy [-h] [-l] [-t] <int> [-d] <double> [-F] <string> [-i] <string> [-o] <string>
+usage: clust-greedy [-h] [-f] [-d] <double> [-i] <string> <string> [-o] <string>
+-h         : this help message
+-k <int>   : set kmer size, default 21, for both clust-mst and clust-greedy
+-s <int>   : set sketch size, default 1000, for both clust-mst and clust-greedy
+-c <int>   : set sampling ratio to compute variable sketchSize, sketchSize = genomeSize/samplingRatio, only support with MinHash sketch function, for clust-greedy
+-d <double>: set the distance threshold, default 0.05 for both clust-mst and clust-greedy
+-t <int>   : set the thread number, default take full usage of platform cores number, for both clust-mst and clust-greedy
+-l         : input is a file list, not a single genome file. Lines in the input file list specify paths to genome files, one per line, for both clust-mst and clust-greedy
+-i <string>: path of input file. One file list or single genome file. Two input file with -f and -E option
+-f         : two input files, genomeInfo and MSTInfo files for clust-mst; genomeInfo and sketchInfo files for clust-greedy 
+-E         : two input files, genomeInfo and sketchInfo for clust-mst
+-F <string>: set the sketch function, including MinHash and KSSD, default MinHash, for both clust-mst and clust-greedy
+-o <string>: path of output file, for both clust-mst and clust-greedy
+-e         : not save the intermediate file generated from the origin genome file, such as the GenomeInfo, MSTInfo, and SketchInfo files, for both clust-mst and clust-greedy
 
-# clust-greedy, greedy incremental clustering module for RabbitTClust
-Usage: ./clust-greedy [OPTIONS]
-Options:
-  -h,--help                   Print this help message and exit
-  -t,--threads INT            set the thread number, default all CPUs of the platform
-  -m,--min-length UINT        set the filter minimum length (minLen), genome length less than minLen will be ignore, default 10,000
-  -c,--containment INT        use AAF distance with containment coefficient, set the containCompress, the sketch size is in proportion with 1/containCompress
-  -k,--kmer-size INT          set the kmer size
-  -s,--sketch-size INT        set the sketch size for Jaccard Index and Mash distance, default 1000
-  -l,--inputlist              input is genome list, one genome per line
-  -e,--no-save                not save the intermediate files, such as sketches or MST
-  -d,--threshold FLOAT        set the distance threshold for clustering
-  -F,--function TEXT          set the sketch function, such as MinHash, KSSD, default MinHash
-  -o,--output TEXT REQUIRED   set the output name of cluster result
-  -i,--input TEXT             set the input file
-  --presketched TEXT          clustering by the pre-generated sketch files rather than genomes
 ```
 
 ## Example:
@@ -109,18 +85,16 @@ Options:
 
 #for redundancy detection with clust-greedy, input is a genome file list:
 #use -d to specify the distance threshold corresponding to various degrees of redundancy.
-./clust-greedy -d 0.001 -l -i bacteria.list -o bacteria.out
+./clust-greedy -d 0.001 -l -i bacteriaList -o bacteria.out
 
-#for last running of clust-mst, it generated a folder name in year_month_day_hour-minute-second format, such as 2023_05_06_08-49-15.
-#this folder contains the sketch, mst files.
 #for generator cluster from exist MST with a distance threshold of 0.045:
-./clust-mst -d 0.045 --premsted 2023_05_06_08-49-15 -o bacteria.mst.d.045.clust
-#for generator cluster from exist sketches files of clust-mst with a distance threshold of 0.045:
-./clust-mst -d 0.045 --presketched 2023_05_06_08-49-15 -o bacteria.mst.d.045.clust
+#ATTENTION: the -f must in front of the -i option
+./clust-mst -d 0.05 -f -i bact_refseq.list.MinHashGenomeInfo bact_refseq.list.MinHashMSTInfo -o bact_refseq.mst.d.045.clust
 
 #for generator cluster from exist sketches of clust-greedy with a distance threshold of 0.001:
-# folder 2023_05_06_08-49-15 contains the sketch files.
-./clust-greedy -d 0.001 --presketched 2023_05_06_08-49-15 -o bact_genbank.greedy.d.001.clust
+#ATTENTION: the -f must in front of the -i option
+./clust-greedy -d 0.001 -f -i bact_genbank.list.MinHashGenomeInfo bact_genbank.list.MinHashSketchInfo -o bact_genbank.greedy.d.001.clust
+
 ```
 ## Output
 The output file is in a CD-HIT output format and is slightly different when running with varying input options (*-l* and *-i*).  
@@ -175,8 +149,7 @@ the cluster 2 is:
 
 
 # Bug Report
-We highly appreciate all bug reports, comments, and suggestions from our users.  
-Please feel free to raise any concerns or feedback with us without hesitation by `issue`. 
+All bug reports, comments and suggestions are welcome.
 
 ## Cite
 [Xu, X. et al. (2022). RabbitTClust: enabling fast clustering analysis of

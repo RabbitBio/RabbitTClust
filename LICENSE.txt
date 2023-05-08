@@ -5,6 +5,9 @@ on sketch-based distance estimation. Our approach enables efficient processing
 of large-scale datasets by combining dimensionality reduction techniques with
 streaming and parallelization on modern multi-core platforms. It is implemented
 in C++ and is distributed with:
+CLI11
+	https://github.com/CLIUtils/CLI11
+	3-Clause BSD License
 
 KSeq
 	https://github.com/attractivechaos/klib

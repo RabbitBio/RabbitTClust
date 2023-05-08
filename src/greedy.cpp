@@ -13,7 +13,7 @@ using namespace std;
  * @return								cluster result two-dimention array, each array in result is a cluster, and each element in a cluster
  * 												is a genome.
  */
-vector<vector<int> >greedyCluster(vector<SketchInfo> sketches, string sketchFunc, double threshold, int threads)
+vector<vector<int>> greedyCluster(vector<SketchInfo>& sketches, int sketch_func_id, double threshold, int threads)
 {
 	int numGenomes = sketches.size();
 	int * clustLabels = new int[numGenomes];
@@ -30,14 +30,14 @@ vector<vector<int> >greedyCluster(vector<SketchInfo> sketches, string sketchFunc
 		for(int i = 0; i < representiveArr.size(); i++){
 			int repId = representiveArr[i];
 			double dist;
-			if(sketchFunc == "MinHash"){
+			if(sketch_func_id == 0){
 				if(sketches[repId].isContainment)
 					dist = sketches[repId].minHash->containDistance(sketches[j].minHash);
 					//dist = 1.0 - sketches[repId].minHash->containJaccard(sketches[j].minHash);
 				else
 					dist = sketches[repId].minHash->distance(sketches[j].minHash);
 			}
-			else if(sketchFunc == "KSSD"){
+			else if(sketch_func_id == 1){
 				dist = sketches[repId].KSSD->distance(sketches[j].KSSD);
 			}
 			else{
@@ -63,7 +63,7 @@ vector<vector<int> >greedyCluster(vector<SketchInfo> sketches, string sketchFunc
 			semiClust[repId].push_back(j);
 		}
 		map<double, int>().swap(distMapCenter);
-		if(j % 10000 == 0) cerr << "finished cluster " << j << endl;
+		if(j % 10000 == 0) cerr << "---finished cluster: " << j << endl;
 		
 	}//end for j
 	//cerr << "the representiveArr size is : " << representiveArr.size() << endl;

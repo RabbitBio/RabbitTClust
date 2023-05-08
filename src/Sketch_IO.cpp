@@ -3,49 +3,40 @@
 #include <sstream>
 #include "greedy.h"
 #include "MST_IO.h"
+#include <assert.h>
 
 bool cmpIndex(SketchInfo s1, SketchInfo s2){
 	return s1.id < s2.id;
 }
 
-/* @brief											Saving the sketches including hash values, genome informations into output files.
- * @details										To save the genome informations into outputGenomeInfo. To save the sketches informations 
- * 														and hash values into outputSketchInfo.
- * 														The first line in outputGenomeInfo is to determine genome input as a list file(sketchByFile)
- * 														or a single file. The remain lines are specific genome infos including fileName, genomeName, 
- * 														genomeComment, and totalLength, each line a genome.
- * 														The first four lines in outputSketchInfo is to determine iscontainment, containCompress(sketchSize),
- * 														kmerSize and sketchFunc. The remain lines are specific sketches hash values, each line a genome sketch.
- * 														
- * @param[in]	sketches				sketches array need to save
- * @param[in]	folderPath			the filePath to save the sketches
- * @param[in] inputFile				input file name for the prefix name of output file
- * @param[in] sketchFunc			Sketch function, including MinHash and KSSD, used for output file name
- * @param[in] inContainment		whether is used for duplication detection
- * @param[in]	containCompress	the dimension reduction for containment sketches
- * @param[in] sketchByFile		whether the input genomes are list of files or a single file
- * @param[in] sketchSize			the sketch size in the sketches
- * @param[in]	kmerSize				the kmer size in the sketches
- */
-void saveSketches(vector<SketchInfo> sketches, string folderPath, string inputFile, string sketchFunc, bool isContainment, int containCompress, bool sketchByFile, int sketchSize, int kmerSize)
-{
-	std::size_t found = inputFile.find_last_of('/');//if not found, return std::string::npos(-1);
-	string prefixName = inputFile.substr(found+1);
+void save_genome_info(vector<SketchInfo>& sketches, string folderPath, string type, bool sketchByFile){
+	assert(type == "sketch" || type == "mst");
+	string info_file = folderPath + '/' + "info." + type;
+	FILE * fp_info = fopen(info_file.c_str(), "w+");
+	if(!fp_info){
+		cerr << "ERROR: saveSketches(), cannot open the file: " << info_file << endl;
+		exit(1);
+	}
+	fwrite(&sketchByFile, sizeof(bool), 1, fp_info);
+	size_t sketch_number = sketches.size();
+	fwrite(&sketch_number, sizeof(size_t), 1, fp_info);
 
-	cerr << "save the genomeInfo into: " << folderPath << '/' << prefixName+'.'+sketchFunc+"GenomeInfo" << endl;
-	ofstream ofile;
-	ofile.open(folderPath + '/' + prefixName+'.'+sketchFunc+"GenomeInfo");
-	if(sketchByFile)
-		ofile << '1' << endl;
-	else
-		ofile << '0' << endl;
-	
 	if(sketchByFile)
 	{
 		for(int i = 0; i < sketches.size(); i++)
 		{
 			Vec_SeqInfo curFileSeqs = sketches[i].fileSeqs;
-			ofile << sketches[i].fileName << ' ' << curFileSeqs[0].name << ' ' << curFileSeqs[0].strand << ' ' << sketches[i].totalSeqLength << ' ' << curFileSeqs[0].comment << '\n';
+			int file_name_length = sketches[i].fileName.length();
+			int seq0_name_length = curFileSeqs[0].name.length();
+			int seq0_comment_length = curFileSeqs[0].comment.length();
+			fwrite(&file_name_length, sizeof(int), 1, fp_info);
+			fwrite(&seq0_name_length, sizeof(int), 1, fp_info);
+			fwrite(&seq0_comment_length, sizeof(int), 1, fp_info);
+			fwrite(&curFileSeqs[0].strand, sizeof(int), 1, fp_info);
+			fwrite(&sketches[i].totalSeqLength, sizeof(uint64_t), 1, fp_info);
+			fwrite(sketches[i].fileName.c_str(), sizeof(char), file_name_length, fp_info);
+			fwrite(curFileSeqs[0].name.c_str(), sizeof(char), seq0_name_length, fp_info);
+			fwrite(curFileSeqs[0].comment.c_str(), sizeof(char), seq0_comment_length, fp_info);
 		}
 	}
 	else//sketchBySequence
@@ -53,206 +44,242 @@ void saveSketches(vector<SketchInfo> sketches, string folderPath, string inputFi
 		for(int i = 0; i < sketches.size(); i++)
 		{
 			SequenceInfo curSeq = sketches[i].seqInfo;
-			ofile << curSeq.name << ' ' << ' ' << curSeq.strand << ' ' << curSeq.length << curSeq.comment << endl;
-			//ofile << curSeq.comment << endl;
+			int seq_name_length = curSeq.name.length();
+			int seq_comment_length = curSeq.comment.length();
+			fwrite(&seq_name_length, sizeof(int), 1, fp_info);
+			fwrite(&seq_comment_length, sizeof(int), 1, fp_info);
+			fwrite(&curSeq.strand, sizeof(int), 1, fp_info);
+			fwrite(&curSeq.length, sizeof(int), 1, fp_info);
+			fwrite(curSeq.name.c_str(), sizeof(char), seq_name_length, fp_info);
+			fwrite(curSeq.comment.c_str(), sizeof(char), seq_comment_length, fp_info);
 		}
 	}
-	ofile.close();
+	fclose(fp_info);
+}
 
-	cerr << "save the SketchInfo into: " << folderPath << '/' << prefixName+'.'+sketchFunc+"SketchInfo" << endl;
-	ofstream ofile1;
-	ofile1.open(folderPath + '/' + prefixName+'.'+sketchFunc+"SketchInfo");
 
-	ofile1 << sketchFunc << endl;
+void saveSketches(vector<SketchInfo>& sketches, string folderPath, bool sketchByFile, string sketchFunc, bool isContainment, int containCompress, int sketchSize, int kmerSize)
+{
+	//-----save the info.sketch
+	save_genome_info(sketches, folderPath, "sketch", sketchByFile);
+
+	//-----save the hash.sketch
+	string hash_file = folderPath + '/' + "hash.sketch";
+	FILE * fp_hash = fopen(hash_file.c_str(), "w+");
+	if(!fp_hash){
+		cerr << "ERROR: saveSketch(), cannot open the file: " << hash_file << endl;
+		exit(1);
+	}
+	int sketch_func_id = 0;
 	if(sketchFunc == "MinHash"){
-		if(isContainment){
-			ofile1 << '1' << endl;
-			ofile1 << containCompress << endl;
-		}
-		else{
-			ofile1 << '0' << endl;
-			ofile1 << sketchSize << endl;
-		}
-		ofile1 << kmerSize << endl;
+		sketch_func_id = 0;
 	}
 	else if(sketchFunc == "KSSD"){
+		sketch_func_id = 1;
+	}
+	else{
+		cerr << "ERROR: saveSketches(), noexistent hash function: " << sketchFunc << endl;
+		exit(1);
+	}
+	fwrite(&sketch_func_id, sizeof(int), 1, fp_hash);
+	if(sketch_func_id == 0){
+		fwrite(&kmerSize, sizeof(int), 1, fp_hash);
+		fwrite(&isContainment, sizeof(bool), 1, fp_hash);
+		if(isContainment)
+			fwrite(&containCompress, sizeof(int), 1, fp_hash);
+		else
+			fwrite(&sketchSize, sizeof(int), 1, fp_hash);
+		//-----saving hash number and hash values for each sketch
+		for(int i = 0; i < sketches.size(); i++){
+			vector<uint64_t> hashArr = sketches[i].minHash->storeMinHashes();
+			size_t cur_sketch_size = hashArr.size();
+			fwrite(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
+			fwrite(hashArr.data(), sizeof(uint64_t), cur_sketch_size, fp_hash);
+		}
+	}
+	else if(sketch_func_id == 1){
 		int half_k, half_subk, drlevel;
 		half_k = sketches[0].KSSD->get_half_k();
 		half_subk = sketches[0].KSSD->get_half_subk();
 		drlevel = sketches[0].KSSD->get_drlevel();
-
-		ofile1 << half_k << endl;
-		ofile1 << half_subk << endl;
-		ofile1 << drlevel << endl;
-	}
-	
-	if(sketchFunc == "MinHash"){
-		for(int i = 0; i < sketches.size(); i++){
-			vector<uint64_t> hashArr = sketches[i].minHash->storeMinHashes();
-			for(int j = 0; j < hashArr.size(); j++)
-				ofile1 << hashArr[j] << '\t';
-			ofile1 << endl;
-		}
-	}
-	else if(sketchFunc == "KSSD"){
+		fwrite(&half_k, sizeof(int), 1, fp_hash);
+		fwrite(&half_subk, sizeof(int), 1, fp_hash);
+		fwrite(&drlevel, sizeof(int), 1, fp_hash);
 		for(int i = 0; i < sketches.size(); i++){
 			vector<uint64_t> hashArr = sketches[i].KSSD->storeHashes();
-			for(int j = 0; j < hashArr.size(); j++)
-				ofile1 << hashArr[j] << '\t';
-			ofile1 << endl;
+			size_t cur_sketch_size = hashArr.size();
+			fwrite(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
+			fwrite(hashArr.data(), sizeof(uint64_t), cur_sketch_size, fp_hash);
 		}
 	}
-	else{
-		cerr << "save sketches can only support MinHash and KSSD functions" << endl;
-	}
-
-	ofile1.close();
-
+	fclose(fp_hash); 
+	cerr << "-----save the sketches into: " << folderPath << endl;
+	
 }
 
-/* @brief										Get the sketches informations and hash values from the input files, corresponding to the saveSketches function.
- * @details									This function is in corresponding to the function saveSketches;
- * @param[in] inputFile0		Genome information file including fileName, seqName, seqComment, seqStrand and totalSeqLength. 
- * 													The first line in inputFile0 is to determine sketchByFile or sketchBySequences(input as a fileList or a single genome file).
- * @param[in] inputFile1 		Sketch information file including isContainment, containCompress(sketchSize), kmerSize, sketchFunc and hashValues. 
- * 													The first four lines determine the isContainment, containCompress(sketchSize), kmerSize and sketch function. 
- * 													The remaining lines are sorted hash values one genome per line.
- * @param[in] threads				Thread number of clustering.
- * @param[out] sketches			Result SketchInfo arrays.
- * return sketchByFile			The origin input genome is a file list or a single genome file.
- */
-bool loadSketches(string inputFile0, string inputFile1, int threads, vector<SketchInfo>& sketches, string& sketchFunc)
-{
-	fstream fs0(inputFile0);//Genome Info
-	fstream fs1(inputFile1);//Sketch Info
-	if(!fs0){
-		fprintf(stderr, "error open the inputFile: %s\n", inputFile0.c_str());
-		printUsage();
+bool loadSketches(string folderPath, int threads, vector<SketchInfo>& sketches, int& sketch_func_id){
+	string hash_file = folderPath + '/' + "hash.sketch";
+	FILE * fp_hash = fopen(hash_file.c_str(), "r");
+	if(!fp_hash){
+		cerr << "ERROR: loadSketches(), cannot open the file: " << hash_file << endl;
 		exit(1);
 	}
-	if(!fs1){
-		fprintf(stderr, "error open the inputFile: %s\n", inputFile1.c_str());
-		printUsage();
-		exit(1);
-	}
-
-	string line;
-	getline(fs0, line);
-	bool sketchByFile = stoi(line);//1 or 0
-
-	bool isContainment;
-	int containCompress(10000), sketchSize(1000), kmerSize(21);
+	fread(&sketch_func_id, sizeof(int), 1, fp_hash);
+	int kmer_size, contain_compress, sketch_size;
 	int half_k(10), half_subk(6), drlevel(3);
-
-	getline(fs1, line);
-	sketchFunc = line;
-	if(sketchFunc == "MinHash"){
-		getline(fs1, line);
-		isContainment = stoi(line);//1 or 0
-		getline(fs1, line);
-		if(isContainment)
-			containCompress = stoi(line);
+	bool is_containment;
+	if(sketch_func_id == 0){ //MinHash
+		fread(&kmer_size, sizeof(int), 1, fp_hash);
+		fread(&is_containment, sizeof(bool), 1, fp_hash);
+		if(is_containment)
+			fread(&contain_compress, sizeof(int), 1, fp_hash);
 		else
-			sketchSize = stoi(line);
-		getline(fs1, line);
-		kmerSize = stoi(line);
+			fread(&sketch_size, sizeof(int), 1, fp_hash);
 	}
-	else if(sketchFunc == "KSSD"){
-		getline(fs1, line);
-		half_k = stoi(line);
-		getline(fs1, line);
-		half_subk = stoi(line);
-		getline(fs1, line);
-		drlevel = stoi(line);
+	else if(sketch_func_id == 1){//KSSD
+		fread(&half_k, sizeof(int), 1, fp_hash);
+		fread(&half_subk, sizeof(int), 1, fp_hash);
+		fread(&drlevel, sizeof(int), 1, fp_hash);
 	}
-
-	//vector<SketchInfo> sketches;
-	//int sketchId = 0;
-
-	vector<string> infoArr;
-	vector<string> valueArr;
-
-	while(getline(fs0, line)){
-		infoArr.push_back(line);
-		getline(fs1, line);
-		valueArr.push_back(line);
-	}
-	fs0.close();
-	fs1.close();
 
 	Sketch::KSSDParameters kssdPara(half_k, half_subk, drlevel);
 
-	#pragma omp parallel for num_threads(threads)
-	for(int i = 0; i < infoArr.size(); i++){
-		SketchInfo tmpSketchInfo;
+	bool sketch_by_file = load_genome_info(folderPath, "sketch", sketches);
+	int max_hash_number = 1 << 20;
+	uint64_t * buffer_hash_arr = new uint64_t [max_hash_number];
+	for(size_t i = 0; i < sketches.size(); i++){
 		Sketch::MinHash * mh1;
 		Sketch::KSSD * kssd;
-		string infoLine = infoArr[i];
-		stringstream ss;
-		ss << infoLine;
-		string fileName, seqName, seqComment, tmpComment;
-		int seqStrand, seqLength(0);
-		uint64_t totalLength;
-		if(sketchByFile){
-			ss >> fileName >> seqName >> seqStrand >> totalLength; 
-			while(ss >> tmpComment){
-				seqComment += tmpComment + ' ';
-			}
-			seqComment = seqComment.substr(0, seqComment.length()-1);
-			SequenceInfo tmpSeq{seqName, seqComment, seqStrand, seqLength};
-			Vec_SeqInfo curFileSeqs;
-			curFileSeqs.push_back(tmpSeq);
-			tmpSketchInfo.fileName = fileName;
-			tmpSketchInfo.totalSeqLength = totalLength;
-			tmpSketchInfo.fileSeqs = curFileSeqs;
+		size_t cur_sketch_size;
+		fread(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
+		if(cur_sketch_size > max_hash_number){
+			max_hash_number = cur_sketch_size;
+			buffer_hash_arr = new uint64_t [max_hash_number];
 		}
-		else{
-			ss >> seqName >> seqStrand >> seqLength;
-			while(ss >> tmpComment){
-				seqComment += tmpComment + ' ';
-			}
-			seqComment = seqComment.substr(0, seqComment.length()-1);
-			//getline(fs0, seqComment);//comment is a single line;
-			SequenceInfo curSeq{seqName, seqComment, seqStrand, seqLength};
-			tmpSketchInfo.seqInfo = curSeq;
-		}
-
-		string valueLine = valueArr[i];
-		stringstream ss1;
-		ss1 << valueLine;
-		vector<uint64_t> hashArr;
-		uint64_t hashValue;
-		while(ss1 >> hashValue){
-			hashArr.push_back(hashValue);
-		}
-		
-		if(sketchFunc == "MinHash"){
-			if(isContainment){
-				mh1 = new Sketch::MinHash(kmerSize, containCompress);
-				tmpSketchInfo.isContainment = true;
+		int cur_hash_number = fread(buffer_hash_arr, sizeof(uint64_t), cur_sketch_size, fp_hash);
+		assert(cur_hash_number == cur_sketch_size);
+		vector<uint64_t> hash_arr(buffer_hash_arr, buffer_hash_arr+cur_hash_number);
+		if(sketch_func_id == 0){//MinHash
+			if(is_containment){
+				mh1 = new Sketch::MinHash(kmer_size, contain_compress);
+				sketches[i].isContainment = true;
 			}
 			else{
-				mh1 = new Sketch::MinHash(kmerSize, sketchSize);
+				mh1 = new Sketch::MinHash(kmer_size, sketch_size);
 			}
-			mh1->loadMinHashes(hashArr);
-			tmpSketchInfo.minHash = mh1;
+			mh1->loadMinHashes(hash_arr);
+			sketches[i].minHash = mh1;
 		}
-		else if(sketchFunc == "KSSD"){
+		else if(sketch_func_id == 1){
 			kssd = new Sketch::KSSD(kssdPara);
-			kssd->loadHashes(hashArr);
-			tmpSketchInfo.KSSD = kssd;
+			kssd->loadHashes(hash_arr);
+			sketches[i].KSSD = kssd;
 		}
-		tmpSketchInfo.id = i;
-		#pragma omp critical
-		{
-			sketches.push_back(tmpSketchInfo);
+		sketches[i].id = i;
+	}
+
+	//std::sort(sketches.begin(), sketches.end(), cmpIndex);
+	return sketch_by_file;
+}
+
+bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketches){
+	assert(type == "sketch" || type == "mst");
+	string file_genome_info = folderPath + '/' + "info." + type;
+	FILE* fp_info = fopen(file_genome_info.c_str(), "r");
+	if(!fp_info){
+		cerr << "ERROR: loadMST(), cannot open file: " << file_genome_info << endl;
+		exit(1);
+	}
+	bool sketch_by_file;
+	fread(&sketch_by_file, sizeof(bool), 1, fp_info);
+	size_t sketch_number;
+	fread(&sketch_number, sizeof(size_t), 1, fp_info);
+	int max_file_name_length = 1 << 12;
+	int max_seq_name_length = 1 << 12;
+	int max_seq_comment_length = 1 << 16;
+	char * buffer_file_name = new char[max_file_name_length+1];
+	char * buffer_seq_name = new char[max_seq_name_length+1];
+	char * buffer_seq_comment = new char[max_seq_comment_length+1];
+	if(sketch_by_file){
+		int file_name_length, seq0_name_length, seq0_comment_length, strand;
+		uint64_t total_seq_length;
+		for(int i = 0; i < sketch_number; i++){
+			SketchInfo cur_sketch_info;
+			Sketch::MinHash * mh1;
+			Sketch::KSSD * kssd;
+			fread(&file_name_length, sizeof(int), 1, fp_info);
+			fread(&seq0_name_length, sizeof(int), 1, fp_info);
+			fread(&seq0_comment_length, sizeof(int), 1, fp_info);
+			fread(&strand, sizeof(int), 1, fp_info);
+			fread(&total_seq_length, sizeof(uint64_t), 1, fp_info);
+			if(file_name_length > max_file_name_length){
+				max_file_name_length = file_name_length;
+				buffer_file_name = new char [max_file_name_length+1];
+			}
+			if(seq0_name_length > max_seq_name_length){
+				max_seq_name_length = seq0_name_length;
+				buffer_seq_name = new char [max_seq_name_length+1];
+			}
+			if(seq0_comment_length > max_seq_comment_length){
+				max_seq_comment_length = seq0_comment_length;
+				buffer_seq_comment = new char [max_seq_comment_length+1];
+			}
+			int cur_name_length = fread(buffer_file_name, sizeof(char), file_name_length, fp_info);
+			assert(cur_name_length == file_name_length);
+			int cur_seq_name_length = fread(buffer_seq_name, sizeof(char), seq0_name_length, fp_info);
+			assert(cur_seq_name_length = seq0_name_length);
+			int cur_seq_comment_length = fread(buffer_seq_comment, sizeof(char), seq0_comment_length, fp_info);
+			assert(cur_seq_comment_length == seq0_comment_length);
+			string file_name, seq0_name, seq0_comment;
+			file_name.assign(buffer_file_name, buffer_file_name + cur_name_length);
+			seq0_name.assign(buffer_seq_name, buffer_seq_name + cur_seq_name_length);
+			seq0_comment.assign(buffer_seq_comment, buffer_seq_comment + cur_seq_comment_length);
+			SequenceInfo tmp_seq{seq0_name, seq0_comment, strand, 0};
+			Vec_SeqInfo cur_file_seqs;
+			cur_file_seqs.push_back(tmp_seq);
+			cur_sketch_info.fileName = file_name;
+			cur_sketch_info.totalSeqLength = total_seq_length;
+			cur_sketch_info.fileSeqs = cur_file_seqs;
+			cur_sketch_info.id = i;
+			sketches.push_back(cur_sketch_info);
 		}
 	}
-	vector<string>().swap(infoArr);
-	vector<string>().swap(valueArr);
-	std::sort(sketches.begin(), sketches.end(), cmpIndex);
-	return sketchByFile;
+	else{
+		int seq_name_length, seq_comment_length, strand, length;
+		for(int i = 0; i < sketch_number; i++){
+			SketchInfo cur_sketch_info;
+			Sketch::MinHash * mh1;
+			Sketch::KSSD * kssd;
+			fread(&seq_name_length, sizeof(int), 1, fp_info);
+			fread(&seq_comment_length, sizeof(int), 1, fp_info);
+			fread(&strand, sizeof(int), 1, fp_info);
+			fread(&length, sizeof(int), 1, fp_info);
+			if(seq_name_length > max_seq_name_length){
+				max_seq_name_length = seq_name_length;
+				buffer_seq_name = new char [max_seq_name_length+1];
+			}
+			if(seq_comment_length > max_seq_comment_length){
+				max_seq_comment_length = seq_comment_length;
+				buffer_seq_comment = new char [max_seq_comment_length+1];
+			}
+			int cur_seq_name_length = fread(buffer_seq_name, sizeof(char), seq_name_length, fp_info);
+			assert(cur_seq_name_length == seq_name_length);
+			int cur_seq_comment_length = fread(buffer_seq_comment, sizeof(char), seq_comment_length, fp_info);
+			assert(cur_seq_comment_length == seq_comment_length);
+			string seq_name, seq_comment;
+			seq_name.assign(buffer_seq_name, buffer_seq_name + cur_seq_name_length);
+			seq_comment.assign(buffer_seq_comment, buffer_seq_comment + cur_seq_comment_length);
+			SequenceInfo cur_seq{seq_name, seq_comment, strand, length};
+			cur_sketch_info.seqInfo = cur_seq;
+			cur_sketch_info.id = i;
+			sketches.push_back(cur_sketch_info);
+		}
+	}
+	fclose(fp_info);
+	return sketch_by_file;
 }
+
+
 
 
 
