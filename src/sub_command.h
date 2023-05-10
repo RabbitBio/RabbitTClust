@@ -20,5 +20,7 @@ bool tune_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int th
 void clust_from_sketches(string folder_path, string outputFile, double threshold, int threads);
 void clust_from_mst(string folder_path, string outputFile, double threshold, int threads);
 
+void append_clust_mst(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads);
 
+void append_clust_greedy(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads);
 

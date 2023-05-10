@@ -95,8 +95,10 @@ int main(int argc, char * argv[]){
 #ifndef GREEDY_CLUST
 	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
 #endif
+	auto option_append = app.add_option("--append", inputFile, "append genome file or file list with the pre-generated sketch or MST files");
 
 	option_output->required();
+	option_append->excludes(option_input);
 
 	CLI11_PARSE(app, argc, argv);
 
@@ -132,14 +134,33 @@ int main(int argc, char * argv[]){
 
 #ifndef GREEDY_CLUST
 //======clust-mst=========================================================================
-	if(*option_premsted){
+	if(*option_premsted && !*option_append){
 		clust_from_mst(folder_path, outputFile, threshold, threads);
 		return 0;
 	}
+	if(*option_append && !*option_presketched && !*option_premsted){
+		cerr << "ERROR option --append, option --presketched or --premsted needed" << endl;
+		return 1;
+	}
+	if(*option_append && (*option_premsted || *option_presketched)){
+		append_clust_mst(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
+		return 0;
+	}
 //======clust-mst=========================================================================
+#else
+//======clust-greedy======================================================================
+	if(*option_append && !*option_presketched){
+		cerr << "ERROR option --append, option --presketched needed" << endl;
+		return 1;
+	}
+	if(*option_append && *option_presketched){
+		append_clust_greedy(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
+		return 0;
+	}
+//======clust-greedy======================================================================
 #endif
 	
-	if(*option_presketched){
+	if(*option_presketched && !*option_append){
 		clust_from_sketches(folder_path, outputFile, threshold, threads);
 		return 0;
 	}
@@ -147,7 +168,7 @@ int main(int argc, char * argv[]){
 	if(!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, isJaccard, kmerSize, threshold, containCompress, sketchSize)){
 		return 1;
 	}
-
+	
 	clust_from_genomes(inputFile, outputFile, sketchByFile, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads);
 
 	return 0;

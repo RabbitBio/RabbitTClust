@@ -9,12 +9,36 @@ bool cmpIndex(SketchInfo s1, SketchInfo s2){
 	return s1.id < s2.id;
 }
 
+void read_sketch_parameters(string folder_path, int& sketch_func_id, int& kmer_size, bool& is_containment, int& contain_compress, int& sketch_size, int& half_k, int& half_subk, int& drlevel){
+	string hash_file = folder_path + '/' + "hash.sketch";
+	FILE * fp_hash = fopen(hash_file.c_str(), "r");
+	if(!fp_hash){
+		cerr << "ERROR: read_sketch_parameters(), cannot open the file: " << hash_file << endl;
+		exit(1);
+	}
+	fread(&sketch_func_id, sizeof(int), 1, fp_hash);
+	if(sketch_func_id == 0){
+		fread(&kmer_size, sizeof(int), 1, fp_hash);
+		fread(&is_containment, sizeof(bool), 1, fp_hash);
+		if(is_containment)
+			fread(&contain_compress, sizeof(int), 1, fp_hash);
+		else
+			fread(&sketch_size, sizeof(int), 1, fp_hash);
+	}
+	else if(sketch_func_id == 1){
+		fread(&half_k, sizeof(int), 1, fp_hash);
+		fread(&half_subk, sizeof(int), 1, fp_hash);
+		fread(&drlevel, sizeof(int), 1, fp_hash);
+	}
+	fclose(fp_hash); 
+}
+
 void save_genome_info(vector<SketchInfo>& sketches, string folderPath, string type, bool sketchByFile){
 	assert(type == "sketch" || type == "mst");
 	string info_file = folderPath + '/' + "info." + type;
 	FILE * fp_info = fopen(info_file.c_str(), "w+");
 	if(!fp_info){
-		cerr << "ERROR: saveSketches(), cannot open the file: " << info_file << endl;
+		cerr << "ERROR: save_genome_info(), cannot open the file: " << info_file << endl;
 		exit(1);
 	}
 	fwrite(&sketchByFile, sizeof(bool), 1, fp_info);

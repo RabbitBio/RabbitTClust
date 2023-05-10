@@ -44,7 +44,9 @@ std::vector<EdgeInfo> kruskalAlgorithm(std::vector<EdgeInfo>graph, int vertices)
 
 vector<EdgeInfo> generateMST(vector<SketchInfo>& sketches, string sketchFunc, int threads);
 
-vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int sketch_func_id, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, string prefixName, double threshold);
+vector<EdgeInfo> append_MST(vector<SketchInfo>& pre_sketches, vector<SketchInfo>& append_sketches, int sketch_func_id, int threads, int ** &denseArr, int denseSpan, uint64_t* &aniArr);
+
+vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sketch_func_id, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr);
 
 std::vector<EdgeInfo> generateForest(std::vector <EdgeInfo> mst, double threshhold);
 

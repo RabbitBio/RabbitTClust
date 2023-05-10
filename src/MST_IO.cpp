@@ -26,15 +26,30 @@ void loadDense(int** &denseArr, string folderPath, int& denseSpan, int& genome_n
 	cerr << "-----read the dense file from: " << file_dense << endl;
 }
 
+void loadANI(string folderPath, uint64_t* &aniArr, int sketch_func_id){
+	if(sketch_func_id != 0 && sketch_func_id != 1){
+		cerr << "ERROR: saveANI(), save ANI can only support MinHash and KSSD functions" << endl;
+		return;
+	}
+	string file_ani = folderPath + '/' + "mst.ani";
+	FILE* fp_ani = fopen(file_ani.c_str(), "r");
+	if(!fp_ani){
+		cerr << "ERROR: saveANI(), cannot open file: " << file_ani << endl;
+		exit(1);
+	}
+	aniArr = new uint64_t[101];
+	fread(aniArr, sizeof(uint64_t), 101, fp_ani);
+	fclose(fp_ani);
+	cerr << "-----read the ani file from: " << file_ani << endl;
+}
 
-bool loadMST(string folderPath, vector<SketchInfo>& sketches, vector<EdgeInfo>& mst)
+void loadMST(string folderPath, vector<EdgeInfo>& mst)
 {
-	bool sketch_by_file = load_genome_info(folderPath, "mst", sketches);
 	//load the mst edge 
 	string file_mst = folderPath + '/' + "edge.mst";
 	FILE* fp_mst = fopen(file_mst.c_str(), "r");
 	if(!fp_mst){
-		cerr << "ERROR: saveMST(), cannot open the file: " <<  file_mst << endl;
+		cerr << "ERROR: loadMST(), cannot open the file: " <<  file_mst << endl;
 		exit(1);
 	}
 	size_t mst_size;
@@ -51,7 +66,6 @@ bool loadMST(string folderPath, vector<SketchInfo>& sketches, vector<EdgeInfo>& 
 	}
 	fclose(fp_mst);
 	cerr << "-----read the mst file from " << file_mst << endl;
-	return sketch_by_file;
 }
 
 void printResult(vector<vector<int>>& cluster, vector<SketchInfo>& sketches, bool sketchByFile, string outputFile)
@@ -88,7 +102,7 @@ void printResult(vector<vector<int>>& cluster, vector<SketchInfo>& sketches, boo
 
 }
 
-void saveMST(vector<SketchInfo> sketches, vector<EdgeInfo> mst, string folderPath, bool sketchByFile){
+void saveMST(vector<SketchInfo>& sketches, vector<EdgeInfo>& mst, string folderPath, bool sketchByFile){
 	save_genome_info(sketches, folderPath, "mst", sketchByFile);
 	string file_mst = folderPath + '/' + "edge.mst";
 	FILE* fp_mst = fopen(file_mst.c_str(), "w+");
@@ -137,7 +151,7 @@ void saveANI(string folderPath, uint64_t* aniArr, int sketch_func_id){
 	}
 	fwrite(aniArr, sizeof(uint64_t), 101, fp_ani);
 	fclose(fp_ani);
-	cerr << "-----save the ani file into: " << folderPath << endl;
+	cerr << "-----save the ani file into: " << file_ani << endl;
 }
 
 

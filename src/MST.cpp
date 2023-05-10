@@ -171,10 +171,11 @@ vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha){
 	return noiseArr;
 }
 
-vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int sketch_func_id, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, string prefixName, double threshold){
+
+
+vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sketch_func_id, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr){
 	//int denseSpan = 10;
 	double step = 1.0 / denseSpan;
-	
 	
 	//double step = threshold / denseSpan;
 	//cerr << "the threshold is: " << threshold << endl;
@@ -211,13 +212,14 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int sketch_func_id, int
 	//int N = sketches.size();
 	uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
 	uint64_t percentNum = totalCompNum / 100;
-	//cerr << "the percentNum is: " << percentNum << endl;
+	cerr << "---the percentNum is: " << percentNum << endl;
+	cerr << "---the start_index is: " << start_index << endl;
 	uint64_t percentId = 0;
 	#pragma omp parallel for num_threads(threads) schedule (dynamic)
 	for(id = 0; id < sketches.size() - tailNum; id+=subSize){
 		int thread_id = omp_get_thread_num();
 		for(int i = id; i < id+subSize; i++){
-			for(int j = i+1; j < sketches.size(); j++){
+			for(int j = max(i+1, start_index); j < sketches.size(); j++){
 				double tmpDist;
 				if(sketch_func_id == 0)
 				{
