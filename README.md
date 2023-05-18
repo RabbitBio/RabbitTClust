@@ -156,5 +156,4 @@ We highly appreciate all bug reports, comments, and suggestions from our users.
 Please feel free to raise any concerns or feedback with us without hesitation by `issue`. 
 
 ## Cite
-[Xu, X. et al. (2022). RabbitTClust: enabling fast clustering analysis of
-millions bacteria genomes with minhash sketches. bioRxiv.](https://doi.org/10.1101/2022.10.13.512052)
+Xu, X., Yin, Z., Yan, L. et al. RabbitTClust: enabling fast clustering analysis of millions of bacteria genomes with MinHash sketches. Genome Biol 24, 121 (2023). https://doi.org/10.1186/s13059-023-02961-6
