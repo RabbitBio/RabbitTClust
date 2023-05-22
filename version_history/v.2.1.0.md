@@ -1,5 +1,3 @@
-![RabbitTClust](rabbittclust.png)
-
 # `RabbitTClust v.2.1.0`
 RabbitTClust is a fast and memory-efficient genome clustering tool based on sketch-based distance estimations.
 It enables processing of large-scale datasets by combining dimensionality reduction techniques with streaming and parallelization on modern multi-core platforms.
