@@ -50,9 +50,9 @@ using namespace std;
 
 int main(int argc, char * argv[]){
 	#ifdef GREEDY_CLUST
-		CLI::App app{"clust-greedy, greedy incremental clustering module for RabbitTClust"};
+		CLI::App app{"clust-greedy v.2.2.1, greedy incremental clustering module for RabbitTClust"};
 	#else
-		CLI::App app{"clust-mst, minimum-spanning-tree-based module for RabbitTClust"};
+		CLI::App app{"clust-mst v.2.2.1, minimum-spanning-tree-based module for RabbitTClust"};
 	#endif
 	//section 1: init parameters
 	int argIndex = 1;
@@ -75,6 +75,7 @@ int main(int argc, char * argv[]){
 	bool isSetKmer = false;
 	uint64_t minLen = 10000;
 	string folder_path;
+	bool is_newick_tree = false;
 
 	bool noSave = false;
 
@@ -94,6 +95,7 @@ int main(int argc, char * argv[]){
 	auto option_presketched = app.add_option("--presketched", folder_path, "clustering by the pre-generated sketch files rather than genomes");
 #ifndef GREEDY_CLUST
 	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
+	auto flag_newick_tree = app.add_flag("--newick-tree", is_newick_tree, "output the newick tree format file for clust-mst");
 #endif
 	auto option_append = app.add_option("--append", inputFile, "append genome file or file list with the pre-generated sketch or MST files");
 
@@ -135,7 +137,7 @@ int main(int argc, char * argv[]){
 #ifndef GREEDY_CLUST
 //======clust-mst=========================================================================
 	if(*option_premsted && !*option_append){
-		clust_from_mst(folder_path, outputFile, threshold, threads);
+		clust_from_mst(folder_path, outputFile, is_newick_tree, threshold, threads);
 		return 0;
 	}
 	if(*option_append && !*option_presketched && !*option_premsted){
@@ -143,7 +145,7 @@ int main(int argc, char * argv[]){
 		return 1;
 	}
 	if(*option_append && (*option_premsted || *option_presketched)){
-		append_clust_mst(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
+		append_clust_mst(folder_path, inputFile, outputFile, is_newick_tree, sketchByFile, minLen, noSave, threshold, threads);
 		return 0;
 	}
 //======clust-mst=========================================================================
@@ -161,7 +163,7 @@ int main(int argc, char * argv[]){
 #endif
 	
 	if(*option_presketched && !*option_append){
-		clust_from_sketches(folder_path, outputFile, threshold, threads);
+		clust_from_sketches(folder_path, outputFile, is_newick_tree, threshold, threads);
 		return 0;
 	}
 
@@ -169,7 +171,7 @@ int main(int argc, char * argv[]){
 		return 1;
 	}
 	
-	clust_from_genomes(inputFile, outputFile, sketchByFile, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads);
+	clust_from_genomes(inputFile, outputFile, is_newick_tree, sketchByFile, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads);
 
 	return 0;
 }//end main

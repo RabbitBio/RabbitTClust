@@ -65,7 +65,7 @@ void append_clust_greedy(string folder_path, string input_file, string output_fi
 #endif
 
 #ifndef GREEDY_CLUST
-void append_clust_mst(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
+void append_clust_mst(string folder_path, string input_file, string output_file, bool is_newick_tree, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
 	int sketch_func_id_0; 
 	vector<SketchInfo> pre_sketches; 
 	bool pre_sketch_by_file = loadSketches(folder_path, threads, pre_sketches, sketch_func_id_0); 
@@ -135,6 +135,12 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 	sort(final_graph.begin(), final_graph.end(), cmpEdge);
 	vector<EdgeInfo> final_mst = kruskalAlgorithm(final_graph, final_sketches.size());
 	vector<EdgeInfo>().swap(final_graph);
+	if(is_newick_tree){
+		string output_newick_file = output_file + ".newick.tree";
+		print_newick_tree(final_sketches, final_mst, pre_sketch_by_file, output_newick_file);
+		cerr << "-----write the newick tree into: " << output_newick_file << endl;
+
+	}
 
 	vector<EdgeInfo> forest = generateForest(final_mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, final_sketches.size());
@@ -183,12 +189,19 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 	cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 }
 
-void clust_from_mst(string folder_path, string outputFile, double threshold, int threads){
+void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, double threshold, int threads){
 	vector<SketchInfo> sketches;
 	vector<EdgeInfo> mst;
 	vector<vector<int>> cluster;
 	bool sketchByFile = load_genome_info(folder_path, "mst", sketches);
 	loadMST(folder_path, mst);
+
+	if(is_newick_tree){
+		string output_newick_file = outputFile + ".newick.tree";
+		print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
+		cerr << "-----write the newick tree into: " << output_newick_file << endl;
+	}
+
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
 	printResult(tmpClust, sketches, sketchByFile, outputFile);
@@ -224,7 +237,7 @@ void clust_from_mst(string folder_path, string outputFile, double threshold, int
 }
 #endif
 
-void clust_from_genomes(string inputFile, string outputFile, bool sketchByFile, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads){
+void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool sketchByFile, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads){
 	bool isSave = !noSave;
 	vector<SketchInfo> sketches;
 	int sketch_func_id;
@@ -233,7 +246,7 @@ void clust_from_genomes(string inputFile, string outputFile, bool sketchByFile, 
 
 	compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, isSave, threads);
 
-	compute_clusters(sketches, sketchByFile, outputFile, folder_path, sketch_func_id, threshold, isSave, threads);
+	compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, folder_path, sketch_func_id, threshold, isSave, threads);
 }
 
 bool tune_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, bool& isJaccard, int& kmerSize, double& threshold, int& containCompress, int& sketchSize){
@@ -322,7 +335,7 @@ bool tune_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int th
 	return true;
 }
 
-void clust_from_sketches(string folder_path, string outputFile, double threshold, int threads){
+void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, double threshold, int threads){
 	vector<SketchInfo> sketches;
 	vector<vector<int>> cluster;
 	int sketch_func_id;
@@ -362,6 +375,11 @@ void clust_from_sketches(string folder_path, string outputFile, double threshold
 	#ifdef Timer
 	cerr << "========time of generateMST is: " << time2 - time1 << "========" << endl;
 	#endif
+	if(is_newick_tree){
+		string output_newick_file = outputFile + ".newick.tree";
+		print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
+		cerr << "-----write the newick tree into: " << output_newick_file << endl;
+	}
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
 	printResult(tmpClust, sketches, sketchByFile, outputFile);
@@ -430,7 +448,7 @@ void compute_sketches(vector<SketchInfo>& sketches, string inputFile, string& fo
 	}
 }
 
-void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads){
+void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads){
 	vector<vector<int>> cluster;
 	double t2 = get_sec();
 #ifdef GREEDY_CLUST
@@ -463,6 +481,14 @@ void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string ou
 	#ifdef Timer
 	cerr << "========time of saveMST is: " << t4 - t3 << "========" << endl;
 	#endif
+
+	//generate the Newick tree format
+	if(is_newick_tree){
+		string output_newick_file = outputFile + ".newick.tree";
+		print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
+		cerr << "-----write the newick tree into: " << output_newick_file << endl;
+	}
+
 
 //	for(int i = 0; i < denseSpan; i++){
 //		for(int j = 0; j < sketches.size(); j++){

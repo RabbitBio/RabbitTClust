@@ -154,5 +154,16 @@ void saveANI(string folderPath, uint64_t* aniArr, int sketch_func_id){
 	cerr << "-----save the ani file into: " << file_ani << endl;
 }
 
+void print_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
+	string res_newick_tree = get_newick_tree(sketches, mst, sketch_by_file);
+	FILE* fp_tree = fopen(output.c_str(), "w");
+	if(!fp_tree){
+		cerr << "ERROR: print_newick_tree(), cannot write file: " << output << endl;
+		exit(1);
+	}
+	fprintf(fp_tree, "%s\n", res_newick_tree.c_str());
+	fclose(fp_tree);
+}
+
 
 

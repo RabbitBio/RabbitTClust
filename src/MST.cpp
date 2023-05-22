@@ -360,8 +360,50 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
 	return mst;
 }
 
+string build_newick_tree(vector<pair<int, double>>* G, bool* visited, const vector<SketchInfo>& sketches, bool sketch_by_file, int node){
+	visited[node] = true;
+	//if(G[node].size() == 0)	return to_string(node);
+	string name;
+	if(sketch_by_file) name = sketches[node].fileName;
+	else name = sketches[node].seqInfo.name;
+	if(G[node].size() == 0){
+		return name;
+	}
+	string children("");
+	for(auto x : G[node]){
+		int cur_node = x.first;
+		double dist = x.second;
+		if(!visited[cur_node]){
+			string child = build_newick_tree(G, visited, sketches, sketch_by_file, cur_node);
+			children += child + ':' + to_string(dist) + ',';
+		}
+	}
+	//if(children.length() == 0) return to_string(node);
+	if(children.length() == 0) return name;
+	//children = '(' + children.substr(0, children.length()-1) + ')' + to_string(node);
+	children = '(' + children.substr(0, children.length()-1) + ')' + name;
+	return children;
+}
 
 
+string get_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file){
+	int vertice_number = sketches.size();
+	vector<pair<int, double>>* G = new vector<pair<int, double>> [vertice_number];
+	for(auto f : mst){
+		int u = f.preNode;
+		int v = f.sufNode;
+		double dist = f.dist;
+		G[u].push_back(make_pair(v, dist));
+		G[v].push_back(make_pair(u, dist));
+	}
+	bool* visited = new bool[vertice_number];
+	memset(visited, 0, vertice_number*sizeof(bool));
+
+	string newick_tree = build_newick_tree(G, visited, sketches, sketch_by_file, 0);
+	newick_tree += ';';
+
+	return newick_tree;
+}
 
 
 
