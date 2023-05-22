@@ -6,7 +6,7 @@ RabbitTClust supports classical single-linkage hierarchical (clust-mst) and gree
 ## Installation
 `RabbitTClust v.2.2.0` can only support 64-bit Linux Systems.
 
-The detailed update information for this version, as well as the version history, can be found in the [`version_history`](version_history/history.md) document.
+The detailed update information for this version, as well as the version history, can be found in the [`version_history`](./history.md) document.
 
 ### Dependancy
 * cmake v.3.0 or later
