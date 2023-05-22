@@ -1,12 +1,12 @@
 ![RabbitTClust](rabbittclust.png)
 
-# `RabbitTClust v.2.2.0`
+# `RabbitTClust v.2.2.1`
 RabbitTClust is a fast and memory-efficient genome clustering tool based on sketch-based distance estimations.
 It enables processing of large-scale datasets by combining dimensionality reduction techniques with streaming and parallelization on modern multi-core platforms.
 RabbitTClust supports classical single-linkage hierarchical (clust-mst) and greedy incremental clustering (clust-greedy) algorithms for different scenarios. 
 
 ## Installation
-`RabbitTClust v.2.2.0` can only support 64-bit Linux Systems.
+`RabbitTClust v.2.2.1` can only support 64-bit Linux Systems.
 
 The detailed update information for this version, as well as the version history, can be found in the [`version_history`](version_history/history.md) document.
 
@@ -40,6 +40,7 @@ Options:
                               set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)
   --presketched TEXT          clustering by the pre-generated sketch files rather than genomes
   --premsted TEXT             clustering by the pre-generated mst files rather than genomes for clust-mst
+  --newick-tree               output the newick tree format file for clust-mst
   --append TEXT Excludes: --input
                               append genome file or file list with the pre-generated sketch or MST files
 
@@ -98,13 +99,17 @@ Options:
 # for generator cluster from exist part sketches (presketch_A_dir) and append genome set (genome_B.list) to incrementally clustering 
 ./clust-mst --presketched 2023_05_06_08-49-15/ -l --append genome_B.list -o append_refseq.mst.clust
 ./clust-mst --presketched 2023_05_06_09-37-23/ -l --append genome_B.list -o append_genbank.greedy.clust
+
+# v.2.2.1 or later
+# output the newick tree format for clust-mst, use the --newick-tree flag.
+./clust-mst -l -i bacteria.list --newick-tree -o bacteria.mst.clust 
 ```
 ## Output
-The output file is in a CD-HIT output format and is slightly different when running with varying input options (*-l* and *-i*).  
-Option *-l* means input as a FASTA file list, one file per genome, and *-i* means input as a single FASTA file, one sequence per genome.
+The output file is in a CD-HIT output format and is slightly different when running with or without `-l` input option.  
+When using the `-l` option, the input is expected to be a FASTA file list, with each file representing a genome. Without the `-l` option, the input should be a single FASTA file, with each sequence representing a genome.
 
 #### Output format for a FASTA file list input
-With *-l* option, the tab-delimited values in the lines beginning with tab delimiters are:
+With `-l*` option, the tab-delimited values in the lines beginning with tab delimiters are:
 * local index in a cluster
 * global index of the genome
 * genome length
@@ -128,7 +133,7 @@ the cluster 2 is:
 ```
 
 #### Output format for a single FASTA file input
-With *-i* option, the tab-delimited values in the lines beginning with tab delimiters are:
+Without `-l` option, the tab-delimited values in the lines beginning with tab delimiters are:
 * local index in a cluster
 * global index of the genome
 * genome length
@@ -149,6 +154,9 @@ the cluster 2 is:
 
 ......
 ```
+
+#### Output the newick tree format (v.2.2.1 or latter)
+When the `--newick-tree` option is used, an additional output file will be generated in the Newick tree format with a suffix name of ".newick.tree".
 
 
 # Bug Report

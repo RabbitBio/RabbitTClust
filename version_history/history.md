@@ -1,4 +1,7 @@
-# Latest version: `v.2.2.0` 
+# Latest version: `v.2.2.1` 
+* add `--newick-tree` option to output the Newick tree format for `clust-mst`.
+
+## [`v.2.2.0`](v.2.2.0.md)
 * support incrementally clustering by option `--append` accompanied with `--presketched` or `--premsted` options.
 
 Note:  
@@ -8,7 +11,6 @@ Note:
     Therefore, the changes in the genome lengths of the appending set `B` are unlikely to have a significant effect on the automatically generated parameters if they are not substantial.
 
 * In the context of genome clustering, the sketches are sorted by unstable sort in a decreasing order of their genome length. Consequently, the order of sketches may undergo slight changes if there are genomes with identical lengths. However, this does not significantly affect the outcome of the clustering process.
-
 
 ## [`v.2.1.0`](v.2.1.0.md)
 * change the parameter parsing by [CLI11](https://github.com/CLIUtils/CLI11).
