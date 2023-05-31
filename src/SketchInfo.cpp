@@ -219,6 +219,10 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, 
 	int badNumber = 0;
 	if(sketchByFile){
 		ifstream ifs(inputFile);
+		if(!ifs){
+			cerr << "ERROR: calSize(), cannot open the inputFile: " << inputFile << endl;
+			exit(1);
+		}
 		string line;
 		while(getline(ifs, line)){
 			uint64_t curSize;
@@ -308,9 +312,9 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, 
 	}
 	averageSize = totalSize / number;
 	int totalNumber = number + badNumber;
-	cerr << "\t===the number is: " << number << endl;
-	cerr << "\t===the badNumber is: " << badNumber << endl;
-	cerr << "\t===the totalNumber is: " << totalNumber << endl;
+	cerr << "\t===the genome number for clustering is: " << number << endl;
+	cerr << "\t===the genome number below the minimum genome length threshold is: " << badNumber << endl;
+	cerr << "\t===the total genome number is: " << totalNumber << endl;
 	
 	if((double)badNumber / totalNumber >= 0.2)
 	{
