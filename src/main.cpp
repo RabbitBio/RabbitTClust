@@ -70,12 +70,14 @@ int main(int argc, char * argv[]){
 	int kmerSize = 21;
 	int sketchSize = 1000;
 	int containCompress = 1000;
+	int drlevel = 3;
 	bool mstLoadSketch = false;
 	string mstSketchFile = "sketch.info";
 	bool isSetKmer = false;
 	uint64_t minLen = 10000;
 	string folder_path;
 	bool is_newick_tree = false;
+	bool is_fast = false;
 
 	bool noSave = false;
 
@@ -96,6 +98,7 @@ int main(int argc, char * argv[]){
 #ifndef GREEDY_CLUST
 	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
 	auto flag_newick_tree = app.add_flag("--newick-tree", is_newick_tree, "output the newick tree format file for clust-mst");
+	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing for clust-mst");
 #endif
 	auto option_append = app.add_option("--append", inputFile, "append genome file or file list with the pre-generated sketch or MST files");
 
@@ -169,6 +172,11 @@ int main(int argc, char * argv[]){
 
 	if(!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, isJaccard, kmerSize, threshold, containCompress, sketchSize)){
 		return 1;
+	}
+
+	if(is_fast){
+		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
+		return 0;
 	}
 	
 	clust_from_genomes(inputFile, outputFile, is_newick_tree, sketchByFile, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads);

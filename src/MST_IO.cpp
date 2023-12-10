@@ -68,6 +68,40 @@ void loadMST(string folderPath, vector<EdgeInfo>& mst)
 	cerr << "-----read the mst file from " << file_mst << endl;
 }
 
+void printKssdResult(vector<vector<int>>& cluster, vector<KssdSketchInfo>& sketches, bool sketchByFile, string outputFile)
+{
+	//cerr << "output the result into: " << outputFile << endl;
+	FILE *fp = fopen(outputFile.c_str(), "w");
+	
+	if(sketchByFile)
+	{
+		for(int i = 0; i < cluster.size(); i++){
+			fprintf(fp, "the cluster %d is: \n", i);
+			for(int j = 0; j < cluster[i].size(); j++)
+			{
+				int curId = cluster[i][j];
+				fprintf(fp, "\t%5d\t%6d\t%12dnt\t%20s\t%20s\t%s\n", j, curId, sketches[curId].totalSeqLength, sketches[curId].fileName.c_str(),  sketches[curId].fileSeqs[0].name.c_str(), sketches[curId].fileSeqs[0].comment.c_str());
+			}
+			fprintf(fp, "\n");
+		}
+	}//end sketchByFile
+
+	else//sketch by sequence
+	{
+		for(int i = 0; i < cluster.size(); i++){
+			fprintf(fp, "the cluster %d is: \n", i);
+			for(int j = 0; j < cluster[i].size(); j++)
+			{
+				int curId = cluster[i][j];		
+				fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n", j, curId, sketches[curId].seqInfo.length, sketches[curId].seqInfo.name.c_str(), sketches[curId].seqInfo.comment.c_str());
+			}
+			fprintf(fp, "\n");
+		}
+	}//end sketchBySequence
+	fclose(fp);
+
+}
+
 void printResult(vector<vector<int>>& cluster, vector<SketchInfo>& sketches, bool sketchByFile, string outputFile)
 {
 	//cerr << "output the result into: " << outputFile << endl;

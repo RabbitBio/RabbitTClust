@@ -24,7 +24,7 @@ struct SketchInfo{
 	string fileName;//for sketch files;
 	uint64_t totalSeqLength;
 	Vec_SeqInfo fileSeqs;//for sketch files;
-	SequenceInfo seqInfo;//for sketch squence;
+	SequenceInfo seqInfo;//for sketch sequence;
 	bool isContainment = false;
 	
 	Sketch::MinHash* minHash;
@@ -32,6 +32,25 @@ struct SketchInfo{
 	Sketch::WMinHash* WMinHash;
 	Sketch::HyperLogLog* HLL;
 	Sketch::OrderMinHash * OMH;
+};
+
+struct KssdSketchInfo{
+	int id;
+	string fileName;
+	uint64_t totalSeqLength;
+	Vec_SeqInfo fileSeqs;
+	SequenceInfo seqInfo;
+	bool use64;
+	vector<uint32_t> hash32_arr;
+	vector<uint64_t> hash64_arr;
+};
+
+struct KssdParameters{
+	int id;
+	int half_k;
+	int half_subk;
+	int drlevel;
+	int genomeNumber;
 };
 
 
@@ -42,27 +61,9 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, 
 bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads);
 bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads);
 bool cmpSketch(SketchInfo s1, SketchInfo s2);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+//bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, int threads);
+bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads);
+void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters& info, const string folder_path, const string dictFile, const string indexFile, int numThreads);
 
 
 

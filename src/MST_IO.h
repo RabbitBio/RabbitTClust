@@ -14,6 +14,7 @@ struct ClusterInfo{
 
 void print_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output);
 void printResult(std::vector<std::vector<int>>& clusterOrigin, std::vector<SketchInfo>& sketches, bool sketchByFile, string outputFile);
+void printKssdResult(vector<vector<int>>& cluster, vector<KssdSketchInfo>& sketches, bool sketchByFile, string outputFile);
 
 void loadMST(string folderPath, vector<EdgeInfo>& mst);
 void loadDense(int** &denseArr, string folderPath, int& denseSpan, int& genome_number);

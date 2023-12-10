@@ -237,6 +237,137 @@ void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, 
 }
 #endif
 
+void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads){
+	bool isSave = !noSave;
+	vector<KssdSketchInfo> sketches;
+	KssdParameters info;
+	compute_kssd_sketches(sketches, info, isSave, inputFile, folder_path, sketchByFile, minLen, kmerSize, drlevel, threads);
+	string dictFile = inputFile + "sketch.dict";
+	string indexFile = inputFile + "sketch.index";
+	transSketches(sketches, info, folder_path, dictFile, indexFile, threads);
+	compute_kssd_clusters(sketches, info, sketchByFile, isContainment, folder_path, dictFile, indexFile, outputFile, is_newick_tree, threshold, isSave, threads);
+
+}
+
+void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool isContainment, const string folder_path, const string dictFile, const string indexFile, string outputFile, bool is_newick_tree, double threshold, bool isSave, int threads){
+	vector<vector<int>> cluster;
+	double t2 = get_sec();
+#ifdef GREEDY_CLUST
+//======clust-greedy====================================================================
+	//cluster = greedyCluster(sketches, sketch_func_id, threshold, threads);
+	//printResult(cluster, sketches, sketchByFile, outputFile);
+	//cerr << "-----write the cluster result into: " << outputFile << endl;
+	//cerr << "-----the cluster number of " << outputFile << " is: " << cluster.size() << endl;
+	//double t3 = get_sec();
+	//#ifdef Timer
+	//cerr << "========time of greedyCluster is: " << t3 - t2 << "========" << endl;
+	//#endif
+//======clust-greedy====================================================================
+#else
+//======clust-mst=======================================================================
+	int **denseArr;
+	uint64_t* aniArr; //= new uint64_t[101];
+	int denseSpan = DENSE_SPAN;
+	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, dictFile, indexFile, 0, isContainment, threads, denseArr, denseSpan, aniArr);
+	double t3 = get_sec();
+	#ifdef Timer
+	cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
+	#endif
+	string sketch_func_id = "fast_kssd_sketch";
+	// if(isSave){
+	// 	saveANI(folder_path, aniArr, sketch_func_id);
+	// 	saveDense(folder_path, denseArr, denseSpan, sketches.size());
+	// 	saveMST(sketches, mst, folder_path, sketchByFile);
+	// }
+	double t4 = get_sec();
+	#ifdef Timer
+	cerr << "========time of saveMST is: " << t4 - t3 << "========" << endl;
+	#endif
+
+	//generate the Newick tree format
+	// if(is_newick_tree){
+	// 	string output_newick_file = outputFile + ".newick.tree";
+	// 	print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
+	// 	cerr << "-----write the newick tree into: " << output_newick_file << endl;
+	// }
+
+
+//	for(int i = 0; i < denseSpan; i++){
+//		for(int j = 0; j < sketches.size(); j++){
+//			cout << denseArr[i][j] << endl;
+//		}
+//	}
+	
+	vector<EdgeInfo> forest = generateForest(mst, threshold);
+	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
+	printKssdResult(tmpClust, sketches, sketchByFile, outputFile);
+	cerr << "-----write the cluster result into: " << outputFile << endl;
+	cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
+	//tune cluster by noise cluster
+	int alpha = 2;
+	int denseIndex = threshold / 0.01;
+	vector<int> totalNoiseArr;
+	for(int i = 0; i < tmpClust.size(); i++){
+		if(tmpClust[i].size() == 1) continue;
+		vector<PairInt> curDenseArr;
+		set<int> denseSet;
+		for(int j = 0; j < tmpClust[i].size(); j++){
+			int element = tmpClust[i][j];
+			PairInt p(element, denseArr[denseIndex][element]);
+			denseSet.insert(denseArr[denseIndex][element]);
+			curDenseArr.push_back(p);
+		}
+		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
+		totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
+	}
+	cerr << "-----the total noiseArr size is: " << totalNoiseArr.size() << endl;
+	forest = modifyForest(forest, totalNoiseArr, threads);
+	cluster = generateClusterWithBfs(forest, sketches.size());
+	string outputFileNew = outputFile + ".removeNoise";
+	printKssdResult(cluster, sketches, sketchByFile, outputFileNew);
+	cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
+	cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
+	
+	double t5 = get_sec();
+	#ifdef Timer
+	cerr << "========time of tuning cluster is: " << t5 - t4 << "========" << endl;
+	#endif
+//======clust-mst=======================================================================
+#endif//endif GREEDY_CLUST
+}
+
+void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& info, bool isSave, const string inputFile, string& folder_path, bool sketchByFile, const int minLen, const int kmerSize, const int drlevel, int threads){
+	double t0 = get_sec();
+	if(sketchByFile){
+		//if(!sketchFiles(inputFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
+		if(!sketchFileWithKssd(inputFile, minLen, kmerSize, drlevel, sketches, info, threads)){
+			cerr << "ERROR: generate_sketches(), cannot finish the sketch generation by genome files" << endl;
+			exit(1);
+		}
+	}//end sketch by sequence
+	else{
+		cerr << "The sketch by sequences are TODO implemented." << endl;
+		exit(0);
+	}//end sketch by file
+	cerr << "-----the size of sketches (number of genomes or sequences) is: " << sketches.size() << endl;
+	double t1 = get_sec();
+	#ifdef Timer
+	cerr << "========time of computing sketch is: " << t1 - t0 << "========" << endl;
+	#endif
+	folder_path = currentDataTime();
+	if(isSave){
+		string command = "mkdir -p " + folder_path;
+		system(command.c_str());
+		cerr << "The saving of kssd sketches are TODO implement" << endl;
+		//saveSketches(sketches, folder_path, sketchByFile, sketchFunc, isContainment, containCompress, sketchSize, kmerSize);
+		double t2 = get_sec();
+		#ifdef Timer
+		cerr << "========time of saveSketches is: " << t2 - t1 << "========" << endl;
+		#endif
+	}
+
+}
+
 void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool sketchByFile, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads){
 	bool isSave = !noSave;
 	vector<SketchInfo> sketches;
