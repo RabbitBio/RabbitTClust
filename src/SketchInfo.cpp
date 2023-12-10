@@ -758,14 +758,14 @@ int * generate_shuffle_dim(int half_subk){
 
 bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
 	fprintf(stderr, "-----input fileList, sketch by file\n");
-	fstream fs(inputFile);
-	if(!fs){
+	ifstream ifs(inputFile);
+	if(!ifs){
 		fprintf(stderr, "error open the inputFile: %s\n", inputFile.c_str());
 		return false;
 	}
 	vector<string> fileList;
 	string fileName;
-	while(getline(fs, fileName)){
+	while(getline(ifs, fileName)){
 		fileList.push_back(fileName);
 	}
 
@@ -783,10 +783,10 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int
 	// generate the shuffle file.
 	int half_k = (kmerSize + 1) / 2;
 	bool use64 = half_k - drlevel > 8 ? true : false;
-	int dim_start = 0;
-	int dim_end = 1 << 4 * (half_k - drlevel);
 	int half_subk = 6 - drlevel >= 2 ? 6 : drlevel + 2;
 	int dim_size = 1 << 4 * half_subk;
+	int dim_start = 0;
+	int dim_end = 1 << 4 * (half_subk - drlevel);
 	int* shuffled_dim = generate_shuffle_dim(half_subk);
 	info.half_k = half_k;
 	info.half_subk = half_subk;
@@ -930,6 +930,7 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int
 		kseq_destroy(ks1);
 	}//end for
 
+	return true;
 }
 
 void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters& info, const string folder_path, const string dictFile, const string indexFile, int numThreads){

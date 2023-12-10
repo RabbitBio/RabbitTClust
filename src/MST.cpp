@@ -325,6 +325,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 	for(id = 0; id < sketches.size() - tailNum; id+=subSize){
 		int thread_id = omp_get_thread_num();
 		for(int i = id; i < id+subSize; i++){
+			memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
 			if(use64){
 				for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
 					uint64_t hash64 = sketches[i].hash64_arr[j];
