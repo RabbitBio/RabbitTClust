@@ -934,6 +934,7 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int
 }
 
 void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters& info, const string folder_path, const string dictFile, const string indexFile, int numThreads){
+	//cerr << "the folder path in transSKetch is: " << folder_path << endl;
 	double t0 = get_sec();
 	int half_k = info.half_k;
 	int drlevel = info.drlevel;
@@ -963,7 +964,8 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 		size_t total_size = 0;
 		uint64_t* hash_arr = (uint64_t*)malloc(hash_number * sizeof(uint64_t));
 		uint32_t* hash_size_arr = (uint32_t*)malloc(hash_number * sizeof(uint32_t));
-		FILE* fp_dict = fopen((folder_path+ '/' + dictFile).c_str(), "w+");
+		string cur_dict_file = folder_path + '/' + dictFile;
+		FILE* fp_dict = fopen((cur_dict_file).c_str(), "w+");
 		if(!fp_dict){
 			cerr << "ERROR: transSketches, cannot open dictFile: " << dictFile << endl;
 			exit(1);
@@ -983,7 +985,8 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 		cerr << "the time of writing dictFile is: " << t2 - t1 << endl;
 		#endif
 
-		FILE* fp_index = fopen((folder_path + '/' + indexFile).c_str(), "w+");
+		string cur_index_file = folder_path + '/' + indexFile;
+		FILE* fp_index = fopen(cur_index_file.c_str(), "w+");
 		if(!fp_index){
 			cerr << "ERROR: transSketches, cannot open indexFile: " << indexFile << endl;
 			exit(1);
@@ -1018,7 +1021,8 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 		cerr << "the time of generate the idx by multiple threads are: " << tt0 - t0 << endl;
 		#endif
 
-		FILE * fp0 = fopen(dictFile.c_str(), "w+");
+		string cur_dict_file = folder_path + '/' + dictFile;
+		FILE * fp0 = fopen(cur_dict_file.c_str(), "w+");
 		uint64_t totalIndex = 0;
 		for(size_t hash = 0; hash < hashSize; hash++){
 			offsetArr[hash] = 0;
@@ -1035,7 +1039,8 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 		cerr << "the time of merge multiple idx into final hashMap is: " << t1 - tt0 << endl;
 		#endif
 
-		FILE * fp1 = fopen(indexFile.c_str(), "w+");
+		string cur_index_file = folder_path + '/' + indexFile;
+		FILE * fp1 = fopen(cur_index_file.c_str(), "w+");
 		fwrite(&hashSize, sizeof(size_t), 1, fp1);
 		fwrite(&totalIndex, sizeof(uint64_t), 1, fp1);
 		fwrite(offsetArr, sizeof(uint32_t), hashSize, fp1);

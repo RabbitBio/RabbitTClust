@@ -33,6 +33,58 @@ void read_sketch_parameters(string folder_path, int& sketch_func_id, int& kmer_s
 	fclose(fp_hash); 
 }
 
+void save_kssd_genome_info(const vector<KssdSketchInfo>& sketches, const string folderPath, const string type, bool sketchByFile){
+	assert(type == "sketch" || type == "mst");
+	string info_file = folderPath + '/' + "kssd.info." + type;
+	FILE * fp_info = fopen(info_file.c_str(), "w+");
+	if(!fp_info){
+		cerr << "ERROR: save_genome_info(), cannot open the file: " << info_file << endl;
+		exit(1);
+	}
+	fwrite(&sketchByFile, sizeof(bool), 1, fp_info);
+	size_t sketch_number = sketches.size();
+	fwrite(&sketch_number, sizeof(size_t), 1, fp_info);
+
+	if(sketchByFile)
+	{
+		for(int i = 0; i < sketches.size(); i++)
+		{
+			Vec_SeqInfo curFileSeqs = sketches[i].fileSeqs;
+			int file_name_length = sketches[i].fileName.length();
+			int seq0_name_length = curFileSeqs[0].name.length();
+			int seq0_comment_length = curFileSeqs[0].comment.length();
+			fwrite(&file_name_length, sizeof(int), 1, fp_info);
+			fwrite(&seq0_name_length, sizeof(int), 1, fp_info);
+			fwrite(&seq0_comment_length, sizeof(int), 1, fp_info);
+			fwrite(&curFileSeqs[0].strand, sizeof(int), 1, fp_info);
+			fwrite(&sketches[i].totalSeqLength, sizeof(uint64_t), 1, fp_info);
+			fwrite(sketches[i].fileName.c_str(), sizeof(char), file_name_length, fp_info);
+			fwrite(curFileSeqs[0].name.c_str(), sizeof(char), seq0_name_length, fp_info);
+			fwrite(curFileSeqs[0].comment.c_str(), sizeof(char), seq0_comment_length, fp_info);
+			bool use64 = sketches[i].use64;
+			fwrite(&use64, sizeof(bool), 1, fp_info);
+		}
+	}
+	else//sketchBySequence
+	{
+		for(int i = 0; i < sketches.size(); i++)
+		{
+			SequenceInfo curSeq = sketches[i].seqInfo;
+			int seq_name_length = curSeq.name.length();
+			int seq_comment_length = curSeq.comment.length();
+			fwrite(&seq_name_length, sizeof(int), 1, fp_info);
+			fwrite(&seq_comment_length, sizeof(int), 1, fp_info);
+			fwrite(&curSeq.strand, sizeof(int), 1, fp_info);
+			fwrite(&curSeq.length, sizeof(int), 1, fp_info);
+			fwrite(curSeq.name.c_str(), sizeof(char), seq_name_length, fp_info);
+			fwrite(curSeq.comment.c_str(), sizeof(char), seq_comment_length, fp_info);
+			bool use64 = sketches[i].use64;
+			fwrite(&use64, sizeof(bool), 1, fp_info);
+		}
+	}
+	fclose(fp_info);
+}
+
 void save_genome_info(vector<SketchInfo>& sketches, string folderPath, string type, bool sketchByFile){
 	assert(type == "sketch" || type == "mst");
 	string info_file = folderPath + '/' + "info." + type;
@@ -81,6 +133,38 @@ void save_genome_info(vector<SketchInfo>& sketches, string folderPath, string ty
 	fclose(fp_info);
 }
 
+void saveKssdSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters info, const string folderPath, bool sketchByFile)
+{
+	//-----save the info.sketch
+	save_kssd_genome_info(sketches, folderPath, "sketch", sketchByFile);
+
+	//-----save the hash.sketch
+	string hash_file = folderPath + '/' + "kssd.hash.sketch";
+	FILE * fp_hash = fopen(hash_file.c_str(), "w+");
+	if(!fp_hash){
+		cerr << "ERROR: saveSketch(), cannot open the file: " << hash_file << endl;
+		exit(1);
+	}
+	fwrite(&info, sizeof(KssdParameters), 1, fp_hash);
+	bool use64 = sketches[0].use64;
+	if(use64){
+		for(int i = 0; i < sketches.size(); i++){
+			size_t cur_sketch_size = sketches[i].hash64_arr.size();
+			fwrite(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
+			fwrite(sketches[i].hash64_arr.data(), sizeof(uint64_t), cur_sketch_size, fp_hash);
+		}
+	}
+	else{
+		for(int i = 0; i < sketches.size(); i++){
+			size_t cur_sketch_size = sketches[i].hash32_arr.size();
+			fwrite(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
+			fwrite(sketches[i].hash32_arr.data(), sizeof(uint32_t), cur_sketch_size, fp_hash);
+		}
+	}
+	fclose(fp_hash); 
+	cerr << "-----save the kssd sketches into: " << folderPath << endl;
+	
+}
 
 void saveSketches(vector<SketchInfo>& sketches, string folderPath, bool sketchByFile, string sketchFunc, bool isContainment, int containCompress, int sketchSize, int kmerSize)
 {

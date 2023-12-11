@@ -186,7 +186,8 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 	{
 		cerr << "-----use hash64 in compute_kssd_mst() " << endl;
 		size_t hash_number;
-		FILE* fp_index = fopen((folder_path+'/'+indexFile).c_str(), "rb");
+		string cur_index_file = folder_path + '/' + indexFile;
+		FILE* fp_index = fopen(cur_index_file.c_str(), "rb");
 		if(!fp_index){
 			cerr << "ERROR: compute_kssd_mst(), cannot open index file: " << indexFile << endl;
 			exit(1);
@@ -203,7 +204,8 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 		
 		fclose(fp_index);
 
-		FILE* fp_dict = fopen((folder_path+'/'+dictFile).c_str(), "rb");
+		string cur_dict_file = folder_path + '/' + dictFile;
+		FILE* fp_dict = fopen(cur_dict_file.c_str(), "rb");
 		if(!fp_dict){
 			cerr << "ERROR: compute_kssd_mst(), cannot open dict file: " << dictFile << endl;
 			exit(1);
@@ -234,7 +236,8 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 		cerr << "-----not use hash64 in compute_kssd_mst() " << endl;
 		size_t hashSize;
 		uint64_t totalIndex;
-		FILE * fp_index = fopen(indexFile.c_str(), "rb");
+		string cur_index_file = folder_path + '/' + indexFile;
+		FILE * fp_index = fopen(cur_index_file.c_str(), "rb");
 		if(!fp_index){
 			cerr << "ERROR: compute_kssd_mst(), cannot open the index sketch file: " << indexFile << endl;
 			exit(1);
@@ -266,7 +269,8 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 
 		//indexArr = (uint32_t*)malloc(totalHashNumber * sizeof(uint32_t));
 		indexArr = new uint32_t[totalHashNumber];
-		FILE * fp_dict = fopen(dictFile.c_str(), "rb");
+		string cur_dict_file = folder_path + '/' + dictFile;
+		FILE * fp_dict = fopen(cur_dict_file.c_str(), "rb");
 		if(!fp_dict){
 			cerr << "ERROR: compute_kssd_mst(), cannot open the dictionary sketch file: " << dictFile << endl;
 			exit(1);

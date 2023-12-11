@@ -242,8 +242,8 @@ void clust_from_genome_fast(const string inputFile, string outputFile, string fo
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
 	compute_kssd_sketches(sketches, info, isSave, inputFile, folder_path, sketchByFile, minLen, kmerSize, drlevel, threads);
-	string dictFile = inputFile + "sketch.dict";
-	string indexFile = inputFile + "sketch.index";
+	string dictFile = inputFile + ".sketch.dict";
+	string indexFile = inputFile + ".sketch.index";
 	transSketches(sketches, info, folder_path, dictFile, indexFile, threads);
 	compute_kssd_clusters(sketches, info, sketchByFile, isContainment, folder_path, dictFile, indexFile, outputFile, is_newick_tree, threshold, isSave, threads);
 
@@ -346,7 +346,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		}
 	}//end sketch by sequence
 	else{
-		cerr << "The sketch by sequences are TODO implemented." << endl;
+		cerr << "TODO: The sketch by sequences are TODO implemented." << endl;
 		exit(0);
 	}//end sketch by file
 	cerr << "-----the size of sketches (number of genomes or sequences) is: " << sketches.size() << endl;
@@ -358,8 +358,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 	if(isSave){
 		string command = "mkdir -p " + folder_path;
 		system(command.c_str());
-		cerr << "The saving of kssd sketches are TODO implement" << endl;
-		//saveSketches(sketches, folder_path, sketchByFile, sketchFunc, isContainment, containCompress, sketchSize, kmerSize);
+		saveKssdSketches(sketches, info, folder_path, sketchByFile);
 		double t2 = get_sec();
 		#ifdef Timer
 		cerr << "========time of saveSketches is: " << t2 - t1 << "========" << endl;
