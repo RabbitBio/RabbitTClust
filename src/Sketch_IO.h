@@ -10,4 +10,6 @@ void saveKssdSketches(const vector<KssdSketchInfo>& sketches, const KssdParamete
 
 bool loadSketches(string folderPath, int threads, vector<SketchInfo>& sketches, int& sketch_func_id);
 bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketches);
+bool load_kssd_genome_info(string folderPath, string type, vector<KssdSketchInfo>& sketches);
+bool loadKssdSketches(string folderPath, int threads, vector<KssdSketchInfo>& sketches, KssdParameters& info);
 #endif

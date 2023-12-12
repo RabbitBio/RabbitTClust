@@ -136,6 +136,17 @@ int main(int argc, char * argv[]){
 		fprintf(stderr, "-----set threshold:  %d\n", threshold);
 	}
 
+	if(is_fast){
+		if(*option_presketched && !*option_append){
+			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, isContainment, threshold, threads);
+			return 0;
+		}
+		if(!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, isJaccard, kmerSize, threshold, containCompress, sketchSize)){
+			return 1;
+		}
+		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
+		return 0;
+	}
 
 #ifndef GREEDY_CLUST
 //======clust-mst=========================================================================
@@ -174,10 +185,6 @@ int main(int argc, char * argv[]){
 		return 1;
 	}
 
-	if(is_fast){
-		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
-		return 0;
-	}
 	
 	clust_from_genomes(inputFile, outputFile, is_newick_tree, sketchByFile, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads);
 

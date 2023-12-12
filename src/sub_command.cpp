@@ -242,33 +242,19 @@ void clust_from_genome_fast(const string inputFile, string outputFile, string fo
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
 	compute_kssd_sketches(sketches, info, isSave, inputFile, folder_path, sketchByFile, minLen, kmerSize, drlevel, threads);
-	string dictFile = inputFile + ".sketch.dict";
-	string indexFile = inputFile + ".sketch.index";
-	transSketches(sketches, info, folder_path, dictFile, indexFile, threads);
-	compute_kssd_clusters(sketches, info, sketchByFile, isContainment, folder_path, dictFile, indexFile, outputFile, is_newick_tree, threshold, isSave, threads);
+	transSketches(sketches, info, folder_path, threads);
+	compute_kssd_clusters(sketches, info, sketchByFile, isContainment, folder_path, outputFile, is_newick_tree, threshold, isSave, threads);
 
 }
 
-void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool isContainment, const string folder_path, const string dictFile, const string indexFile, string outputFile, bool is_newick_tree, double threshold, bool isSave, int threads){
+void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, double threshold, bool isSave, int threads){
 	vector<vector<int>> cluster;
 	double t2 = get_sec();
-#ifdef GREEDY_CLUST
-//======clust-greedy====================================================================
-	//cluster = greedyCluster(sketches, sketch_func_id, threshold, threads);
-	//printResult(cluster, sketches, sketchByFile, outputFile);
-	//cerr << "-----write the cluster result into: " << outputFile << endl;
-	//cerr << "-----the cluster number of " << outputFile << " is: " << cluster.size() << endl;
-	//double t3 = get_sec();
-	//#ifdef Timer
-	//cerr << "========time of greedyCluster is: " << t3 - t2 << "========" << endl;
-	//#endif
-//======clust-greedy====================================================================
-#else
 //======clust-mst=======================================================================
 	int **denseArr;
 	uint64_t* aniArr; //= new uint64_t[101];
 	int denseSpan = DENSE_SPAN;
-	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, dictFile, indexFile, 0, isContainment, threads, denseArr, denseSpan, aniArr);
+	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, isContainment, threads, denseArr, denseSpan, aniArr);
 	double t3 = get_sec();
 	#ifdef Timer
 	cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
@@ -333,7 +319,6 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 	cerr << "========time of tuning cluster is: " << t5 - t4 << "========" << endl;
 	#endif
 //======clust-mst=======================================================================
-#endif//endif GREEDY_CLUST
 }
 
 void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& info, bool isSave, const string inputFile, string& folder_path, bool sketchByFile, const int minLen, const int kmerSize, const int drlevel, int threads){
@@ -463,6 +448,71 @@ bool tune_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int th
 	#endif
 
 	return true;
+}
+
+void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool isContainment, double threshold, int threads){
+	vector<KssdSketchInfo> sketches;
+	vector<vector<int>> cluster;
+	bool sketchByFile;
+	KssdParameters info;
+//======clust-mst=======================================================================
+	double time0 = get_sec();
+	//sketchByFile = loadSketches(folder_path, threads, sketches, sketch_func_id);
+	sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
+
+	cerr << "-----the size of sketches is: " << sketches.size() << endl;
+	double time1 = get_sec();
+	#ifdef Timer
+	cerr << "========time of load genome Infos and sketch Infos is: " << time1 - time0 << endl;
+	#endif
+	int** denseArr;
+	uint64_t* aniArr; //= new uint64_t[101];
+	int denseSpan = DENSE_SPAN;
+	//vector<EdgeInfo> mst = modifyMST(sketches, 0, sketch_func_id, threads, denseArr, denseSpan, aniArr);
+	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, isContainment, threads, denseArr, denseSpan, aniArr);
+	double time2 = get_sec();
+	#ifdef Timer
+	cerr << "========time of generateMST is: " << time2 - time1 << "========" << endl;
+	#endif
+	//TODO: open the newick_tree format
+	//if(is_newick_tree){
+	//	string output_newick_file = outputFile + ".newick.tree";
+	//	print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
+	//	cerr << "-----write the newick tree into: " << output_newick_file << endl;
+	//}
+	vector<EdgeInfo> forest = generateForest(mst, threshold);
+	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
+	printKssdResult(tmpClust, sketches, sketchByFile, outputFile);
+	cerr << "-----write the cluster result into: " << outputFile << endl;
+	cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
+
+	int alpha = 2;
+	int denseIndex = threshold / 0.01;
+	vector<int> totalNoiseArr;
+	for(int i = 0; i < tmpClust.size(); i++){
+		if(tmpClust[i].size() == 1) continue;
+		vector<PairInt> curDenseArr;
+		set<int> denseSet;
+		for(int j = 0; j < tmpClust[i].size(); j++){
+			int element = tmpClust[i][j];
+			PairInt p(element, denseArr[denseIndex][element]);
+			denseSet.insert(denseArr[denseIndex][element]);
+			curDenseArr.push_back(p);
+		}
+		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
+		totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
+	}
+	cerr << "-----the total noiseArr size is: " << totalNoiseArr.size() << endl;
+	forest = modifyForest(forest, totalNoiseArr, threads);
+	cluster = generateClusterWithBfs(forest, sketches.size());
+	string outputFileNew = outputFile + ".removeNoise";
+	printKssdResult(cluster, sketches, sketchByFile, outputFileNew);
+	cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
+	cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
+	double time3 = get_sec();
+	#ifdef Timer
+	cerr << "========time of generator forest and cluster is: " << time3 - time2 << "========" << endl;
+	#endif
 }
 
 void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, double threshold, int threads){

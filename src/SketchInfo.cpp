@@ -933,7 +933,7 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int
 	return true;
 }
 
-void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters& info, const string folder_path, const string dictFile, const string indexFile, int numThreads){
+void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters& info, const string folder_path, int numThreads){
 	//cerr << "the folder path in transSKetch is: " << folder_path << endl;
 	double t0 = get_sec();
 	int half_k = info.half_k;
@@ -964,10 +964,10 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 		size_t total_size = 0;
 		uint64_t* hash_arr = (uint64_t*)malloc(hash_number * sizeof(uint64_t));
 		uint32_t* hash_size_arr = (uint32_t*)malloc(hash_number * sizeof(uint32_t));
-		string cur_dict_file = folder_path + '/' + dictFile;
+		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
 		FILE* fp_dict = fopen((cur_dict_file).c_str(), "w+");
 		if(!fp_dict){
-			cerr << "ERROR: transSketches, cannot open dictFile: " << dictFile << endl;
+			cerr << "ERROR: transSketches, cannot open dictFile: " << cur_dict_file << endl;
 			exit(1);
 		}
 		size_t cur_id = 0;
@@ -985,10 +985,10 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 		cerr << "the time of writing dictFile is: " << t2 - t1 << endl;
 		#endif
 
-		string cur_index_file = folder_path + '/' + indexFile;
+		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
 		FILE* fp_index = fopen(cur_index_file.c_str(), "w+");
 		if(!fp_index){
-			cerr << "ERROR: transSketches, cannot open indexFile: " << indexFile << endl;
+			cerr << "ERROR: transSketches, cannot open indexFile: " << cur_index_file << endl;
 			exit(1);
 		}
 		fwrite(&hash_number, sizeof(size_t), 1, fp_index);
@@ -1021,7 +1021,7 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 		cerr << "the time of generate the idx by multiple threads are: " << tt0 - t0 << endl;
 		#endif
 
-		string cur_dict_file = folder_path + '/' + dictFile;
+		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
 		FILE * fp0 = fopen(cur_dict_file.c_str(), "w+");
 		uint64_t totalIndex = 0;
 		for(size_t hash = 0; hash < hashSize; hash++){
@@ -1039,7 +1039,7 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 		cerr << "the time of merge multiple idx into final hashMap is: " << t1 - tt0 << endl;
 		#endif
 
-		string cur_index_file = folder_path + '/' + indexFile;
+		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
 		FILE * fp1 = fopen(cur_index_file.c_str(), "w+");
 		fwrite(&hashSize, sizeof(size_t), 1, fp1);
 		fwrite(&totalIndex, sizeof(uint64_t), 1, fp1);
