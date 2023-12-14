@@ -326,13 +326,16 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 	if(sketchByFile){
 		//if(!sketchFiles(inputFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
 		if(!sketchFileWithKssd(inputFile, minLen, kmerSize, drlevel, sketches, info, threads)){
-			cerr << "ERROR: generate_sketches(), cannot finish the sketch generation by genome files" << endl;
+			cerr << "ERROR: sketchFileWithKssd(), cannot finish the sketch generation by genome files" << endl;
 			exit(1);
 		}
 	}//end sketch by sequence
 	else{
-		cerr << "TODO: The sketch by sequences are TODO implemented." << endl;
-		exit(0);
+		cerr << "use the sketch seuqnce with kssd " << endl;
+		if(!sketchSequencesWithKssd(inputFile, minLen, kmerSize, drlevel, sketches, info, threads)){
+			cerr << "ERROR: sketchSequencesWithKssd (), cannot finish the sketch generation by genome sequences" << endl;
+			exit(1);
+		}
 	}//end sketch by file
 	cerr << "-----the size of sketches (number of genomes or sequences) is: " << sketches.size() << endl;
 	double t1 = get_sec();

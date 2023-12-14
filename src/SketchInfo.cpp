@@ -40,6 +40,49 @@ bool cmpSeqSize(SketchInfo s1, SketchInfo s2){
 	else return false;
 }
 
+int * shuffle(int arr[], int length, uint64_t seed)
+
+{
+	if(length > RAND_MAX){
+		fprintf(stderr, "shuffling array length %d must be less than RAND_MAX: %d", length, RAND_MAX);
+		exit(1);
+	}
+	srand(seed);
+	int j, tmp;
+	for(int i = length-1; i > 0; i--)
+	{
+		j = rand() % (i + 1);
+		tmp = arr[i];
+		arr[i] = arr[j];
+		arr[j] = tmp;
+	}
+	
+	return arr;
+}
+
+int * shuffleN(int n, int base)
+{
+	int * arr;
+	arr = (int* ) malloc(n * sizeof(int));
+	for(int i = 0; i < n; i++){
+		arr[i] = i + base;
+	}
+	
+	return shuffle(arr, n, 23);
+}
+
+int * generate_shuffle_dim(int half_subk){
+	int dim_size = 1 << 4 * half_subk;
+	int * shuffled_dim = shuffleN(dim_size, 0);
+	shuffled_dim = shuffle(shuffled_dim, dim_size, 348842630);
+
+	//printf("print the shuffle_dim : \n");
+	//for(int i = 0; i < dim_size; i++)
+	//	printf("%lx\n", shuffled_dim[i]);
+	//exit(0);
+
+	return shuffled_dim;
+}
 
 #ifdef THREADPOOL_MINHASH
 struct SketchInput{
@@ -210,7 +253,145 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 	}
 
 }
+
+void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int minLen, int kmerSize, int drlevel, vector<KssdSketchInfo> *sketches){
+	static const int BaseMap[128] = 
+	{
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, 0, -1, 1, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, 0, -1, 1, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+	};
+	// generate the shuffle file.
+	int half_k = (kmerSize + 1) / 2;
+	bool use64 = half_k - drlevel > 8 ? true : false;
+	int half_subk = 6 - drlevel >= 2 ? 6 : drlevel + 2;
+	int dim_size = 1 << 4 * half_subk;
+	int dim_start = 0;
+	int dim_end = 1 << 4 * (half_subk - drlevel);
+	int* shuffled_dim = generate_shuffle_dim(half_subk);
+
+	int comp_bittl = 64 - 4 * half_k;
+	int half_outctx_len = half_k - half_subk;
+	int rev_add_move = 4 * half_k - 2;
+	//cout << "the comp_bittl is: " << comp_bittl << endl;
+
+	uint64_t tupmask = _64MASK >> comp_bittl;
+	uint64_t domask = (tupmask >> (4 * half_outctx_len)) << (2 * half_outctx_len);
+	uint64_t undomask = (tupmask ^ domask) & tupmask;
+	uint64_t undomask1 = undomask &	(tupmask >> ((half_k + half_subk) * 2));
+	uint64_t undomask0 = undomask ^ undomask1;
+
+	robin_hood::unordered_map<uint32_t, int> shuffled_map;
+	for(int t = 0; t < dim_size; t++){
+		if(shuffled_dim[t] < dim_end && shuffled_dim[t] >= dim_start){
+			shuffled_map.insert({t, shuffled_dim[t]});
+		}
+	}
+
+	rabbit::int64 id = 0;
+	rabbit::fa::FastaChunk *faChunk;
+	uint64_t totalLength = 0;
+	while(dq.Pop(id, faChunk)){
+		std::vector<Reference> data;
+		int ref_num = rabbit::fa::chunkListFormat(*faChunk, data);
+		for(Reference &r: data){
+			string name = r.name;
+			string comment = r.comment;
+			int length = r.length;
+			if(length < minLen) continue;
+			SequenceInfo curSeq{name, comment, 0, length};
+
+			//SketchInfo tmpSketchInfo; 
+			KssdSketchInfo tmpKssdSketchInfo;
+			tmpKssdSketchInfo.seqInfo = curSeq;
+
+			// parse the sequences 
+			unordered_set<uint32_t> hashValueSet;
+			unordered_set<uint64_t> hashValueSet64;
+
+			uint64_t tuple = 0LLU, rvs_tuple = 0LLU, uni_tuple, dr_tuple, pfilter;
+			int base = 1;
+			//slide window to generate k-mers and get hashes
+			for(int i = 0; i < length; i++)
+			{
+				//char ch = sequence[i];
+				char ch = r.seq[i];
+				int basenum = BaseMap[(int)ch];
+				if(basenum != -1)
+				{
+					tuple = ((tuple << 2) | basenum) & tupmask;
+					rvs_tuple = (rvs_tuple >> 2) + (((uint64_t)basenum ^3LLU) << rev_add_move); 
+					base++;
+				}
+				else{
+					base = 1;
+
+				}
+				if(base > kmerSize)
+				{
+					uni_tuple = tuple < rvs_tuple ? tuple : rvs_tuple;
+					int dim_id = (uni_tuple & domask) >> (half_outctx_len * 2);
+
+					//pfilter = shuffled_dim[dim_id];
+					//if((pfilter >= dim_end) || (pfilter < dim_start)){
+					//	continue;
+					//}
+
+					if(shuffled_map.count(dim_id) == 0){
+						continue;
+					}
+					pfilter = shuffled_map[dim_id];
+
+					pfilter -= dim_start;
+					//dr_tuple = (((uni_tuple & undomask0) + ((uni_tuple & undomask1) << (kmer_size * 2 - half_outctx_len * 4))) >> (drlevel * 4)) + pfilter; 
+					////only when the dim_end is 4096(the pfilter is 12bit in binary and the lowerst 12bit is all 0 
+					dr_tuple = (((uni_tuple & undomask0) | ((uni_tuple & undomask1) << (kmerSize * 2 - half_outctx_len * 4))) >> (drlevel * 4)) | pfilter; 
+
+					if(use64)
+						hashValueSet64.insert(dr_tuple);
+					else
+						hashValueSet.insert(dr_tuple);
+				}//end if, i > kmer_size
+			}//end for, of a sequence 
+
+			vector<uint32_t> hashArr32;
+			vector<uint64_t> hashArr64;
+			if(use64){
+				for(auto x : hashValueSet64){
+					hashArr64.push_back(x);
+				}
+			}
+			else{
+				for(auto x : hashValueSet){
+					hashArr32.push_back(x);
+				}
+			}
+
+			tmpKssdSketchInfo.id = r.gid;
+			tmpKssdSketchInfo.totalSeqLength = length;
+			tmpKssdSketchInfo.use64 = use64;
+			tmpKssdSketchInfo.hash32_arr = hashArr32;
+			tmpKssdSketchInfo.hash64_arr = hashArr64;
+			sketches->push_back(tmpKssdSketchInfo);
+
+		}
+		rabbit::fa::FastaDataChunk *tmp = faChunk->chunk;
+		do{
+			if(tmp != NULL){
+			fastaPool->Release(tmp);
+			tmp = tmp->next;
+			}
+		}while(tmp!=NULL);
+	}//end while loop for this file
+}
+
 #endif
+
 
 void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, uint64_t &maxSize, uint64_t& minSize, uint64_t& averageSize){
 	maxSize = 0;
@@ -328,6 +509,53 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, 
 	cerr << "\t===the averageSize is: " << averageSize << endl;
 }
 
+bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
+	int sufIndex = inputFile.find_last_of('.');
+	string sufName = inputFile.substr(sufIndex+1);
+	if(sufName != "fasta" && sufName != "fna" && sufName != "fa")
+	{
+		cerr << "error input format file: " << inputFile << endl;
+		cerr << "Only support FASTA files" << endl;
+		exit(0);
+	}
+#ifdef RABBIT_FX
+	int th = std::max(threads - 1, 1);//consumer threads number;
+	vector<KssdSketchInfo> sketchesArr[th];
+	
+	rabbit::fa::FastaDataPool *fastaPool = new rabbit::fa::FastaDataPool(256, 1<< 24);
+	FaChunkQueue queue1(128, 1);
+	//cout << "--------------------" << endl;
+	std::thread producer(producer_fasta_task, inputFile, fastaPool, std::ref(queue1));
+	std::thread **threadArr = new std::thread* [th];
+
+	for(int t = 0; t < th; t++){
+		threadArr[t] = new std::thread(std::bind(consumer_fasta_task_with_kssd, fastaPool, std::ref(queue1), minLen, kmerSize, drlevel, &sketchesArr[t]));
+	}
+	producer.join();
+	for(int t = 0; t < th; t++){
+		threadArr[t]->join();
+	}
+
+	for(int i = 0; i < th; i++){
+		for(int j = 0; j < sketchesArr[i].size(); j++){
+			sketches.push_back(sketchesArr[i][j]);
+			//similarityInfos.push_back(similarityInfosArr[i][j]);
+		}
+	}
+	int half_k = (kmerSize + 1) / 2;
+	int half_subk = 6 - drlevel >= 2 ? 6 : drlevel + 2;
+	info.half_k = half_k;
+	info.half_subk = half_subk;
+	info.drlevel = drlevel;
+	info.id = (half_k << 8) + (half_subk << 4) + drlevel;
+	info.genomeNumber = sketches.size();
+	
+	return true;
+#else
+	cerr << "need the RabbitFX to parse the genome sequences" << endl;
+	return false;
+#endif
+}
 
 
 bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
@@ -711,49 +939,6 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 	sort(sketches.begin(), sketches.end(), cmpGenomeSize);
 
 	return true;
-}
-int * shuffle(int arr[], int length, uint64_t seed)
-
-{
-	if(length > RAND_MAX){
-		fprintf(stderr, "shuffling array length %d must be less than RAND_MAX: %d", length, RAND_MAX);
-		exit(1);
-	}
-	srand(seed);
-	int j, tmp;
-	for(int i = length-1; i > 0; i--)
-	{
-		j = rand() % (i + 1);
-		tmp = arr[i];
-		arr[i] = arr[j];
-		arr[j] = tmp;
-	}
-	
-	return arr;
-}
-
-int * shuffleN(int n, int base)
-{
-	int * arr;
-	arr = (int* ) malloc(n * sizeof(int));
-	for(int i = 0; i < n; i++){
-		arr[i] = i + base;
-	}
-	
-	return shuffle(arr, n, 23);
-}
-
-int * generate_shuffle_dim(int half_subk){
-	int dim_size = 1 << 4 * half_subk;
-	int * shuffled_dim = shuffleN(dim_size, 0);
-	shuffled_dim = shuffle(shuffled_dim, dim_size, 348842630);
-
-	//printf("print the shuffle_dim : \n");
-	//for(int i = 0; i < dim_size; i++)
-	//	printf("%lx\n", shuffled_dim[i]);
-	//exit(0);
-
-	return shuffled_dim;
 }
 
 bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
