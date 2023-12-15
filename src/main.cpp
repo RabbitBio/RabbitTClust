@@ -136,9 +136,20 @@ int main(int argc, char * argv[]){
 		fprintf(stderr, "-----set threshold:  %d\n", threshold);
 	}
 
+
+#ifndef GREEDY_CLUST
+//======clust-mst=========================================================================
 	if(is_fast){
 		if(*option_presketched && !*option_append){
 			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, isContainment, threshold, threads);
+			return 0;
+		}
+		if(*option_append && !*option_premsted && !*option_presketched){
+			cerr << "ERROR: option --append, option --presketched or --premsted needed" << endl;
+			return 1;
+		}
+		if(*option_append && (*option_presketched || *option_premsted)){
+			append_clust_mst_fast(folder_path, inputFile, outputFile, is_newick_tree, sketchByFile, minLen, noSave, threshold, threads);
 			return 0;
 		}
 		if(!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, isJaccard, kmerSize, threshold, containCompress, sketchSize)){
@@ -148,8 +159,6 @@ int main(int argc, char * argv[]){
 		return 0;
 	}
 
-#ifndef GREEDY_CLUST
-//======clust-mst=========================================================================
 	if(*option_premsted && !*option_append){
 		clust_from_mst(folder_path, outputFile, is_newick_tree, threshold, threads);
 		return 0;

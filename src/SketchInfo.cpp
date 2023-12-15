@@ -941,7 +941,7 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 	return true;
 }
 
-bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
+bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
 	fprintf(stderr, "-----input fileList, sketch by file\n");
 	ifstream ifs(inputFile);
 	if(!ifs){
@@ -967,6 +967,7 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int
 	};
 	// generate the shuffle file.
 	int half_k = (kmerSize + 1) / 2;
+	kmerSize = half_k * 2;
 	bool use64 = half_k - drlevel > 8 ? true : false;
 	int half_subk = 6 - drlevel >= 2 ? 6 : drlevel + 2;
 	int dim_size = 1 << 4 * half_subk;
