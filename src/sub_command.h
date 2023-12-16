@@ -20,6 +20,7 @@ bool tune_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int th
 void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, double threshold, int threads);
 
 void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, double threshold, int threads);
+void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, double threshold, int threads);
 
 void append_clust_mst(string folder_path, string input_file, string output_file, bool is_newick_tree, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads);
 void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads);

@@ -90,9 +90,7 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	vector<KssdSketchInfo> append_sketches;
 	KssdParameters append_info;
 	string append_folder_path;
-//void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& info, bool isSave, const string inputFile, 
-//string& folder_path, bool sketchByFile, const int minLen, const int kmerSize, const int drlevel, int threads){
-	compute_kssd_sketches(append_sketches, append_info, isSave, input_file, output_file, sketch_by_file, min_len, kmer_size, drlevel, threads);
+	compute_kssd_sketches(append_sketches, append_info, isSave, input_file, append_folder_path, sketch_by_file, min_len, kmer_size, drlevel, threads);
 	
 	vector<KssdSketchInfo> final_sketches;
 	int pre_sketch_size = pre_sketches.size();
@@ -100,12 +98,14 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	final_sketches.insert(final_sketches.end(), append_sketches.begin(), append_sketches.end());
 	vector<KssdSketchInfo>().swap(pre_sketches);
 	vector<KssdSketchInfo>().swap(append_sketches);
-	string new_folder_path = currentDataTime();
+	string new_folder_path = append_folder_path;
 	if(!no_save){
 		string command = "mkdir -p " + new_folder_path;
 		system(command.c_str());
 		saveKssdSketches(final_sketches, pre_info, new_folder_path, sketch_by_file);
 	}
+	transSketches(final_sketches, append_info, new_folder_path, threads);
+
 
 	int ** pre_dense_arr;
 	uint64_t* pre_ani_arr;
@@ -116,8 +116,8 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	int ** dense_arr;
 	int dense_span = DENSE_SPAN;
 	uint64_t* ani_arr;
-	//vector<EdgeInfo> append_mst = modifyMST(final_sketches, pre_sketch_size, sketch_func_id_0, threads, dense_arr, dense_span, ani_arr);
-	vector<EdgeInfo> append_mst = modifyMST(final_sketches, pre_sketch_size, sketch_func_id_0, threads, dense_arr, dense_span, ani_arr);
+	vector<EdgeInfo> append_mst = compute_kssd_mst(final_sketches, append_info, new_folder_path, pre_sketch_size, isContainment, threads, dense_arr, dense_span, ani_arr);
+	cerr << "finish the append_Mst"<< endl;
 	vector<EdgeInfo> final_graph;
 	final_graph.insert(final_graph.end(), pre_mst.begin(), pre_mst.end());
 	final_graph.insert(final_graph.end(), append_mst.begin(), append_mst.end());
@@ -128,14 +128,14 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	vector<EdgeInfo>().swap(final_graph);
 	if(is_newick_tree){
 		string output_newick_file = output_file + ".newick.tree";
-		print_newick_tree(final_sketches, final_mst, pre_sketch_by_file, output_newick_file);
+		print_kssd_newick_tree(final_sketches, final_mst, pre_sketch_by_file, output_newick_file);
 		cerr << "-----write the newick tree into: " << output_newick_file << endl;
-
 	}
 
 	vector<EdgeInfo> forest = generateForest(final_mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, final_sketches.size());
-	printResult(tmpClust, final_sketches, pre_sketch_by_file, output_file);
+	//printResult(tmpClust, final_sketches, pre_sketch_by_file, output_file);
+	printKssdResult(tmpClust, final_sketches, pre_sketch_by_file, output_file);
 	cerr << "-----write the cluster result into: " << output_file << endl;
 	cerr << "-----the cluster number of: " << output_file << " is: " << tmpClust.size() << endl;
 	
@@ -151,7 +151,7 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	if(!no_save){
 		saveANI(new_folder_path, ani_arr, sketch_func_id_0);
 		saveDense(new_folder_path, dense_arr, dense_span, final_sketches.size());
-		saveMST(final_sketches, final_mst, new_folder_path, sketch_by_file);
+		saveKssdMST(final_sketches, final_mst, new_folder_path, sketch_by_file);
 	}
 
 
@@ -175,7 +175,7 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	forest = modifyForest(forest, totalNoiseArr, threads);
 	vector<vector<int>> cluster = generateClusterWithBfs(forest, final_sketches.size());
 	string outputFileNew = output_file + ".removeNoise";
-	printResult(cluster, final_sketches, pre_sketch_by_file, outputFileNew);
+	printKssdResult(cluster, final_sketches, pre_sketch_by_file, outputFileNew);
 	cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
 	cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 }
@@ -303,6 +303,52 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 	cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
 	cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 }
+void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, double threshold, int threads){
+	vector<KssdSketchInfo> sketches;
+	vector<EdgeInfo> mst;
+	vector<vector<int>> cluster;
+	bool sketchByFile = load_kssd_genome_info(folder_path, "mst", sketches);
+	loadMST(folder_path, mst);
+
+	if(is_newick_tree){
+		string output_newick_file = outputFile + ".newick.tree";
+		print_kssd_newick_tree(sketches, mst, sketchByFile, output_newick_file);
+		cerr << "-----write the newick tree into: " << output_newick_file << endl;
+	}
+
+	vector<EdgeInfo> forest = generateForest(mst, threshold);
+	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
+	printKssdResult(tmpClust, sketches, sketchByFile, outputFile);
+	cerr << "-----write the cluster result into: " << outputFile << endl;
+	cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
+	int **denseArr;
+	int genome_number = sketches.size();
+	int denseSpan = DENSE_SPAN;
+	loadDense(denseArr, folder_path, denseSpan, genome_number);
+	int alpha = 2;
+	int denseIndex = threshold / 0.01;
+	vector<int> totalNoiseArr;
+	for(int i = 0; i < tmpClust.size(); i++){
+		if(tmpClust[i].size() == 1) continue;
+		vector<PairInt> curDenseArr;
+		set<int> denseSet;
+		for(int j = 0; j < tmpClust[i].size(); j++){
+			int element = tmpClust[i][j];
+			PairInt p(element, denseArr[denseIndex][element]);
+			denseSet.insert(denseArr[denseIndex][element]);
+			curDenseArr.push_back(p);
+		}
+		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
+		totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
+	}
+	cerr << "-----the total noiseArr size is: " << totalNoiseArr.size() << endl;
+	forest = modifyForest(forest, totalNoiseArr, threads);
+	cluster = generateClusterWithBfs(forest, sketches.size());
+	string outputFileNew = outputFile + ".removeNoise";
+	printKssdResult(cluster, sketches, sketchByFile, outputFileNew);
+	cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
+	cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
+}
 
 void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, double threshold, int threads){
 	vector<SketchInfo> sketches;
@@ -375,22 +421,22 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 	cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
 	#endif
 	//string sketch_func_id = "fast_kssd_sketch";
-	// if(isSave){
-	// 	saveANI(folder_path, aniArr, sketch_func_id);
-	// 	saveDense(folder_path, denseArr, denseSpan, sketches.size());
-	// 	saveMST(sketches, mst, folder_path, sketchByFile);
-	// }
+	 if(isSave){
+	 	saveANI(folder_path, aniArr, 1);
+	 	saveDense(folder_path, denseArr, denseSpan, sketches.size());
+	 	saveKssdMST(sketches, mst, folder_path, sketchByFile);
+	 }
 	double t4 = get_sec();
 	#ifdef Timer
 	cerr << "========time of saveMST is: " << t4 - t3 << "========" << endl;
 	#endif
 
 	//generate the Newick tree format
-	// if(is_newick_tree){
-	// 	string output_newick_file = outputFile + ".newick.tree";
-	// 	print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
-	// 	cerr << "-----write the newick tree into: " << output_newick_file << endl;
-	// }
+	if(is_newick_tree){
+		string output_newick_file = outputFile + ".newick.tree";
+		print_kssd_newick_tree(sketches, mst, sketchByFile, output_newick_file);
+		cerr << "-----write the newick tree into: " << output_newick_file << endl;
+	}
 
 
 //	for(int i = 0; i < denseSpan; i++){
@@ -592,12 +638,11 @@ void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newic
 	#ifdef Timer
 	cerr << "========time of generateMST is: " << time2 - time1 << "========" << endl;
 	#endif
-	//TODO: open the newick_tree format
-	//if(is_newick_tree){
-	//	string output_newick_file = outputFile + ".newick.tree";
-	//	print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
-	//	cerr << "-----write the newick tree into: " << output_newick_file << endl;
-	//}
+	if(is_newick_tree){
+		string output_newick_file = outputFile + ".newick.tree";
+		print_kssd_newick_tree(sketches, mst, sketchByFile, output_newick_file);
+		cerr << "-----write the newick tree into: " << output_newick_file << endl;
+	}
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
 	printKssdResult(tmpClust, sketches, sketchByFile, outputFile);

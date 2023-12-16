@@ -318,15 +318,17 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 	}
 	int subSize = 8;
 	int id = 0;
-	int tailNum = sketches.size() % subSize;
+	//int tailNum = sketches.size() % subSize;
+	int tailNum = (N - start_index) % subSize;
 	//int N = sketches.size();
-	uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
+	//uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
+	uint64_t totalCompNum = (uint64_t)(N-start_index) * (uint64_t)(N+start_index)/2;
 	uint64_t percentNum = totalCompNum / 100;
 	cerr << "---the percentNum is: " << percentNum << endl;
 	cerr << "---the start_index is: " << start_index << endl;
 	uint64_t percentId = 0;
 	#pragma omp parallel for num_threads(threads) schedule (dynamic)
-	for(id = 0; id < sketches.size() - tailNum; id+=subSize){
+	for(id = start_index; id < sketches.size() - tailNum; id+=subSize){
 		int thread_id = omp_get_thread_num();
 		for(int i = id; i < id+subSize; i++){
 			memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
@@ -356,7 +358,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 				}
 			}
 
-			for(int j = max(i+1, start_index); j < sketches.size(); j++){
+			for(int j = 0; j < start_index; j++){
 				double tmpDist;
 				int common = intersectionArr[thread_id][j];
 				int size0, size1;
@@ -417,7 +419,8 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 			}
 		}
 		if(thread_id == 0){
-			uint64_t computedNum = (uint64_t)(N - id) * (uint64_t)id + (uint64_t)id * (uint64_t)id / 2;
+			//uint64_t computedNum = (uint64_t)(N - id) * (uint64_t)id + (uint64_t)id * (uint64_t)id / 2;
+			uint64_t computedNum = (uint64_t)(id-start_index) * (uint64_t)(id+start_index) / 2;
 			if(computedNum >= percentId * percentNum){
 				fprintf(stderr, "---finish MST generation %d %\n", percentId);
 				percentId++;
@@ -453,6 +456,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 
 	if(tailNum != 0){
 		for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
+			memset(intersectionArr[0], 0, sketches.size() * sizeof(int));
 			if(use64){
 				for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
 					uint64_t hash64 = sketches[i].hash64_arr[j];
@@ -479,7 +483,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 				}
 			}
 
-			for(int j = i+1; j < sketches.size(); j++){
+			for(int j = 0; j < i; j++){
 				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
 				double tmpDist;
 				int common = intersectionArr[0][j];
@@ -750,6 +754,30 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
 	return mst;
 }
 
+string build_kssd_newick_tree(vector<pair<int, double>>* G, bool* visited, const vector<KssdSketchInfo>& sketches, bool sketch_by_file, int node){
+	visited[node] = true;
+	//if(G[node].size() == 0)	return to_string(node);
+	string name;
+	if(sketch_by_file) name = sketches[node].fileName;
+	else name = sketches[node].seqInfo.name;
+	if(G[node].size() == 0){
+		return name;
+	}
+	string children("");
+	for(auto x : G[node]){
+		int cur_node = x.first;
+		double dist = x.second;
+		if(!visited[cur_node]){
+			string child = build_kssd_newick_tree(G, visited, sketches, sketch_by_file, cur_node);
+			children += child + ':' + to_string(dist) + ',';
+		}
+	}
+	//if(children.length() == 0) return to_string(node);
+	if(children.length() == 0) return name;
+	//children = '(' + children.substr(0, children.length()-1) + ')' + to_string(node);
+	children = '(' + children.substr(0, children.length()-1) + ')' + name;
+	return children;
+}
 string build_newick_tree(vector<pair<int, double>>* G, bool* visited, const vector<SketchInfo>& sketches, bool sketch_by_file, int node){
 	visited[node] = true;
 	//if(G[node].size() == 0)	return to_string(node);
@@ -776,6 +804,25 @@ string build_newick_tree(vector<pair<int, double>>* G, bool* visited, const vect
 }
 
 
+string get_kssd_newick_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file){
+	int vertice_number = sketches.size();
+	vector<pair<int, double>>* G = new vector<pair<int, double>> [vertice_number];
+	for(auto f : mst){
+		int u = f.preNode;
+		int v = f.sufNode;
+		double dist = f.dist;
+		G[u].push_back(make_pair(v, dist));
+		G[v].push_back(make_pair(u, dist));
+	}
+	bool* visited = new bool[vertice_number];
+	memset(visited, 0, vertice_number*sizeof(bool));
+
+	string newick_tree = build_kssd_newick_tree(G, visited, sketches, sketch_by_file, 0);
+	newick_tree += ';';
+
+	return newick_tree;
+}
+
 string get_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file){
 	int vertice_number = sketches.size();
 	vector<pair<int, double>>* G = new vector<pair<int, double>> [vertice_number];
@@ -794,7 +841,6 @@ string get_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo
 
 	return newick_tree;
 }
-
 
 
 

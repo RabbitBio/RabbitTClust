@@ -140,6 +140,10 @@ int main(int argc, char * argv[]){
 #ifndef GREEDY_CLUST
 //======clust-mst=========================================================================
 	if(is_fast){
+		if(*option_premsted && !*option_append){
+			clust_from_mst_fast(folder_path, outputFile, is_newick_tree, threshold, threads);
+			return 0;
+		}
 		if(*option_presketched && !*option_append){
 			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, isContainment, threshold, threads);
 			return 0;
@@ -149,7 +153,7 @@ int main(int argc, char * argv[]){
 			return 1;
 		}
 		if(*option_append && (*option_presketched || *option_premsted)){
-			append_clust_mst_fast(folder_path, inputFile, outputFile, is_newick_tree, sketchByFile, minLen, noSave, threshold, threads);
+			append_clust_mst_fast(folder_path, inputFile, outputFile, is_newick_tree, sketchByFile, isContainment, minLen, noSave, threshold, threads);
 			return 0;
 		}
 		if(!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, isJaccard, kmerSize, threshold, containCompress, sketchSize)){

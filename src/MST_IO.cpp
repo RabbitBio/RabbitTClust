@@ -72,6 +72,10 @@ void printKssdResult(vector<vector<int>>& cluster, vector<KssdSketchInfo>& sketc
 {
 	//cerr << "output the result into: " << outputFile << endl;
 	FILE *fp = fopen(outputFile.c_str(), "w");
+	if(!fp){
+		cerr << "Error in printKssdResult(), cannot open file: " << outputFile << endl;
+		exit(1);
+	}
 	
 	if(sketchByFile)
 	{
@@ -106,6 +110,10 @@ void printResult(vector<vector<int>>& cluster, vector<SketchInfo>& sketches, boo
 {
 	//cerr << "output the result into: " << outputFile << endl;
 	FILE *fp = fopen(outputFile.c_str(), "w");
+	if(!fp){
+		cerr << "Error in printResult(), cannot open file: " << outputFile << endl;
+		exit(1);
+	}
 	
 	if(sketchByFile)
 	{
@@ -134,6 +142,25 @@ void printResult(vector<vector<int>>& cluster, vector<SketchInfo>& sketches, boo
 	}//end sketchBySequence
 	fclose(fp);
 
+}
+
+void saveKssdMST(vector<KssdSketchInfo>& sketches, vector<EdgeInfo>& mst, string folderPath, bool sketchByFile){
+	save_kssd_genome_info(sketches, folderPath, "mst", sketchByFile);
+	string file_mst = folderPath + '/' + "edge.mst";
+	FILE* fp_mst = fopen(file_mst.c_str(), "w+");
+	if(!fp_mst){
+		cerr << "ERROR: saveKsdMST(), cannot open the file: " <<  file_mst << endl;
+		exit(1);
+	}
+	size_t mst_size = mst.size();
+	fwrite(&mst_size, sizeof(size_t), 1, fp_mst);
+	for(size_t i = 0; i < mst.size(); i++){
+		fwrite(&mst[i].preNode, sizeof(int), 1, fp_mst);
+		fwrite(&mst[i].sufNode, sizeof(int), 1, fp_mst);
+		fwrite(&mst[i].dist, sizeof(double), 1, fp_mst);
+	}
+	fclose(fp_mst);
+	cerr << "-----save the kssd mst into: " << folderPath << endl;
 }
 
 void saveMST(vector<SketchInfo>& sketches, vector<EdgeInfo>& mst, string folderPath, bool sketchByFile){
@@ -186,6 +213,17 @@ void saveANI(string folderPath, uint64_t* aniArr, int sketch_func_id){
 	fwrite(aniArr, sizeof(uint64_t), 101, fp_ani);
 	fclose(fp_ani);
 	cerr << "-----save the ani file into: " << file_ani << endl;
+}
+
+void print_kssd_newick_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
+	string res_newick_tree = get_kssd_newick_tree(sketches, mst, sketch_by_file);
+	FILE* fp_tree = fopen(output.c_str(), "w");
+	if(!fp_tree){
+		cerr << "ERROR: print_newick_tree(), cannot write file: " << output << endl;
+		exit(1);
+	}
+	fprintf(fp_tree, "%s\n", res_newick_tree.c_str());
+	fclose(fp_tree);
 }
 
 void print_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
