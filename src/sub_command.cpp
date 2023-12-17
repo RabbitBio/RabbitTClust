@@ -409,7 +409,7 @@ void clust_from_genome_fast(const string inputFile, string outputFile, string fo
 
 }
 
-void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool no_dense, bool sketchByFile, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, double threshold, bool isSave, int threads){
+void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, double threshold, bool isSave, int threads){
 	vector<vector<int>> cluster;
 	double t2 = get_sec();
 //======clust-mst=======================================================================
