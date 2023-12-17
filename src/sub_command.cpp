@@ -528,6 +528,72 @@ void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree
 	compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, folder_path, sketch_func_id, threshold, isSave, threads);
 }
 
+bool tune_kssd_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, int& kmerSize, double& threshold, int &drlevel){
+	uint64_t maxSize, minSize, averageSize;
+	calSize(sketchByFile, inputFile, threads, minLen, maxSize, minSize, averageSize);
+	
+	//======tune the sketch_size===============
+	int compression = 1 << (4 * drlevel);
+	int sketchSize = averageSize / compression;
+	//=====tune the kmer_size===============
+	double warning_rate = 0.01;
+	double recommend_rate = 0.0001;
+	int alphabetSize = 4;//for "AGCT"
+	int recommendedKmerSize = ceil(log(maxSize * (1 - recommend_rate) / recommend_rate) / log(4));
+	int warningKmerSize = ceil(log(maxSize * (1 - warning_rate) / warning_rate) / log(4));
+	if(!isSetKmer){
+		kmerSize = recommendedKmerSize;
+	}
+	else{
+		if(kmerSize < warningKmerSize){
+			cerr << "the kmerSize " << kmerSize << " is too small for the maximum genome size of " << maxSize << endl;
+			cerr << "replace the kmerSize to the: " << recommendedKmerSize << " for reducing the random collision of kmers" << endl;
+			kmerSize = recommendedKmerSize;
+		}
+		else if(kmerSize > recommendedKmerSize + 3){
+			cerr << "the kmerSize " << kmerSize << " maybe too large for the maximum genome size of " << maxSize << endl;
+			cerr << "replace the kmerSize to the " << recommendedKmerSize << " for increasing the sensitivity of genome comparison" << endl;
+			kmerSize = recommendedKmerSize;
+		}
+	}
+
+	//=====tune the distance threshold===============
+	double minJaccard = 0.001;
+	if(!isContainment){
+		minJaccard = 1.0 / sketchSize;
+	}
+	else{
+		//minJaccard = 1.0 / (averageSize / containCompress);
+		minJaccard = 1.0 / (minSize / compression);
+	}
+
+	double maxDist;
+	if(minJaccard >= 1.0)	
+		maxDist = 1.0;
+	else
+		maxDist = -1.0 / kmerSize * log(2*minJaccard / (1.0 + minJaccard));
+	cerr << "-----the max recommand distance threshold is: " << maxDist << endl;
+	if(threshold > maxDist){
+		cerr << "ERROR: tune_parameters(), the threshold: " << threshold << " is out of the valid distance range estimated by Mash distance or AAF distance" << endl;
+		cerr << "Please set a distance threshold with -d option" << endl;
+		return false;
+	}
+
+	#ifdef DEBUG
+	if(sketchByFile) cerr << "-----sketch by file!" << endl;
+	else cerr << "-----sketch by sequence!" << endl;
+	cerr << "-----the kmerSize is: " << kmerSize << endl;
+	cerr << "-----the thread number is: " << threads << endl;
+	cerr << "-----the threshold is: " << threshold << endl;
+	if(isContainment)
+		cerr << "-----use the AAF distance (variable-sketch-size), the sketchSize is approximately in proportion with 1/" << compression << endl;
+	else
+		cerr << "-----use the Mash distance (fixed-sketch-size), the sketchSize is about: " << sketchSize << endl;
+	#endif
+
+	return true;
+}
+
 bool tune_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, bool& isJaccard, int& kmerSize, double& threshold, int& containCompress, int& sketchSize){
 	uint64_t maxSize, minSize, averageSize;
 	calSize(sketchByFile, inputFile, threads, minLen, maxSize, minSize, averageSize);

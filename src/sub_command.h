@@ -16,6 +16,7 @@ void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string ou
 void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool sketchByFile, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool isSave, int threads);
 
 bool tune_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, bool& isJaccard, int& kmerSize, double& threshold, int& containCompress, int& sketchSize);
+bool tune_kssd_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, int& kmerSize, double& threshold, int &drlevel);
 
 void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, double threshold, int threads);
 

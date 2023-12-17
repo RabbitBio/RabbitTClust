@@ -156,7 +156,7 @@ int main(int argc, char * argv[]){
 			append_clust_mst_fast(folder_path, inputFile, outputFile, is_newick_tree, sketchByFile, isContainment, minLen, noSave, threshold, threads);
 			return 0;
 		}
-		if(!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, isJaccard, kmerSize, threshold, containCompress, sketchSize)){
+		if(!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)){
 			return 1;
 		}
 		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
