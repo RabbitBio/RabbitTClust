@@ -46,7 +46,7 @@ vector<EdgeInfo> generateMST(vector<SketchInfo>& sketches, string sketchFunc, in
 
 vector<EdgeInfo> append_MST(vector<SketchInfo>& pre_sketches, vector<SketchInfo>& append_sketches, int sketch_func_id, int threads, int ** &denseArr, int denseSpan, uint64_t* &aniArr);
 
-vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sketch_func_id, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr);
+vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sketch_func_id, int threads, bool no_dense, int** &denseArr, int denseSpan, uint64_t* &aniArr);
 
 vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr);
 

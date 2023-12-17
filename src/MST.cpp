@@ -573,7 +573,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 }
 
 
-vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sketch_func_id, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr){
+vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sketch_func_id, int threads, bool no_dense, int** &denseArr, int denseSpan, uint64_t* &aniArr){
 	//int denseSpan = 10;
 	double step = 1.0 / denseSpan;
 	
@@ -648,16 +648,18 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
 				else	
 					break;
 
-				for(int t = 0; t < denseSpan; t++){
-					if(tmpDist <= distRadius[t]){
-						denseLocalArr[t * threads + thread_id][i]++;
-						denseLocalArr[t * threads + thread_id][j]++;
+				if(!no_dense){
+					for(int t = 0; t < denseSpan; t++){
+						if(tmpDist <= distRadius[t]){
+							denseLocalArr[t * threads + thread_id][i]++;
+							denseLocalArr[t * threads + thread_id][j]++;
+						}
 					}
+					double tmpANI = 1.0 - tmpDist;
+					int ANI = (int)(tmpANI / 0.01);
+					assert(ANI < 101);
+					threadsANI[thread_id][ANI]++;
 				}
-				double tmpANI = 1.0 - tmpDist;
-				int ANI = (int)(tmpANI / 0.01);
-				assert(ANI < 101);
-				threadsANI[thread_id][ANI]++;
 					
 				EdgeInfo tmpE{i, j, tmpDist};
 				mstArr[thread_id].push_back(tmpE);
@@ -678,22 +680,24 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
 	}
 	cerr << "-----finish the 100 % multiThreads mst generate" << endl;
 
-	for(int i = 0; i < 101; i++){
-		for(int j = 0; j < threads; j++){
-			aniArr[i] += threadsANI[j][i];
+	if(!no_dense){
+		for(int i = 0; i < 101; i++){
+			for(int j = 0; j < threads; j++){
+				aniArr[i] += threadsANI[j][i];
+			}
+		}
+		for(int i = 0; i < denseSpan; i++){
+			for(int j = 0; j < threads; j++){
+				for(int k = 0; k < N; k++){
+					denseArr[i][k] += denseLocalArr[i*threads+j][k];
+				}
+			}
 		}
 	}
 	for(int i = 0; i < threads; i++){
 		delete(threadsANI[i]);
 	}
 
-	for(int i = 0; i < denseSpan; i++){
-		for(int j = 0; j < threads; j++){
-			for(int k = 0; k < N; k++){
-				denseArr[i][k] += denseLocalArr[i*threads+j][k];
-			}
-		}
-	}
 	for(int i = 0; i < denseSpan * threads; i++){
 		delete(denseLocalArr[i]);
 	}
@@ -722,17 +726,19 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
 					tmpDist = sketches[i].OMH->distance(*sketches[j].OMH);
 				else	
 					break;
-
-				for(int t = 0; t < denseSpan; t++){
-					if(tmpDist <= distRadius[t]){
-						denseArr[t][i]++;
-						denseArr[t][j]++;
+				
+				if(!no_dense){
+					for(int t = 0; t < denseSpan; t++){
+						if(tmpDist <= distRadius[t]){
+							denseArr[t][i]++;
+							denseArr[t][j]++;
+						}
 					}
+					double tmpANI = 1.0 - tmpDist;
+					int ANI = (int)(tmpANI/0.01);
+					assert(ANI < 101);
+					aniArr[ANI]++;
 				}
-				double tmpANI = 1.0 - tmpDist;
-				int ANI = (int)(tmpANI/0.01);
-				assert(ANI < 101);
-				aniArr[ANI]++;
 
 				EdgeInfo tmpE{i, j, tmpDist};
 				mstArr[0].push_back(tmpE);
