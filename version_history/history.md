@@ -1,4 +1,9 @@
-# Latest version: `v.2.2.1` 
+# Latest version: `v.2.3.0` 
+* add `--fast` option for `clust-mst` to use the more efficient Kssd sketch strategy when computing the all-vs-all genome distances.
+    * The `--fast` option can work together with `--append`, `--presketched`, and `--premsted` options.
+    * the `--drlevel` is used for setting the dimention reduction level for Kssd sketches. Default value is 3, which is corresponding to a dimention reduction of $1 / 2^{(4*3)} = 1/4096$.
+
+## [`v.2.2.1`](v.2.2.1.md)
 * add `--newick-tree` option to output the Newick tree format for `clust-mst`.
 
 ## [`v.2.2.0`](v.2.2.0.md)
