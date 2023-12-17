@@ -65,7 +65,7 @@ void append_clust_greedy(string folder_path, string input_file, string output_fi
 #endif
 
 #ifndef GREEDY_CLUST
-void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads){
+void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool no_dense, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads){
 	bool isSave = !no_save;
 	int sketch_func_id_0; 
 	vector<KssdSketchInfo> pre_sketches; 
@@ -77,16 +77,12 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	}
 	vector<EdgeInfo> pre_mst;
 	loadMST(folder_path, pre_mst);
-	//int sketch_func_id_1, kmer_size, contain_compress, sketch_size, half_k, half_subk, drlevel;
-	//bool is_containment;
 	int kmer_size = pre_info.half_k * 2;
 	int drlevel = pre_info.drlevel;
-	
 
 	cerr << "---the thread number is: " << threads << endl;
 	cerr << "---the threshold is: " << threshold << endl;
 
-	//vector<SketchInfo> append_sketches;
 	vector<KssdSketchInfo> append_sketches;
 	KssdParameters append_info;
 	string append_folder_path;
@@ -106,18 +102,18 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	}
 	transSketches(final_sketches, append_info, new_folder_path, threads);
 
-
 	int ** pre_dense_arr;
 	uint64_t* pre_ani_arr;
 	int pre_dense_span;
 	int pre_genome_number;
-	loadDense(pre_dense_arr, folder_path, pre_dense_span, pre_genome_number);
+	if(!no_dense){
+		loadDense(pre_dense_arr, folder_path, pre_dense_span, pre_genome_number);
+	}
 
 	int ** dense_arr;
 	int dense_span = DENSE_SPAN;
 	uint64_t* ani_arr;
-	vector<EdgeInfo> append_mst = compute_kssd_mst(final_sketches, append_info, new_folder_path, pre_sketch_size, isContainment, threads, dense_arr, dense_span, ani_arr);
-	cerr << "finish the append_Mst"<< endl;
+	vector<EdgeInfo> append_mst = compute_kssd_mst(final_sketches, append_info, new_folder_path, pre_sketch_size, no_dense, isContainment, threads, dense_arr, dense_span, ani_arr);
 	vector<EdgeInfo> final_graph;
 	final_graph.insert(final_graph.end(), pre_mst.begin(), pre_mst.end());
 	final_graph.insert(final_graph.end(), append_mst.begin(), append_mst.end());
@@ -134,50 +130,53 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 
 	vector<EdgeInfo> forest = generateForest(final_mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, final_sketches.size());
-	//printResult(tmpClust, final_sketches, pre_sketch_by_file, output_file);
 	printKssdResult(tmpClust, final_sketches, pre_sketch_by_file, output_file);
 	cerr << "-----write the cluster result into: " << output_file << endl;
 	cerr << "-----the cluster number of: " << output_file << " is: " << tmpClust.size() << endl;
-	
-	loadANI(folder_path, pre_ani_arr, sketch_func_id_0);
-	for(int i = 0; i < 101; i++)
-		ani_arr[i] += pre_ani_arr[i];
-	for(int i = 0; i < pre_dense_span; i++){
-		for(int j = 0; j < pre_genome_number; j++){
-			dense_arr[i][j] += pre_dense_arr[i][j];
-		}
-	}
-
 	if(!no_save){
-		saveANI(new_folder_path, ani_arr, sketch_func_id_0);
-		saveDense(new_folder_path, dense_arr, dense_span, final_sketches.size());
 		saveKssdMST(final_sketches, final_mst, new_folder_path, sketch_by_file);
 	}
 
-
-	int alpha = 2;
-	int denseIndex = threshold / 0.01;
-	vector<int> totalNoiseArr;
-	for(int i = 0; i < tmpClust.size(); i++){
-		if(tmpClust[i].size() == 1) continue;
-		vector<PairInt> curDenseArr;
-		set<int> denseSet;
-		for(int j = 0; j < tmpClust[i].size(); j++){
-			int element = tmpClust[i][j];
-			PairInt p(element, dense_arr[denseIndex][element]);
-			denseSet.insert(dense_arr[denseIndex][element]);
-			curDenseArr.push_back(p);
+	if(!no_dense){
+		loadANI(folder_path, pre_ani_arr, sketch_func_id_0);
+		for(int i = 0; i < 101; i++)
+			ani_arr[i] += pre_ani_arr[i];
+		for(int i = 0; i < pre_dense_span; i++){
+			for(int j = 0; j < pre_genome_number; j++){
+				dense_arr[i][j] += pre_dense_arr[i][j];
+			}
 		}
-		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
-		totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
+
+		if(!no_save){
+			saveANI(new_folder_path, ani_arr, sketch_func_id_0);
+			saveDense(new_folder_path, dense_arr, dense_span, final_sketches.size());
+		}
+
+		int alpha = 2;
+		int denseIndex = threshold / 0.01;
+		vector<int> totalNoiseArr;
+		for(int i = 0; i < tmpClust.size(); i++){
+			if(tmpClust[i].size() == 1) continue;
+			vector<PairInt> curDenseArr;
+			set<int> denseSet;
+			for(int j = 0; j < tmpClust[i].size(); j++){
+				int element = tmpClust[i][j];
+				PairInt p(element, dense_arr[denseIndex][element]);
+				denseSet.insert(dense_arr[denseIndex][element]);
+				curDenseArr.push_back(p);
+			}
+			vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
+			totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
+		}
+		cerr << "-----the total noiseArr size is: " << totalNoiseArr.size() << endl;
+		forest = modifyForest(forest, totalNoiseArr, threads);
+		vector<vector<int>> cluster = generateClusterWithBfs(forest, final_sketches.size());
+		string outputFileNew = output_file + ".removeNoise";
+		printKssdResult(cluster, final_sketches, pre_sketch_by_file, outputFileNew);
+		cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
+		cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 	}
-	cerr << "-----the total noiseArr size is: " << totalNoiseArr.size() << endl;
-	forest = modifyForest(forest, totalNoiseArr, threads);
-	vector<vector<int>> cluster = generateClusterWithBfs(forest, final_sketches.size());
-	string outputFileNew = output_file + ".removeNoise";
-	printKssdResult(cluster, final_sketches, pre_sketch_by_file, outputFileNew);
-	cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
-	cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
+	
 }
 
 void append_clust_mst(string folder_path, string input_file, string output_file, bool is_newick_tree, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
@@ -303,7 +302,7 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 	cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
 	cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 }
-void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, double threshold, int threads){
+void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, double threshold, int threads){
 	vector<KssdSketchInfo> sketches;
 	vector<EdgeInfo> mst;
 	vector<vector<int>> cluster;
@@ -321,33 +320,35 @@ void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_t
 	printKssdResult(tmpClust, sketches, sketchByFile, outputFile);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
 	cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
-	int **denseArr;
-	int genome_number = sketches.size();
-	int denseSpan = DENSE_SPAN;
-	loadDense(denseArr, folder_path, denseSpan, genome_number);
-	int alpha = 2;
-	int denseIndex = threshold / 0.01;
-	vector<int> totalNoiseArr;
-	for(int i = 0; i < tmpClust.size(); i++){
-		if(tmpClust[i].size() == 1) continue;
-		vector<PairInt> curDenseArr;
-		set<int> denseSet;
-		for(int j = 0; j < tmpClust[i].size(); j++){
-			int element = tmpClust[i][j];
-			PairInt p(element, denseArr[denseIndex][element]);
-			denseSet.insert(denseArr[denseIndex][element]);
-			curDenseArr.push_back(p);
+	if(!no_dense){
+		int **denseArr;
+		int genome_number = sketches.size();
+		int denseSpan = DENSE_SPAN;
+		loadDense(denseArr, folder_path, denseSpan, genome_number);
+		int alpha = 2;
+		int denseIndex = threshold / 0.01;
+		vector<int> totalNoiseArr;
+		for(int i = 0; i < tmpClust.size(); i++){
+			if(tmpClust[i].size() == 1) continue;
+			vector<PairInt> curDenseArr;
+			set<int> denseSet;
+			for(int j = 0; j < tmpClust[i].size(); j++){
+				int element = tmpClust[i][j];
+				PairInt p(element, denseArr[denseIndex][element]);
+				denseSet.insert(denseArr[denseIndex][element]);
+				curDenseArr.push_back(p);
+			}
+			vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
+			totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
 		}
-		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
-		totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
+		cerr << "-----the total noiseArr size is: " << totalNoiseArr.size() << endl;
+		forest = modifyForest(forest, totalNoiseArr, threads);
+		cluster = generateClusterWithBfs(forest, sketches.size());
+		string outputFileNew = outputFile + ".removeNoise";
+		printKssdResult(cluster, sketches, sketchByFile, outputFileNew);
+		cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
+		cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 	}
-	cerr << "-----the total noiseArr size is: " << totalNoiseArr.size() << endl;
-	forest = modifyForest(forest, totalNoiseArr, threads);
-	cluster = generateClusterWithBfs(forest, sketches.size());
-	string outputFileNew = outputFile + ".removeNoise";
-	printKssdResult(cluster, sketches, sketchByFile, outputFileNew);
-	cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
-	cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 }
 
 void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, double threshold, int threads){
@@ -398,32 +399,34 @@ void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, 
 }
 #endif
 
-void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads){
+void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads){
 	bool isSave = !noSave;
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
 	compute_kssd_sketches(sketches, info, isSave, inputFile, folder_path, sketchByFile, minLen, kmerSize, drlevel, threads);
 	transSketches(sketches, info, folder_path, threads);
-	compute_kssd_clusters(sketches, info, sketchByFile, isContainment, folder_path, outputFile, is_newick_tree, threshold, isSave, threads);
+	compute_kssd_clusters(sketches, info, sketchByFile, no_dense, isContainment, folder_path, outputFile, is_newick_tree, threshold, isSave, threads);
 
 }
 
-void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, double threshold, bool isSave, int threads){
+void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool no_dense, bool sketchByFile, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, double threshold, bool isSave, int threads){
 	vector<vector<int>> cluster;
 	double t2 = get_sec();
 //======clust-mst=======================================================================
 	int **denseArr;
 	uint64_t* aniArr; //= new uint64_t[101];
 	int denseSpan = DENSE_SPAN;
-	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, isContainment, threads, denseArr, denseSpan, aniArr);
+	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, no_dense, isContainment, threads, denseArr, denseSpan, aniArr);
 	double t3 = get_sec();
 	#ifdef Timer
 	cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
 	#endif
 	//string sketch_func_id = "fast_kssd_sketch";
 	 if(isSave){
-	 	saveANI(folder_path, aniArr, 1);
-	 	saveDense(folder_path, denseArr, denseSpan, sketches.size());
+		if(!no_dense){
+	 		saveANI(folder_path, aniArr, 1);
+	 		saveDense(folder_path, denseArr, denseSpan, sketches.size());
+		}
 	 	saveKssdMST(sketches, mst, folder_path, sketchByFile);
 	 }
 	double t4 = get_sec();
@@ -438,42 +441,37 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 		cerr << "-----write the newick tree into: " << output_newick_file << endl;
 	}
 
-
-//	for(int i = 0; i < denseSpan; i++){
-//		for(int j = 0; j < sketches.size(); j++){
-//			cout << denseArr[i][j] << endl;
-//		}
-//	}
-	
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
 	printKssdResult(tmpClust, sketches, sketchByFile, outputFile);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
 	cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
 	//tune cluster by noise cluster
-	int alpha = 2;
-	int denseIndex = threshold / 0.01;
-	vector<int> totalNoiseArr;
-	for(int i = 0; i < tmpClust.size(); i++){
-		if(tmpClust[i].size() == 1) continue;
-		vector<PairInt> curDenseArr;
-		set<int> denseSet;
-		for(int j = 0; j < tmpClust[i].size(); j++){
-			int element = tmpClust[i][j];
-			PairInt p(element, denseArr[denseIndex][element]);
-			denseSet.insert(denseArr[denseIndex][element]);
-			curDenseArr.push_back(p);
+	if(!no_dense){
+		int alpha = 2;
+		int denseIndex = threshold / 0.01;
+		vector<int> totalNoiseArr;
+		for(int i = 0; i < tmpClust.size(); i++){
+			if(tmpClust[i].size() == 1) continue;
+			vector<PairInt> curDenseArr;
+			set<int> denseSet;
+			for(int j = 0; j < tmpClust[i].size(); j++){
+				int element = tmpClust[i][j];
+				PairInt p(element, denseArr[denseIndex][element]);
+				denseSet.insert(denseArr[denseIndex][element]);
+				curDenseArr.push_back(p);
+			}
+			vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
+			totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
 		}
-		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
-		totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
+		cerr << "-----the total noiseArr size is: " << totalNoiseArr.size() << endl;
+		forest = modifyForest(forest, totalNoiseArr, threads);
+		cluster = generateClusterWithBfs(forest, sketches.size());
+		string outputFileNew = outputFile + ".removeNoise";
+		printKssdResult(cluster, sketches, sketchByFile, outputFileNew);
+		cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
+		cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 	}
-	cerr << "-----the total noiseArr size is: " << totalNoiseArr.size() << endl;
-	forest = modifyForest(forest, totalNoiseArr, threads);
-	cluster = generateClusterWithBfs(forest, sketches.size());
-	string outputFileNew = outputFile + ".removeNoise";
-	printKssdResult(cluster, sketches, sketchByFile, outputFileNew);
-	cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
-	cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 	
 	double t5 = get_sec();
 	#ifdef Timer
@@ -680,7 +678,7 @@ bool tune_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int th
 	return true;
 }
 
-void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool isContainment, double threshold, int threads){
+void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, bool isContainment, double threshold, int threads){
 	vector<KssdSketchInfo> sketches;
 	vector<vector<int>> cluster;
 	bool sketchByFile;
@@ -699,7 +697,7 @@ void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newic
 	uint64_t* aniArr; //= new uint64_t[101];
 	int denseSpan = DENSE_SPAN;
 	//vector<EdgeInfo> mst = modifyMST(sketches, 0, sketch_func_id, threads, denseArr, denseSpan, aniArr);
-	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, isContainment, threads, denseArr, denseSpan, aniArr);
+	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, no_dense, isContainment, threads, denseArr, denseSpan, aniArr);
 	double time2 = get_sec();
 	#ifdef Timer
 	cerr << "========time of generateMST is: " << time2 - time1 << "========" << endl;
@@ -715,29 +713,31 @@ void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newic
 	cerr << "-----write the cluster result into: " << outputFile << endl;
 	cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
 
-	int alpha = 2;
-	int denseIndex = threshold / 0.01;
-	vector<int> totalNoiseArr;
-	for(int i = 0; i < tmpClust.size(); i++){
-		if(tmpClust[i].size() == 1) continue;
-		vector<PairInt> curDenseArr;
-		set<int> denseSet;
-		for(int j = 0; j < tmpClust[i].size(); j++){
-			int element = tmpClust[i][j];
-			PairInt p(element, denseArr[denseIndex][element]);
-			denseSet.insert(denseArr[denseIndex][element]);
-			curDenseArr.push_back(p);
+	if(!no_dense){
+		int alpha = 2;
+		int denseIndex = threshold / 0.01;
+		vector<int> totalNoiseArr;
+		for(int i = 0; i < tmpClust.size(); i++){
+			if(tmpClust[i].size() == 1) continue;
+			vector<PairInt> curDenseArr;
+			set<int> denseSet;
+			for(int j = 0; j < tmpClust[i].size(); j++){
+				int element = tmpClust[i][j];
+				PairInt p(element, denseArr[denseIndex][element]);
+				denseSet.insert(denseArr[denseIndex][element]);
+				curDenseArr.push_back(p);
+			}
+			vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
+			totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
 		}
-		vector<int> curNoiseArr = getNoiseNode(curDenseArr, alpha);
-		totalNoiseArr.insert(totalNoiseArr.end(), curNoiseArr.begin(), curNoiseArr.end());
+		cerr << "-----the total noiseArr size is: " << totalNoiseArr.size() << endl;
+		forest = modifyForest(forest, totalNoiseArr, threads);
+		cluster = generateClusterWithBfs(forest, sketches.size());
+		string outputFileNew = outputFile + ".removeNoise";
+		printKssdResult(cluster, sketches, sketchByFile, outputFileNew);
+		cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
+		cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 	}
-	cerr << "-----the total noiseArr size is: " << totalNoiseArr.size() << endl;
-	forest = modifyForest(forest, totalNoiseArr, threads);
-	cluster = generateClusterWithBfs(forest, sketches.size());
-	string outputFileNew = outputFile + ".removeNoise";
-	printKssdResult(cluster, sketches, sketchByFile, outputFileNew);
-	cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
-	cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 	double time3 = get_sec();
 	#ifdef Timer
 	cerr << "========time of generator forest and cluster is: " << time3 - time2 << "========" << endl;

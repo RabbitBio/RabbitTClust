@@ -78,6 +78,7 @@ int main(int argc, char * argv[]){
 	string folder_path;
 	bool is_newick_tree = false;
 	bool is_fast = false;
+	bool no_dense = false;
 
 	bool noSave = false;
 
@@ -100,6 +101,7 @@ int main(int argc, char * argv[]){
 	auto flag_newick_tree = app.add_flag("--newick-tree", is_newick_tree, "output the newick tree format file for clust-mst");
 	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing for clust-mst");
 	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
+	auto flag_no_dense = app.add_flag("--no-dense", no_dense, "not calculate the density and ANI datas");
 #endif
 	auto option_append = app.add_option("--append", inputFile, "append genome file or file list with the pre-generated sketch or MST files");
 
@@ -142,11 +144,11 @@ int main(int argc, char * argv[]){
 //======clust-mst=========================================================================
 	if(is_fast){
 		if(*option_premsted && !*option_append){
-			clust_from_mst_fast(folder_path, outputFile, is_newick_tree, threshold, threads);
+			clust_from_mst_fast(folder_path, outputFile, is_newick_tree, no_dense, threshold, threads);
 			return 0;
 		}
 		if(*option_presketched && !*option_append){
-			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, isContainment, threshold, threads);
+			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, no_dense, isContainment, threshold, threads);
 			return 0;
 		}
 		if(*option_append && !*option_premsted && !*option_presketched){
@@ -154,13 +156,13 @@ int main(int argc, char * argv[]){
 			return 1;
 		}
 		if(*option_append && (*option_presketched || *option_premsted)){
-			append_clust_mst_fast(folder_path, inputFile, outputFile, is_newick_tree, sketchByFile, isContainment, minLen, noSave, threshold, threads);
+			append_clust_mst_fast(folder_path, inputFile, outputFile, is_newick_tree, no_dense, sketchByFile, isContainment, minLen, noSave, threshold, threads);
 			return 0;
 		}
 		if(!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)){
 			return 1;
 		}
-		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
+		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
 		return 0;
 	}
 
