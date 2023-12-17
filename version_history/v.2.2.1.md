@@ -1,12 +1,12 @@
 ![RabbitTClust](rabbittclust.png)
 
-# `RabbitTClust v.2.3.0`
+# `RabbitTClust v.2.2.1`
 RabbitTClust is a fast and memory-efficient genome clustering tool based on sketch-based distance estimations.
 It enables processing of large-scale datasets by combining dimensionality reduction techniques with streaming and parallelization on modern multi-core platforms.
 RabbitTClust supports classical single-linkage hierarchical (clust-mst) and greedy incremental clustering (clust-greedy) algorithms for different scenarios. 
 
 ## Installation
-`RabbitTClust v.2.3.0` can only support 64-bit Linux Systems.
+`RabbitTClust v.2.2.1` can only support 64-bit Linux Systems.
 
 The detailed update information for this version, as well as the version history, can be found in the [`version_history`](version_history/history.md) document.
 
@@ -41,7 +41,6 @@ Options:
   --presketched TEXT          clustering by the pre-generated sketch files rather than genomes
   --premsted TEXT             clustering by the pre-generated mst files rather than genomes for clust-mst
   --newick-tree               output the newick tree format file for clust-mst
-  --fast                      use the kssd algorithm for sketching and distance computing for clust-mst
   --append TEXT Excludes: --input
                               append genome file or file list with the pre-generated sketch or MST files
 
@@ -104,10 +103,6 @@ Options:
 # v.2.2.1 or later
 # output the newick tree format for clust-mst, use the --newick-tree flag.
 ./clust-mst -l -i bacteria.list --newick-tree -o bacteria.mst.clust 
-
-# v.2.3.0 or later
-# use the efficient Kssd sketch strategy for clust-mst, use the --fast flag.
-./clust-mst --fast -l -i bacteria.list -o bacteria.fast.mst.clust
 ```
 ## Output
 The output file is in a CD-HIT output format and is slightly different when running with or without `-l` input option.  

@@ -14,12 +14,15 @@ struct ClusterInfo{
 
 void print_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output);
 void printResult(std::vector<std::vector<int>>& clusterOrigin, std::vector<SketchInfo>& sketches, bool sketchByFile, string outputFile);
+void printKssdResult(vector<vector<int>>& cluster, vector<KssdSketchInfo>& sketches, bool sketchByFile, string outputFile);
+void print_kssd_newick_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output);
 
 void loadMST(string folderPath, vector<EdgeInfo>& mst);
 void loadDense(int** &denseArr, string folderPath, int& denseSpan, int& genome_number);
 void loadANI(string folderPath, uint64_t* &aniArr, int sketch_func_id);
 
 void saveMST(vector<SketchInfo>& sketches, vector<EdgeInfo>& mst, string folderPath, bool sketchByFile);
+void saveKssdMST(vector<KssdSketchInfo>& sketches, vector<EdgeInfo>& mst, string folderPath, bool sketchByFile);
 void saveDense(string folderPath, int** denseArr, int denseSpan, int genome_number);
 void saveANI(string folderPath, uint64_t* aniArr, int sketch_func_id);
 

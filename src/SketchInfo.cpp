@@ -21,6 +21,8 @@
 
 #include "common.hpp"
 
+#define _64MASK 0xffffffffffffffffLLU
+
 KSEQ_INIT(gzFile, gzread);
 using namespace std;
 
@@ -38,6 +40,49 @@ bool cmpSeqSize(SketchInfo s1, SketchInfo s2){
 	else return false;
 }
 
+int * shuffle(int arr[], int length, uint64_t seed)
+
+{
+	if(length > RAND_MAX){
+		fprintf(stderr, "shuffling array length %d must be less than RAND_MAX: %d", length, RAND_MAX);
+		exit(1);
+	}
+	srand(seed);
+	int j, tmp;
+	for(int i = length-1; i > 0; i--)
+	{
+		j = rand() % (i + 1);
+		tmp = arr[i];
+		arr[i] = arr[j];
+		arr[j] = tmp;
+	}
+	
+	return arr;
+}
+
+int * shuffleN(int n, int base)
+{
+	int * arr;
+	arr = (int* ) malloc(n * sizeof(int));
+	for(int i = 0; i < n; i++){
+		arr[i] = i + base;
+	}
+	
+	return shuffle(arr, n, 23);
+}
+
+int * generate_shuffle_dim(int half_subk){
+	int dim_size = 1 << 4 * half_subk;
+	int * shuffled_dim = shuffleN(dim_size, 0);
+	shuffled_dim = shuffle(shuffled_dim, dim_size, 348842630);
+
+	//printf("print the shuffle_dim : \n");
+	//for(int i = 0; i < dim_size; i++)
+	//	printf("%lx\n", shuffled_dim[i]);
+	//exit(0);
+
+	return shuffled_dim;
+}
 
 #ifdef THREADPOOL_MINHASH
 struct SketchInput{
@@ -208,7 +253,138 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 	}
 
 }
+
+void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int minLen, int kmerSize, int drlevel, robin_hood::unordered_map<uint32_t, int> *shuffled_map, vector<KssdSketchInfo> *sketches){
+	static const int BaseMap[128] = 
+	{
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, 0, -1, 1, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, 0, -1, 1, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+	};
+	// generate the shuffle file.
+	int half_k = (kmerSize + 1) / 2;
+	bool use64 = half_k - drlevel > 8 ? true : false;
+	int half_subk = 6 - drlevel >= 2 ? 6 : drlevel + 2;
+	int dim_size = 1 << 4 * half_subk;
+	int dim_start = 0;
+	int dim_end = 1 << 4 * (half_subk - drlevel);
+
+	int comp_bittl = 64 - 4 * half_k;
+	int half_outctx_len = half_k - half_subk;
+	int rev_add_move = 4 * half_k - 2;
+	//cout << "the comp_bittl is: " << comp_bittl << endl;
+
+	uint64_t tupmask = _64MASK >> comp_bittl;
+	uint64_t domask = (tupmask >> (4 * half_outctx_len)) << (2 * half_outctx_len);
+	uint64_t undomask = (tupmask ^ domask) & tupmask;
+	uint64_t undomask1 = undomask &	(tupmask >> ((half_k + half_subk) * 2));
+	uint64_t undomask0 = undomask ^ undomask1;
+
+
+	rabbit::int64 id = 0;
+	rabbit::fa::FastaChunk *faChunk;
+	uint64_t totalLength = 0;
+	while(dq.Pop(id, faChunk)){
+		std::vector<Reference> data;
+		int ref_num = rabbit::fa::chunkListFormat(*faChunk, data);
+		for(Reference &r: data){
+			string name = r.name;
+			string comment = r.comment;
+			int length = r.length;
+			if(length < minLen) continue;
+			SequenceInfo curSeq{name, comment, 0, length};
+
+			//SketchInfo tmpSketchInfo; 
+			KssdSketchInfo tmpKssdSketchInfo;
+			tmpKssdSketchInfo.seqInfo = curSeq;
+
+			// parse the sequences 
+			unordered_set<uint32_t> hashValueSet;
+			unordered_set<uint64_t> hashValueSet64;
+
+			uint64_t tuple = 0LLU, rvs_tuple = 0LLU, uni_tuple, dr_tuple, pfilter;
+			int base = 1;
+			//slide window to generate k-mers and get hashes
+			for(int i = 0; i < length; i++)
+			{
+				//char ch = sequence[i];
+				char ch = r.seq[i];
+				int basenum = BaseMap[(int)ch];
+				if(basenum != -1)
+				{
+					tuple = ((tuple << 2) | basenum) & tupmask;
+					rvs_tuple = (rvs_tuple >> 2) + (((uint64_t)basenum ^3LLU) << rev_add_move); 
+					base++;
+				}
+				else{
+					base = 1;
+
+				}
+				if(base > kmerSize)
+				{
+					uni_tuple = tuple < rvs_tuple ? tuple : rvs_tuple;
+					int dim_id = (uni_tuple & domask) >> (half_outctx_len * 2);
+
+					//pfilter = shuffled_dim[dim_id];
+					//if((pfilter >= dim_end) || (pfilter < dim_start)){
+					//	continue;
+					//}
+
+					if(shuffled_map->count(dim_id) == 0){
+						continue;
+					}
+					pfilter = (*shuffled_map)[dim_id];
+
+					pfilter -= dim_start;
+					//dr_tuple = (((uni_tuple & undomask0) + ((uni_tuple & undomask1) << (kmer_size * 2 - half_outctx_len * 4))) >> (drlevel * 4)) + pfilter; 
+					////only when the dim_end is 4096(the pfilter is 12bit in binary and the lowerst 12bit is all 0 
+					dr_tuple = (((uni_tuple & undomask0) | ((uni_tuple & undomask1) << (kmerSize * 2 - half_outctx_len * 4))) >> (drlevel * 4)) | pfilter; 
+
+					if(use64)
+						hashValueSet64.insert(dr_tuple);
+					else
+						hashValueSet.insert(dr_tuple);
+				}//end if, i > kmer_size
+			}//end for, of a sequence 
+
+			vector<uint32_t> hashArr32;
+			vector<uint64_t> hashArr64;
+			if(use64){
+				for(auto x : hashValueSet64){
+					hashArr64.push_back(x);
+				}
+			}
+			else{
+				for(auto x : hashValueSet){
+					hashArr32.push_back(x);
+				}
+			}
+
+			tmpKssdSketchInfo.id = r.gid;
+			tmpKssdSketchInfo.totalSeqLength = length;
+			tmpKssdSketchInfo.use64 = use64;
+			tmpKssdSketchInfo.hash32_arr = hashArr32;
+			tmpKssdSketchInfo.hash64_arr = hashArr64;
+			sketches->push_back(tmpKssdSketchInfo);
+
+		}
+		rabbit::fa::FastaDataChunk *tmp = faChunk->chunk;
+		do{
+			if(tmp != NULL){
+			fastaPool->Release(tmp);
+			tmp = tmp->next;
+			}
+		}while(tmp!=NULL);
+	}//end while loop for this file
+}
+
 #endif
+
 
 void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, uint64_t &maxSize, uint64_t& minSize, uint64_t& averageSize){
 	maxSize = 0;
@@ -326,6 +502,65 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, 
 	cerr << "\t===the averageSize is: " << averageSize << endl;
 }
 
+bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
+	int sufIndex = inputFile.find_last_of('.');
+	string sufName = inputFile.substr(sufIndex+1);
+	if(sufName != "fasta" && sufName != "fna" && sufName != "fa")
+	{
+		cerr << "error input format file: " << inputFile << endl;
+		cerr << "Only support FASTA files" << endl;
+		exit(0);
+	}
+#ifdef RABBIT_FX
+	int th = std::max(threads - 1, 1);//consumer threads number;
+	vector<KssdSketchInfo> sketchesArr[th];
+
+	int half_subk = 6 - drlevel >= 2 ? 6 : drlevel + 2;
+	int dim_size = 1 << 4 * half_subk;
+	int dim_start = 0;
+	int dim_end = 1 << 4 * (half_subk - drlevel);
+	int* shuffled_dim = generate_shuffle_dim(half_subk);
+	robin_hood::unordered_map<uint32_t, int> shuffled_map;
+	for(int t = 0; t < dim_size; t++){
+		if(shuffled_dim[t] < dim_end && shuffled_dim[t] >= dim_start){
+			shuffled_map.insert({t, shuffled_dim[t]});
+		}
+	}
+	
+	rabbit::fa::FastaDataPool *fastaPool = new rabbit::fa::FastaDataPool(256, 1<< 24);
+	FaChunkQueue queue1(128, 1);
+	//cout << "--------------------" << endl;
+	std::thread producer(producer_fasta_task, inputFile, fastaPool, std::ref(queue1));
+	std::thread **threadArr = new std::thread* [th];
+
+	for(int t = 0; t < th; t++){
+		threadArr[t] = new std::thread(std::bind(consumer_fasta_task_with_kssd, fastaPool, std::ref(queue1), minLen, kmerSize, drlevel, &shuffled_map, &sketchesArr[t]));
+	}
+	producer.join();
+	for(int t = 0; t < th; t++){
+		threadArr[t]->join();
+	}
+
+	for(int i = 0; i < th; i++){
+		for(int j = 0; j < sketchesArr[i].size(); j++){
+			sketches.push_back(sketchesArr[i][j]);
+			//similarityInfos.push_back(similarityInfosArr[i][j]);
+		}
+	}
+	int half_k = (kmerSize + 1) / 2;
+	//int half_subk = 6 - drlevel >= 2 ? 6 : drlevel + 2;
+	info.half_k = half_k;
+	info.half_subk = half_subk;
+	info.drlevel = drlevel;
+	info.id = (half_k << 8) + (half_subk << 4) + drlevel;
+	info.genomeNumber = sketches.size();
+	
+	return true;
+#else
+	cerr << "need the RabbitFX to parse the genome sequences" << endl;
+	return false;
+#endif
+}
 
 
 bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
@@ -711,6 +946,305 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 	return true;
 }
 
+bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
+	fprintf(stderr, "-----input fileList, sketch by file\n");
+	ifstream ifs(inputFile);
+	if(!ifs){
+		fprintf(stderr, "error open the inputFile: %s\n", inputFile.c_str());
+		return false;
+	}
+	vector<string> fileList;
+	string fileName;
+	while(getline(ifs, fileName)){
+		fileList.push_back(fileName);
+	}
+
+	static const int BaseMap[128] = 
+	{
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, 0, -1, 1, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, 0, -1, 1, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1, -1, 
+	-1, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+	};
+	// generate the shuffle file.
+	int half_k = (kmerSize + 1) / 2;
+	kmerSize = half_k * 2;
+	bool use64 = half_k - drlevel > 8 ? true : false;
+	int half_subk = 6 - drlevel >= 2 ? 6 : drlevel + 2;
+	int dim_size = 1 << 4 * half_subk;
+	int dim_start = 0;
+	int dim_end = 1 << 4 * (half_subk - drlevel);
+	int* shuffled_dim = generate_shuffle_dim(half_subk);
+	info.half_k = half_k;
+	info.half_subk = half_subk;
+	info.drlevel = drlevel;
+	info.id = (half_k << 8) + (half_subk << 4) + drlevel;
+	info.genomeNumber = fileList.size();
+
+	int comp_bittl = 64 - 4 * half_k;
+	int half_outctx_len = half_k - half_subk;
+	int rev_add_move = 4 * half_k - 2;
+	//cout << "the comp_bittl is: " << comp_bittl << endl;
+
+	uint64_t tupmask = _64MASK >> comp_bittl;
+	uint64_t domask = (tupmask >> (4 * half_outctx_len)) << (2 * half_outctx_len);
+	uint64_t undomask = (tupmask ^ domask) & tupmask;
+	uint64_t undomask1 = undomask &	(tupmask >> ((half_k + half_subk) * 2));
+	uint64_t undomask0 = undomask ^ undomask1;
+
+	robin_hood::unordered_map<uint32_t, int> shuffled_map;
+	for(int t = 0; t < dim_size; t++){
+		if(shuffled_dim[t] < dim_end && shuffled_dim[t] >= dim_start){
+			shuffled_map.insert({t, shuffled_dim[t]});
+		}
+	}
+
+	// parse the sequences 
+	#pragma omp parallel for num_threads(threads) schedule(dynamic)
+	for (int i = 0; i < fileList.size(); i++){
+		//cerr << "start the file: " << fileList[i] << endl;
+		gzFile fp1;
+		kseq_t* ks1;
+		fp1 = gzopen(fileList[i].c_str(), "r");
+		if(fp1 == NULL){
+			fprintf(stderr, "cannot open the genome file: %s\n", fileList[i].c_str());
+			exit(1);
+			//return false;
+		}
+		ks1 = kseq_init(fp1);
+		uint64_t totalLength = 0;
+
+		Vec_SeqInfo curFileSeqs;
+		unordered_set<uint32_t> hashValueSet;
+		unordered_set<uint64_t> hashValueSet64;
+		
+		while(1){
+			int length = kseq_read(ks1);
+			if(length < 0){
+				break;
+			}
+			totalLength += length;
+			string name("noName");
+			string comment("noName");
+			if(ks1->name.s != NULL)
+				name = ks1->name.s;
+			if(ks1->comment.s != NULL)
+				comment = ks1->comment.s;
+			SequenceInfo tmpSeq{name, comment, 0, length};
+			uint64_t tuple = 0LLU, rvs_tuple = 0LLU, uni_tuple, dr_tuple, pfilter;
+			int base = 1;
+			//cerr << "the length is: " << length << endl;
+			//slide window to generate k-mers and get hashes
+			for(int i = 0; i < length; i++)
+			{
+				//char ch = sequence[i];
+				char ch = ks1->seq.s[i];
+				int basenum = BaseMap[(int)ch];
+				if(basenum != -1)
+				{
+					tuple = ((tuple << 2) | basenum) & tupmask;
+					rvs_tuple = (rvs_tuple >> 2) + (((uint64_t)basenum ^3LLU) << rev_add_move); 
+					base++;
+				}
+				else{
+					base = 1;
+
+				}
+				if(base > kmerSize)
+				{
+					uni_tuple = tuple < rvs_tuple ? tuple : rvs_tuple;
+					int dim_id = (uni_tuple & domask) >> (half_outctx_len * 2);
+
+					//pfilter = shuffled_dim[dim_id];
+					//if((pfilter >= dim_end) || (pfilter < dim_start)){
+					//	continue;
+					//}
+					
+					if(shuffled_map.count(dim_id) == 0){
+						continue;
+					}
+					pfilter = shuffled_map[dim_id];
+
+					pfilter -= dim_start;
+					//dr_tuple = (((uni_tuple & undomask0) + ((uni_tuple & undomask1) << (kmer_size * 2 - half_outctx_len * 4))) >> (drlevel * 4)) + pfilter; 
+					////only when the dim_end is 4096(the pfilter is 12bit in binary and the lowerst 12bit is all 0 
+					dr_tuple = (((uni_tuple & undomask0) | ((uni_tuple & undomask1) << (kmerSize * 2 - half_outctx_len * 4))) >> (drlevel * 4)) | pfilter; 
+					
+					if(use64)
+						hashValueSet64.insert(dr_tuple);
+					else
+						hashValueSet.insert(dr_tuple);
+				}//end if, i > kmer_size
+			}//end for, of a sequence 
+			//exit(0);
+			
+			//only save the info of the first sequence for reducing the memory footprint
+			//and the overhead of sorting the sketches vector array.
+			if(curFileSeqs.size() == 0)
+				curFileSeqs.push_back(tmpSeq);
+		}//end while, end sketch current file.
+
+		vector<uint32_t> hashArr32;
+		vector<uint64_t> hashArr64;
+		if(use64){
+			for(auto x : hashValueSet64){
+				hashArr64.push_back(x);
+			}
+		}
+		else{
+			for(auto x : hashValueSet){
+				hashArr32.push_back(x);
+			}
+		}
+
+		#pragma omp critical
+		{
+			KssdSketchInfo tmpKssdSketchInfo;
+
+			tmpKssdSketchInfo.id = i;
+			tmpKssdSketchInfo.fileName = fileList[i];
+			tmpKssdSketchInfo.totalSeqLength = totalLength;
+			tmpKssdSketchInfo.fileSeqs = curFileSeqs;
+			tmpKssdSketchInfo.use64 = use64;
+			tmpKssdSketchInfo.hash32_arr = hashArr32;
+			tmpKssdSketchInfo.hash64_arr = hashArr64;
+			if(totalLength >= minLen)//filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
+				sketches.push_back(tmpKssdSketchInfo);
+			if(i % 10000 == 0)	cerr << "---finished sketching: " << i << " genomes" << endl;
+		}
+
+		gzclose(fp1);
+		kseq_destroy(ks1);
+	}//end for
+
+	return true;
+}
+
+void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters& info, const string folder_path, int numThreads){
+	//cerr << "the folder path in transSKetch is: " << folder_path << endl;
+	double t0 = get_sec();
+	int half_k = info.half_k;
+	int drlevel = info.drlevel;
+	bool use64 = half_k - drlevel > 8 ? true : false;
+	if(use64)
+		cerr << "transSketches: use64" << endl;
+	else
+		cerr << "transSketches: not use64" << endl;
+
+	if(use64){
+		double t0 = get_sec();
+		robin_hood::unordered_map<uint64_t, vector<uint32_t>> hash_map_arr;
+		for(size_t i = 0; i < sketches.size(); i++){
+			//#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+			for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
+				uint64_t cur_hash = sketches[i].hash64_arr[j];
+				hash_map_arr.insert({cur_hash, vector<uint32_t>()});
+				hash_map_arr[cur_hash].push_back(i);
+			}
+		}
+		double t1 = get_sec();
+		#ifdef Timer_inner
+		cerr << "the time of generate the bloom dictionary and hash_map_arr is: " << t1 - t0 << endl;
+		#endif
+		size_t hash_number = hash_map_arr.size();
+		cerr << "the hash_number is: " << hash_number << endl;
+		size_t total_size = 0;
+		uint64_t* hash_arr = (uint64_t*)malloc(hash_number * sizeof(uint64_t));
+		uint32_t* hash_size_arr = (uint32_t*)malloc(hash_number * sizeof(uint32_t));
+		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
+		FILE* fp_dict = fopen((cur_dict_file).c_str(), "w+");
+		if(!fp_dict){
+			cerr << "ERROR: transSketches, cannot open dictFile: " << cur_dict_file << endl;
+			exit(1);
+		}
+		size_t cur_id = 0;
+		for(auto x : hash_map_arr){
+			hash_arr[cur_id] = x.first;
+			fwrite(x.second.data(), sizeof(uint32_t), x.second.size(), fp_dict);
+			hash_size_arr[cur_id] = x.second.size();
+			total_size += x.second.size();
+			cur_id++;
+		}
+		cerr << "the total size is: " << total_size << endl;
+		fclose(fp_dict);
+		double t2 = get_sec();
+		#ifdef Timer_inner
+		cerr << "the time of writing dictFile is: " << t2 - t1 << endl;
+		#endif
+
+		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
+		FILE* fp_index = fopen(cur_index_file.c_str(), "w+");
+		if(!fp_index){
+			cerr << "ERROR: transSketches, cannot open indexFile: " << cur_index_file << endl;
+			exit(1);
+		}
+		fwrite(&hash_number, sizeof(size_t), 1, fp_index);
+		fwrite(hash_arr, sizeof(uint64_t), hash_number, fp_index);
+		fwrite(hash_size_arr, sizeof(uint32_t), hash_number, fp_index);
+		fclose(fp_index);
+		double t3 = get_sec();
+		#ifdef Timer_inner
+		cerr << "the time of writing indexFile is: " << t3 - t2 << endl;
+		#endif
+	}
+	else{
+		size_t hashSize = 1LLU << (4 * (half_k - drlevel));
+		vector<vector<uint32_t>> hashMapId;
+		for(size_t i = 0; i < hashSize; i++){
+			hashMapId.push_back(vector<uint32_t>());
+		}
+		uint32_t* offsetArr = (uint32_t*)calloc(hashSize, sizeof(uint32_t));
+
+		cerr << "the hashSize is: " << hashSize << endl;
+		for(size_t i = 0; i < sketches.size(); i++){
+			#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+			for(size_t j = 0; j < sketches[i].hash32_arr.size(); j++){
+				uint32_t hash = sketches[i].hash32_arr[j];
+				hashMapId[hash].push_back(i);
+			}
+		}
+		double tt0 = get_sec();
+		#ifdef Timer_inner
+		cerr << "the time of generate the idx by multiple threads are: " << tt0 - t0 << endl;
+		#endif
+
+		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
+		FILE * fp0 = fopen(cur_dict_file.c_str(), "w+");
+		uint64_t totalIndex = 0;
+		for(size_t hash = 0; hash < hashSize; hash++){
+			offsetArr[hash] = 0;
+			if(hashMapId[hash].size() != 0){
+				fwrite(hashMapId[hash].data(), sizeof(uint32_t), hashMapId[hash].size(), fp0);
+				totalIndex += hashMapId[hash].size();
+				offsetArr[hash] = hashMapId[hash].size();
+			}
+		}
+		fclose(fp0);
+		
+		double t1 = get_sec();
+		#ifdef Timer_inner
+		cerr << "the time of merge multiple idx into final hashMap is: " << t1 - tt0 << endl;
+		#endif
+
+		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
+		FILE * fp1 = fopen(cur_index_file.c_str(), "w+");
+		fwrite(&hashSize, sizeof(size_t), 1, fp1);
+		fwrite(&totalIndex, sizeof(uint64_t), 1, fp1);
+		fwrite(offsetArr, sizeof(uint32_t), hashSize, fp1);
+		double t2 = get_sec();
+		fclose(fp1);
+		#ifdef Timer_inner
+		cerr << "the time of write output file is: " << t2 - t1 << endl;
+		#endif
+	}
+
+	//cerr << "the hashSize is: " << hashSize << endl;
+	//cerr << "the totalIndex is: " << totalIndex << endl;
+}
 
 
 
