@@ -230,6 +230,12 @@ bool loadKssdSketches(string folderPath, int threads, vector<KssdSketchInfo>& sk
 	FILE * fp_hash = fopen(hash_file.c_str(), "r");
 	if(!fp_hash){
 		cerr << "ERROR: loadKssdSketches(), cannot open the file: " << hash_file << endl;
+		string minHash_file = folderPath + '/' + "hash.sketch";
+		FILE * fp_tmp = fopen(minHash_file.c_str(), "r");
+		if(fp_tmp){
+			cerr << "Do you want to load the minHash sketches directory? Try again without '--fast' option" << endl;
+			fclose(fp_tmp);
+		}
 		exit(1);
 	}
 
@@ -280,6 +286,12 @@ bool loadSketches(string folderPath, int threads, vector<SketchInfo>& sketches, 
 	FILE * fp_hash = fopen(hash_file.c_str(), "r");
 	if(!fp_hash){
 		cerr << "ERROR: loadSketches(), cannot open the file: " << hash_file << endl;
+		string kssd_file = folderPath + '/' + "kssd.hash.sketch";
+		FILE * fp_tmp = fopen(kssd_file.c_str(), "r");
+		if(fp_tmp){
+			cerr << "Do you want to load the kssd sketches directory? Try again with '--fast' option" << endl;
+			fclose(fp_tmp);
+		}
 		exit(1);
 	}
 	fread(&sketch_func_id, sizeof(int), 1, fp_hash);
@@ -345,7 +357,13 @@ bool load_kssd_genome_info(string folderPath, string type, vector<KssdSketchInfo
 	string file_genome_info = folderPath + '/' + "kssd.info." + type;
 	FILE* fp_info = fopen(file_genome_info.c_str(), "r");
 	if(!fp_info){
-		cerr << "ERROR: loadMST(), cannot open file: " << file_genome_info << endl;
+		cerr << "ERROR: load_kssd_genome_info(), cannot open file: " << file_genome_info << endl;
+		string minHash_file = folderPath + '/' + "info." + type;
+		FILE * fp_tmp = fopen(minHash_file.c_str(), "r");
+		if(fp_tmp){
+			cerr << "Do you want to load genome info with MinHash sketches? Try again without '--fast' option" << endl;
+			fclose(fp_tmp);
+		}
 		exit(1);
 	}
 	bool sketch_by_file;
@@ -447,7 +465,13 @@ bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketch
 	string file_genome_info = folderPath + '/' + "info." + type;
 	FILE* fp_info = fopen(file_genome_info.c_str(), "r");
 	if(!fp_info){
-		cerr << "ERROR: loadMST(), cannot open file: " << file_genome_info << endl;
+		cerr << "ERROR: load_genome_info(), cannot open file: " << file_genome_info << endl;
+		string kssd_file = folderPath + '/' + "kssd.info." + type;
+		FILE * fp_tmp = fopen(kssd_file.c_str(), "r");
+		if(fp_tmp){
+			cerr << "Do you want to load genome info with fast sketches? Try again with '--fast' option" << endl;
+			fclose(fp_tmp);
+		}
 		exit(1);
 	}
 	bool sketch_by_file;
