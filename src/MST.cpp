@@ -358,7 +358,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 				}
 			}
 
-			for(int j = 0; j < start_index; j++){
+			for(int j = 0; j < i; j++){
 				double tmpDist;
 				int common = intersectionArr[thread_id][j];
 				int size0, size1;
