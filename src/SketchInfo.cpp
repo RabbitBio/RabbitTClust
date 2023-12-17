@@ -254,7 +254,7 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 
 }
 
-void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int minLen, int kmerSize, int drlevel, vector<KssdSketchInfo> *sketches){
+void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int minLen, int kmerSize, int drlevel, robin_hood::unordered_map<uint32_t, int> *shuffled_map, vector<KssdSketchInfo> *sketches){
 	static const int BaseMap[128] = 
 	{
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
@@ -273,7 +273,6 @@ void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunk
 	int dim_size = 1 << 4 * half_subk;
 	int dim_start = 0;
 	int dim_end = 1 << 4 * (half_subk - drlevel);
-	int* shuffled_dim = generate_shuffle_dim(half_subk);
 
 	int comp_bittl = 64 - 4 * half_k;
 	int half_outctx_len = half_k - half_subk;
@@ -286,12 +285,6 @@ void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunk
 	uint64_t undomask1 = undomask &	(tupmask >> ((half_k + half_subk) * 2));
 	uint64_t undomask0 = undomask ^ undomask1;
 
-	robin_hood::unordered_map<uint32_t, int> shuffled_map;
-	for(int t = 0; t < dim_size; t++){
-		if(shuffled_dim[t] < dim_end && shuffled_dim[t] >= dim_start){
-			shuffled_map.insert({t, shuffled_dim[t]});
-		}
-	}
 
 	rabbit::int64 id = 0;
 	rabbit::fa::FastaChunk *faChunk;
@@ -342,10 +335,10 @@ void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunk
 					//	continue;
 					//}
 
-					if(shuffled_map.count(dim_id) == 0){
+					if(shuffled_map->count(dim_id) == 0){
 						continue;
 					}
-					pfilter = shuffled_map[dim_id];
+					pfilter = (*shuffled_map)[dim_id];
 
 					pfilter -= dim_start;
 					//dr_tuple = (((uni_tuple & undomask0) + ((uni_tuple & undomask1) << (kmer_size * 2 - half_outctx_len * 4))) >> (drlevel * 4)) + pfilter; 
@@ -521,6 +514,18 @@ bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int
 #ifdef RABBIT_FX
 	int th = std::max(threads - 1, 1);//consumer threads number;
 	vector<KssdSketchInfo> sketchesArr[th];
+
+	int half_subk = 6 - drlevel >= 2 ? 6 : drlevel + 2;
+	int dim_size = 1 << 4 * half_subk;
+	int dim_start = 0;
+	int dim_end = 1 << 4 * (half_subk - drlevel);
+	int* shuffled_dim = generate_shuffle_dim(half_subk);
+	robin_hood::unordered_map<uint32_t, int> shuffled_map;
+	for(int t = 0; t < dim_size; t++){
+		if(shuffled_dim[t] < dim_end && shuffled_dim[t] >= dim_start){
+			shuffled_map.insert({t, shuffled_dim[t]});
+		}
+	}
 	
 	rabbit::fa::FastaDataPool *fastaPool = new rabbit::fa::FastaDataPool(256, 1<< 24);
 	FaChunkQueue queue1(128, 1);
@@ -529,7 +534,7 @@ bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int
 	std::thread **threadArr = new std::thread* [th];
 
 	for(int t = 0; t < th; t++){
-		threadArr[t] = new std::thread(std::bind(consumer_fasta_task_with_kssd, fastaPool, std::ref(queue1), minLen, kmerSize, drlevel, &sketchesArr[t]));
+		threadArr[t] = new std::thread(std::bind(consumer_fasta_task_with_kssd, fastaPool, std::ref(queue1), minLen, kmerSize, drlevel, &shuffled_map, &sketchesArr[t]));
 	}
 	producer.join();
 	for(int t = 0; t < th; t++){
@@ -543,7 +548,7 @@ bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int
 		}
 	}
 	int half_k = (kmerSize + 1) / 2;
-	int half_subk = 6 - drlevel >= 2 ? 6 : drlevel + 2;
+	//int half_subk = 6 - drlevel >= 2 ? 6 : drlevel + 2;
 	info.half_k = half_k;
 	info.half_subk = half_subk;
 	info.drlevel = drlevel;
