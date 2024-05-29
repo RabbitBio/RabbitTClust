@@ -1,3 +1,12 @@
+[![install with conda](
+https://anaconda.org/bioconda/rabbittclust/badges/version.svg)](https://anaconda.org/bioconda/rabbittclust)
+[![install with conda](
+https://anaconda.org/bioconda/rabbittclust/badges/latest_release_date.svg)](https://anaconda.org/bioconda/rabbittclust)
+[![install with conda](
+https://anaconda.org/bioconda/rabbittclust/badges/platforms.svg)](https://anaconda.org/bioconda/rabbittclust)
+[![install with conda](
+https://anaconda.org/bioconda/rabbittclust/badges/downloads.svg)](https://anaconda.org/bioconda/rabbittclust)
+
 ![RabbitTClust](rabbittclust.png)
 
 # `RabbitTClust v.2.3.0`
