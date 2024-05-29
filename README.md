@@ -10,12 +10,19 @@ RabbitTClust supports classical single-linkage hierarchical (clust-mst) and gree
 
 The detailed update information for this version, as well as the version history, can be found in the [`version_history`](version_history/history.md) document.
 
-### Dependancy
+### Install from bioconda 
+RabbitTClust is available from [Bioconda](https://anaconda.org/bioconda/rabbittclust).
+
+Ensure that your machine supports at least AVX2 instructions.
+
+
+### Install from source code
+#### Dependancy
 * cmake v.3.0 or later
 * c++14
 * [zlib](https://zlib.net/)
 
-### Compile and install
+#### Compile and install
 ```bash
 git clone --recursive https://github.com/RabbitBio/RabbitTClust.git
 cd RabbitTClust
