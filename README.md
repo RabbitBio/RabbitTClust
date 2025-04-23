@@ -50,7 +50,6 @@ Options:
   -l,--list                   input is genome list, one genome per line
   -e,--no-save                not save the intermediate files, such as sketches or MST
   -d,--threshold FLOAT        set the distance threshold for clustering
-  -F,--function TEXT          set the sketch function, such as MinHash, KSSD, default MinHash
   -o,--output TEXT REQUIRED   set the output name of cluster result
   -i,--input TEXT Excludes: --append
                               set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)
@@ -72,7 +71,6 @@ Options:
   -l,--list                   input is genome list, one genome per line
   -e,--no-save                not save the intermediate files, such as sketches or MST
   -d,--threshold FLOAT        set the distance threshold for clustering
-  -F,--function TEXT          set the sketch function, such as MinHash, KSSD, default MinHash
   -o,--output TEXT REQUIRED   set the output name of cluster result
   -i,--input TEXT Excludes: --append
                               set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)

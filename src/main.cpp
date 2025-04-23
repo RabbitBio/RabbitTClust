@@ -92,7 +92,6 @@ int main(int argc, char * argv[]){
 	auto flag_input_list = app.add_flag("-l, --list", sketchByFile, "input is genome list, one genome per line");
 	auto flag_no_save = app.add_flag("-e, --no-save", noSave, "not save the intermediate files, such as sketches or MST");
 	auto option_threshold = app.add_option("-d, --threshold", threshold, "set the distance threshold for clustering");
-	auto option_function = app.add_option("-F, --function", sketchFunc, "set the sketch function, such as MinHash, KSSD, default MinHash");
 	auto option_output = app.add_option("-o, --output", outputFile, "set the output name of cluster result");
 	auto option_input = app.add_option("-i, --input", inputFile, "set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)");
 	auto option_presketched = app.add_option("--presketched", folder_path, "clustering by the pre-generated sketch files rather than genomes");
@@ -110,9 +109,6 @@ int main(int argc, char * argv[]){
 
 	CLI11_PARSE(app, argc, argv);
 
-	if(*option_function){
-		fprintf(stderr, "-----set the sketch function: %s\n", sketchFunc.c_str());
-	}
 	if(threads < 1){
 		fprintf(stderr, "-----Invalid thread number %d\n", threads);
 		return 1;
