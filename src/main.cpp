@@ -95,10 +95,10 @@ int main(int argc, char * argv[]){
 	auto option_output = app.add_option("-o, --output", outputFile, "set the output name of cluster result");
 	auto option_input = app.add_option("-i, --input", inputFile, "set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)");
 	auto option_presketched = app.add_option("--presketched", folder_path, "clustering by the pre-generated sketch files rather than genomes");
+	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing for clust-mst");
 #ifndef GREEDY_CLUST
 	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
 	auto flag_newick_tree = app.add_flag("--newick-tree", is_newick_tree, "output the newick tree format file for clust-mst");
-	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing for clust-mst");
 	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
 	auto flag_no_dense = app.add_flag("--no-dense", no_dense, "not calculate the density and ANI datas");
 #endif
@@ -196,22 +196,17 @@ int main(int argc, char * argv[]){
 	if(!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, isJaccard, kmerSize, threshold, containCompress, sketchSize)){
 		return 1;
 	}
+  if(is_fast){
+  
+    clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
+    return 1;
 
+  }
 	
 	clust_from_genomes(inputFile, outputFile, is_newick_tree, sketchByFile, no_dense, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads);
 
 	return 0;
 }//end main
-
-
-
-
-
-
-
-
-
-
 
 
 

@@ -43,6 +43,7 @@ struct KssdSketchInfo{
 	bool use64;
 	vector<uint32_t> hash32_arr;
 	vector<uint64_t> hash64_arr;
+  uint32_t sketchsize;
 };
 
 struct KssdParameters{

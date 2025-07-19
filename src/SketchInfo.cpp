@@ -34,6 +34,20 @@ bool cmpGenomeSize(SketchInfo s1, SketchInfo s2){
 	else if(s1.totalSeqLength == s2.totalSeqLength)	return s1.id < s2.id;
 	else	return false;
 }
+
+
+bool KssdcmpGenomeSize(KssdSketchInfo s1, KssdSketchInfo s2){
+	if(s1.totalSeqLength > s2.totalSeqLength)	return true;
+	else if(s1.totalSeqLength == s2.totalSeqLength)	return s1.id < s2.id;
+	else	return false;
+}
+
+bool KssdcmpSketchSize(KssdSketchInfo s1, KssdSketchInfo s2){
+	if(s1.sketchsize > s2.sketchsize)	return true;
+	else if(s1.sketchsize == s2.sketchsize)	return s1.id < s2.id;
+	else	return false;
+}
+
 bool cmpSeqSize(SketchInfo s1, SketchInfo s2){
 	if(s1.seqInfo.length > s2.seqInfo.length)	return true;
 	else if(s1.seqInfo.length == s2.seqInfo.length)	return s1.id < s2.id;
@@ -370,7 +384,8 @@ void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunk
 			tmpKssdSketchInfo.use64 = use64;
 			tmpKssdSketchInfo.hash32_arr = hashArr32;
 			tmpKssdSketchInfo.hash64_arr = hashArr64;
-			sketches->push_back(tmpKssdSketchInfo);
+			tmpKssdSketchInfo.sketchsize = hashArr32.size();
+      sketches->push_back(tmpKssdSketchInfo);
 
 		}
 		rabbit::fa::FastaDataChunk *tmp = faChunk->chunk;
@@ -1090,15 +1105,18 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 
 		vector<uint32_t> hashArr32;
 		vector<uint64_t> hashArr64;
-		if(use64){
+		
+    if(use64){
 			for(auto x : hashValueSet64){
 				hashArr64.push_back(x);
 			}
+      std::sort(hashArr64.begin(), hashArr64.end());
 		}
 		else{
 			for(auto x : hashValueSet){
 				hashArr32.push_back(x);
 			}
+      std::sort(hashArr32.begin(), hashArr32.end());
 		}
 
 		#pragma omp critical
@@ -1112,7 +1130,8 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 			tmpKssdSketchInfo.use64 = use64;
 			tmpKssdSketchInfo.hash32_arr = hashArr32;
 			tmpKssdSketchInfo.hash64_arr = hashArr64;
-			if(totalLength >= minLen)//filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
+			tmpKssdSketchInfo.sketchsize = hashArr32.size();
+      if(totalLength >= minLen)//filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
 				sketches.push_back(tmpKssdSketchInfo);
 			if(i % 10000 == 0)	cerr << "---finished sketching: " << i << " genomes" << endl;
 		}
@@ -1120,7 +1139,7 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 		gzclose(fp1);
 		kseq_destroy(ks1);
 	}//end for
-
+	sort(sketches.begin(), sketches.end(), KssdcmpSketchSize);
 	return true;
 }
 

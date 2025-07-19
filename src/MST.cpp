@@ -370,7 +370,12 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 					size0 = sketches[i].hash32_arr.size();
 					size1 = sketches[j].hash32_arr.size();
 				}
-				if(!isContainment){
+				
+//				if (std::max(size0, size1) > 1.5 * std::min(size0, size1)) {
+//					continue;
+//				}
+        
+        if(!isContainment){
 					int denom = size0 + size1 - common;
 					double jaccard;
 					if(size0 == 0 || size1 == 0)
