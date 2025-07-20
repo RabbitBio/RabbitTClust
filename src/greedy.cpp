@@ -58,6 +58,7 @@ uint64_t Kssdu32_intersect_scalar_stop(const uint32_t *list1, uint32_t size1, co
 	return counter;
 }
 
+#if defined __AVX512F__ && defined __AVX512CD__
 uint32_t Kssdu32_intersect_vector_avx512(const uint32_t *list1, uint32_t size1, const uint32_t *list2, uint32_t size2, uint32_t size3, uint64_t *i_a, uint64_t *i_b){
 	//assert(size3 <= size1 + size2);
 	uint64_t count=0;
@@ -171,6 +172,7 @@ uint32_t Kssdu32_intersect_vector_avx512(const uint32_t *list1, uint32_t size1, 
 }
 
 
+#elif defined __AVX2__
 
 
 size_t Kssdu32_intersect_vector_avx2(const uint32_t *list1, uint32_t size1, const uint32_t *list2, uint32_t size2, uint32_t size3, uint64_t* i_a, uint64_t* i_b){
@@ -251,7 +253,7 @@ size_t Kssdu32_intersect_vector_avx2(const uint32_t *list1, uint32_t size1, cons
 	return count;
 }
 
-
+#endif
 
 
 double jaccard(const std::vector<uint32_t>& hashesRef, const std::vector<uint32_t>& hashesQry)
