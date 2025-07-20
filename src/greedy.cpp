@@ -27,7 +27,6 @@ using namespace std;
 //	else if(s1.sketchsize == s2.sketchsize)	return s1.id < s2.id;
 //	else	return false;
 //}
-
 uint64_t Kssdu32_intersect_scalar_stop(const uint32_t *list1, uint32_t size1, const uint32_t *list2, uint32_t size2, uint32_t size3,
 		uint64_t *i_a, uint64_t *i_b){
 	uint64_t counter=0;
@@ -58,7 +57,6 @@ uint64_t Kssdu32_intersect_scalar_stop(const uint32_t *list1, uint32_t size1, co
 	return counter;
 }
 
-#if defined __AVX512F__ && defined __AVX512CD__
 uint32_t Kssdu32_intersect_vector_avx512(const uint32_t *list1, uint32_t size1, const uint32_t *list2, uint32_t size2, uint32_t size3, uint64_t *i_a, uint64_t *i_b){
 	//assert(size3 <= size1 + size2);
 	uint64_t count=0;
@@ -172,7 +170,6 @@ uint32_t Kssdu32_intersect_vector_avx512(const uint32_t *list1, uint32_t size1, 
 }
 
 
-#elif defined __AVX2__
 
 
 size_t Kssdu32_intersect_vector_avx2(const uint32_t *list1, uint32_t size1, const uint32_t *list2, uint32_t size2, uint32_t size3, uint64_t* i_a, uint64_t* i_b){
@@ -253,7 +250,7 @@ size_t Kssdu32_intersect_vector_avx2(const uint32_t *list1, uint32_t size1, cons
 	return count;
 }
 
-#endif
+
 
 
 double jaccard(const std::vector<uint32_t>& hashesRef, const std::vector<uint32_t>& hashesQry)
@@ -330,65 +327,160 @@ double distance(const std::vector<uint32_t>& hashesRef, const std::vector<uint32
 
 
 
-vector<vector<int>> KssdgreedyCluster(vector<KssdSketchInfo>& sketches, int sketch_func_id, double threshold, int threads)
-{
-  int numGenomes = sketches.size();
-  int * clustLabels = new int[numGenomes];
-  memset(clustLabels, 0, numGenomes*sizeof(int));
-  vector<vector<int> > cluster;
-  vector<int> representiveArr;
-  map<int, vector<int> > semiClust;
-  representiveArr.push_back(0);
-  semiClust.insert({0, vector<int>()});
+//vector<vector<int>> KssdgreedyCluster(vector<KssdSketchInfo>& sketches, int sketch_func_id, double threshold, int threads)
+//{
+//  int numGenomes = sketches.size();
+//  int * clustLabels = new int[numGenomes];
+//  memset(clustLabels, 0, numGenomes*sizeof(int));
+//  vector<vector<int> > cluster;
+//  vector<int> representiveArr;
+//  map<int, vector<int> > semiClust;
+//  representiveArr.push_back(0);
+//  semiClust.insert({0, vector<int>()});
+//
+//  for(int j = 1; j < numGenomes; j++){
+//    map<double, int> distMapCenter;
+//    int sizeRef = sketches[j].hash32_arr.size();
+//    //std::sort(representiveArr.begin(), representiveArr.end(),KssdcmpSketchSize);
+//#pragma omp parallel for num_threads(threads)
+//    for(int i = 0; i < representiveArr.size(); i++){
+//      int repId = representiveArr[i];
+//      double dist;
+//      int sizeQry = sketches[repId].hash32_arr.size();
+//      if(sizeRef/sizeQry > 1.5 || sizeQry/sizeRef > 1.5)
+//        continue;
+//
+//      dist = distance(sketches[repId].hash32_arr, sketches[j].hash32_arr, 19);
+//      if(dist <= threshold){
+//        clustLabels[j] = 1;
+//#pragma omp critical
+//        {
+//          distMapCenter.insert({dist, repId});
+//        }
+//        //break;
+//      }
+//    }//end for i
+//    if(clustLabels[j] == 0){//this genome is a representative genome
+//      representiveArr.push_back(j);
+//      semiClust.insert({j, vector<int>()});
+//    }
+//    else{//this genome is a redundant genome, get the nearest representive genome as its center
+//      auto it = distMapCenter.begin();
+//      int repId = it->second;
+//      semiClust[repId].push_back(j);
+//    }
+//    map<double, int>().swap(distMapCenter);
+//    if(j % 10000 == 0) cerr << "---finished cluster: " << j << endl;
+//
+//  }//end for j
+//  //cerr << "the representiveArr size is : " << representiveArr.size() << endl;
+//
+//  for(auto x : semiClust){
+//    int center = x.first;
+//    vector<int> redundantArr = x.second;
+//    vector<int> curClust;
+//    curClust.push_back(center);
+//    curClust.insert(curClust.end(), redundantArr.begin(), redundantArr.end());
+//    cluster.push_back(curClust);
+//  }
+//  return cluster;
+//}
 
-  for(int j = 1; j < numGenomes; j++){
-    map<double, int> distMapCenter;
-    int sizeRef = sketches[j].hash32_arr.size();
-    //std::sort(representiveArr.begin(), representiveArr.end(),KssdcmpSketchSize);
-#pragma omp parallel for num_threads(threads)
-    for(int i = 0; i < representiveArr.size(); i++){
-      int repId = representiveArr[i];
-      double dist;
-      int sizeQry = sketches[repId].hash32_arr.size();
-      if(sizeRef/sizeQry > 1.5 || sizeQry/sizeRef > 1.5)
-        continue;
-
-      dist = distance(sketches[repId].hash32_arr, sketches[j].hash32_arr, 19);
-      if(dist <= threshold){
-        clustLabels[j] = 1;
-#pragma omp critical
-        {
-          distMapCenter.insert({dist, repId});
-        }
-        //break;
-      }
-    }//end for i
-    if(clustLabels[j] == 0){//this genome is a representative genome
-      representiveArr.push_back(j);
-      semiClust.insert({j, vector<int>()});
+double calculateMaxSizeRatio(double D, int k) {
+    if (D < 0) {
+        throw std::runtime_error("Mash distance cannot be negative.");
     }
-    else{//this genome is a redundant genome, get the nearest representive genome as its center
-      auto it = distMapCenter.begin();
-      int repId = it->second;
-      semiClust[repId].push_back(j);
+    if (k <= 0) {
+        throw std::runtime_error("k-mer size must be positive.");
     }
-    map<double, int>().swap(distMapCenter);
-    if(j % 10000 == 0) cerr << "---finished cluster: " << j << endl;
-
-  }//end for j
-  //cerr << "the representiveArr size is : " << representiveArr.size() << endl;
-
-  for(auto x : semiClust){
-    int center = x.first;
-    vector<int> redundantArr = x.second;
-    vector<int> curClust;
-    curClust.push_back(center);
-    curClust.insert(curClust.end(), redundantArr.begin(), redundantArr.end());
-    cluster.push_back(curClust);
-  }
-  return cluster;
+    
+    // Formula derived from inverting Mash and Jaccard calculations:
+    // R_max = 2 * e^(D * k) - 1
+    return 2.0 * std::exp(D * k) - 1.0;
 }
 
+
+vector<std::vector<int>> KssdgreedyCluster(std::vector<KssdSketchInfo>& sketches, int sketch_func_id, double threshold, int threads)
+{
+    int numGenomes = sketches.size();
+    int * clustLabels = new int[numGenomes];
+    memset(clustLabels, 0, numGenomes * sizeof(int));
+    std::vector<std::vector<int>> cluster;
+    std::vector<int> representiveArr;
+    std::map<int, std::vector<int>> semiClust;
+   	int radio = calculateMaxSizeRatio(threshold, 19); 
+    if (numGenomes == 0) return cluster;
+
+    representiveArr.push_back(0);
+    semiClust.insert({0, std::vector<int>()});
+
+    for(int j = 1; j < numGenomes; j++){
+        std::map<double, int> distMapCenter;
+        int sizeRef = sketches[j].hash32_arr.size();
+        
+        std::vector<int> reps_to_blacklist; 
+
+#pragma omp parallel for num_threads(threads)
+        for(int i = 0; i < representiveArr.size(); i++){
+            int repId = representiveArr[i];
+            double dist;
+            int sizeQry = sketches[repId].hash32_arr.size();
+
+            if ( (double)sizeQry / sizeRef > radio)
+            {
+                #pragma omp critical
+                {
+                    reps_to_blacklist.push_back(repId);
+                }
+                continue;
+            }
+
+            dist = distance(sketches[repId].hash32_arr, sketches[j].hash32_arr, 19);
+            if(dist <= threshold){
+                clustLabels[j] = 1;
+                #pragma omp critical
+                {
+                    distMapCenter.insert({dist, repId});
+                }
+            }
+        }
+
+        if(clustLabels[j] == 0){
+            representiveArr.push_back(j);
+            semiClust.insert({j, std::vector<int>()});
+        }
+        else{
+            auto it = distMapCenter.begin();
+            int repId = it->second;
+            semiClust[repId].push_back(j);
+        }
+        
+        std::map<double, int>().swap(distMapCenter);
+        if(j % 10000 == 0) std::cerr << "--- finished cluster: " << j << " | Active reps: " << representiveArr.size() << std::endl;
+
+        if (!reps_to_blacklist.empty()) {
+            std::unordered_set<int> blacklist_set(reps_to_blacklist.begin(), reps_to_blacklist.end());
+
+            representiveArr.erase(
+                std::remove_if(representiveArr.begin(), representiveArr.end(),
+                               [&blacklist_set](int repId) {
+                                   return blacklist_set.count(repId);
+                               }),
+                representiveArr.end()
+            );
+        }
+    }
+
+    delete[] clustLabels;
+
+    for(auto const& [center, redundantArr] : semiClust){
+        std::vector<int> curClust;
+        curClust.push_back(center);
+        curClust.insert(curClust.end(), redundantArr.begin(), redundantArr.end());
+        cluster.push_back(curClust);
+    }
+    return cluster;
+}
 
 
 

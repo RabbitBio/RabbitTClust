@@ -177,7 +177,14 @@ int main(int argc, char * argv[]){
 //======clust-mst=========================================================================
 #else
 //======clust-greedy======================================================================
-	if(*option_append && !*option_presketched){
+	
+ if (is_fast && *option_presketched && !*option_append) {
+    clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, no_dense, isContainment, threshold, threads);
+    return 0;
+} 
+
+  
+  if(*option_append && !*option_presketched){
 		cerr << "ERROR option --append, option --presketched needed" << endl;
 		return 1;
 	}

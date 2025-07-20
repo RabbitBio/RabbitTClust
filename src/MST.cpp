@@ -5,7 +5,6 @@
 #include "UnionFind.h"
 #include <omp.h>
 #include <fstream>
-
 using namespace std;
 
 bool cmpEdge(EdgeInfo e1, EdgeInfo e2){
@@ -14,6 +13,20 @@ bool cmpEdge(EdgeInfo e1, EdgeInfo e2){
 
 bool cmpNeighbor(NeighborNode n1, NeighborNode n2){
 	return n1.distance < n2.distance;
+}
+
+
+inline double calr(double D, int k) {
+    if (D < 0) {
+        throw std::runtime_error("Mash distance cannot be negative.");
+    }
+    if (k <= 0) {
+        throw std::runtime_error("k-mer size must be positive.");
+    }
+    
+    // Formula derived from inverting Mash and Jaccard calculations:
+    // R_max = 2 * e^(D * k) - 1
+    return 2.0 * std::exp(D * k) - 1.0;
 }
 
 
@@ -171,7 +184,7 @@ vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha){
 	return noiseArr;
 }
 
-vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr){
+vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold){
 	// init from the dictFile and indexFile
 	int half_k = info.half_k;
 	int drlevel = info.drlevel;
@@ -181,11 +194,10 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 	uint32_t* sketchSizeArr = NULL;
 	size_t* offset = NULL;
 	uint32_t* indexArr = NULL;
-	//uint64_t* dict;
-	if(use64)
-	{
-		cerr << "-----use hash64 in compute_kssd_mst() " << endl;
-		size_t hash_number;
+  int radio = calr(threshold, kmer_size-1); 
+  if(use64)
+    {
+    size_t hash_number;
 		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
 		FILE* fp_index = fopen(cur_index_file.c_str(), "rb");
 		if(!fp_index){
@@ -371,9 +383,9 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 					size1 = sketches[j].hash32_arr.size();
 				}
 				
-//				if (std::max(size0, size1) > 1.5 * std::min(size0, size1)) {
-//					continue;
-//				}
+				if (std::max(size0, size1) > radio * std::min(size0, size1)) {
+					continue;
+				}
         
         if(!isContainment){
 					int denom = size0 + size1 - common;

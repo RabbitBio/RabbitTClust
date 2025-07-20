@@ -113,7 +113,7 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	int ** dense_arr;
 	int dense_span = DENSE_SPAN;
 	uint64_t* ani_arr;
-	vector<EdgeInfo> append_mst = compute_kssd_mst(final_sketches, append_info, new_folder_path, pre_sketch_size, no_dense, isContainment, threads, dense_arr, dense_span, ani_arr);
+	vector<EdgeInfo> append_mst = compute_kssd_mst(final_sketches, append_info, new_folder_path, pre_sketch_size, no_dense, isContainment, threads, dense_arr, dense_span, ani_arr, threshold);
 	vector<EdgeInfo> final_graph;
 	final_graph.insert(final_graph.end(), pre_mst.begin(), pre_mst.end());
 	final_graph.insert(final_graph.end(), append_mst.begin(), append_mst.end());
@@ -444,7 +444,7 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 	int **denseArr;
 	uint64_t* aniArr; //= new uint64_t[101];
 	int denseSpan = DENSE_SPAN;
-	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, no_dense, isContainment, threads, denseArr, denseSpan, aniArr);
+	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, no_dense, isContainment, threads, denseArr, denseSpan, aniArr, threshold);
 	double t3 = get_sec();
 #ifdef Timer
 	cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
@@ -746,7 +746,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		uint64_t* aniArr; //= new uint64_t[101];
 		int denseSpan = DENSE_SPAN;
 		//vector<EdgeInfo> mst = modifyMST(sketches, 0, sketch_func_id, threads, denseArr, denseSpan, aniArr);
-		vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, no_dense, isContainment, threads, denseArr, denseSpan, aniArr);
+		vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, no_dense, isContainment, threads, denseArr, denseSpan, aniArr, threshold);
 		double time2 = get_sec();
 #ifdef Timer
 		cerr << "========time of generateMST is: " << time2 - time1 << "========" << endl;
