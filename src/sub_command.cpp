@@ -1,9 +1,109 @@
 #include "sub_command.h"
 #include <assert.h>
-
+#include <mpi.h>
+#include <sys/stat.h>
 using namespace std;
 
+
+size_t get_file_size(string file){
+	struct stat file_stat;
+	if(stat(file.c_str(), &file_stat) == -1){
+		cerr << "ERROR: get_file_size(), failed to get file status of: " << file << endl;
+		exit(1);
+	}
+	size_t file_size = file_stat.st_size;
+	return file_size;
+}
+
+void build_message(char* &buffer, size_t& file_size, string file_name){
+	file_size = get_file_size(file_name);
+	buffer = new char[file_size];
+	FILE * fp = fopen(file_name.c_str(), "r");
+	assert(fp != NULL);
+	size_t read_length = fread(buffer, sizeof(char), file_size, fp);
+	assert(read_length == file_size);
+}
+
+void format_sketches(char* info_buffer, size_t info_size, char* hash_buffer, size_t hash_size, string folder_path, vector<KssdSketchInfo>& sketches, bool sketch_by_file, int threads){
+	string info_file = folder_path + '/' + "kssd.info.sketch";
+	string hash_file = folder_path + '/' + "kssd.hash.sketch";
+	FILE* fp_info = fopen(info_file.c_str(), "w");
+	FILE* fp_hash = fopen(hash_file.c_str(), "w");
+	fwrite(info_buffer, sizeof(char), info_size, fp_info);
+	fwrite(hash_buffer, sizeof(char), hash_size, fp_hash);
+	fclose(fp_info);
+	fclose(fp_hash);
+	int sketch_func_id;
+	KssdParameters info;
+	bool cur_sketch_by_file = loadKssdSketches(folder_path, threads, sketches, info);
+	assert(cur_sketch_by_file == sketch_by_file);
+}
+
+
+void format_sketches_index(char* info_buffer, size_t info_size, char* hash_buffer, size_t hash_size, char* index_buffer, size_t index_size, char* dict_buffer, size_t dict_size, string folder_path, vector<KssdSketchInfo>& sketches, bool sketch_by_file, int threads){
+	string info_file = folder_path + '/' + "kssd.info.sketch";
+	string hash_file = folder_path + '/' + "kssd.hash.sketch";
+	string index_file = folder_path + '/' + "kssd.sketch.index";
+	string dict_file = folder_path + '/' + "kssd.sketch.dict";
+	FILE* fp_info = fopen(info_file.c_str(), "w");
+	FILE* fp_hash = fopen(hash_file.c_str(), "w");
+	FILE* fp_index = fopen(index_file.c_str(), "w");
+	FILE* fp_dict = fopen(dict_file.c_str(), "w");
+	fwrite(info_buffer, sizeof(char), info_size, fp_info);
+	fwrite(hash_buffer, sizeof(char), hash_size, fp_hash);
+	fwrite(index_buffer, sizeof(char), index_size, fp_index);
+	fwrite(dict_buffer, sizeof(char), dict_size, fp_dict);
+	fclose(fp_info);
+	fclose(fp_hash);
+	fclose(fp_index);
+	fclose(fp_dict);
+	int sketch_func_id;
+	KssdParameters info;
+	bool cur_sketch_by_file = loadKssdSketches(folder_path, threads, sketches, info);
+	assert(cur_sketch_by_file == sketch_by_file);
+}
+void load_MST(string folderPath, vector<EdgeInfo>& mst)
+{
+	//load the mst edge 
+	string file_mst = folderPath + '/' + "edge.mst";
+	FILE* fp_mst = fopen(file_mst.c_str(), "r");
+	if(!fp_mst){
+		cerr << "ERROR: loadMST(), cannot open the file: " <<  file_mst << endl;
+		exit(1);
+	}
+	size_t mst_size;
+	fread(&mst_size, sizeof(size_t), 1, fp_mst);
+	int preNode, sufNode;
+	double dist;
+	for(size_t i = 0; i < mst_size; i++){
+		fread(&preNode, sizeof(int), 1, fp_mst);
+		fread(&sufNode, sizeof(int), 1, fp_mst);
+		fread(&dist, sizeof(double), 1, fp_mst);
+		EdgeInfo tmpEdge{preNode, sufNode, dist};
+		mst.push_back(tmpEdge);
+		//cout << preNode << '\t' << sufNode << '\t' << dist << endl;
+	}
+	fclose(fp_mst);
+	cerr << "-----read the mst file from " << file_mst << endl;
+}
+
+void format_MST(int my_rank, char* edge_buffer, size_t edge_size, string folder_path, vector<EdgeInfo>& mst){
+	string edge_file = folder_path + '/' + "edge.mst";
+	FILE *fp_edge = fopen(edge_file.c_str(), "w");
+	fwrite(edge_buffer, sizeof(char), edge_size, fp_edge);
+	fclose(fp_edge);
+	load_MST(folder_path, mst);
+}
+
 #ifdef GREEDY_CLUST
+
+
+
+
+
+
+
+
 void append_clust_greedy(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
 	int sketch_func_id_0; 
 	vector<SketchInfo> pre_sketches; 
@@ -76,7 +176,7 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 		cerr << "the output cluster file may not have the genome file name" << endl;
 	}
 	vector<EdgeInfo> pre_mst;
-	loadMST(folder_path, pre_mst);
+	load_MST(folder_path, pre_mst);
 	int kmer_size = pre_info.half_k * 2;
 	int drlevel = pre_info.drlevel;
 
@@ -113,7 +213,7 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	int ** dense_arr;
 	int dense_span = DENSE_SPAN;
 	uint64_t* ani_arr;
-	vector<EdgeInfo> append_mst = compute_kssd_mst(final_sketches, append_info, new_folder_path, pre_sketch_size, no_dense, isContainment, threads, dense_arr, dense_span, ani_arr, threshold);
+	vector<EdgeInfo> append_mst = compute_kssd_mst(final_sketches,0,0, append_info, new_folder_path, no_dense, isContainment, threads, dense_arr, dense_span, ani_arr, threshold);
 	vector<EdgeInfo> final_graph;
 	final_graph.insert(final_graph.end(), pre_mst.begin(), pre_mst.end());
 	final_graph.insert(final_graph.end(), append_mst.begin(), append_mst.end());
@@ -188,7 +288,7 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 		cerr << "the output cluster file may not have the genome file name" << endl;
 	}
 	vector<EdgeInfo> pre_mst;
-	loadMST(folder_path, pre_mst);
+	load_MST(folder_path, pre_mst);
 	int sketch_func_id_1, kmer_size, contain_compress, sketch_size, half_k, half_subk, drlevel;
 	bool is_containment;
 	read_sketch_parameters(folder_path, sketch_func_id_1, kmer_size, is_containment, contain_compress, sketch_size, half_k, half_subk, drlevel);
@@ -312,7 +412,7 @@ void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_t
 	vector<EdgeInfo> mst;
 	vector<vector<int>> cluster;
 	bool sketchByFile = load_kssd_genome_info(folder_path, "mst", sketches);
-	loadMST(folder_path, mst);
+	load_MST(folder_path, mst);
 
 	if(is_newick_tree){
 		string output_newick_file = outputFile + ".newick.tree";
@@ -361,7 +461,7 @@ void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, 
 	vector<EdgeInfo> mst;
 	vector<vector<int>> cluster;
 	bool sketchByFile = load_genome_info(folder_path, "mst", sketches);
-	loadMST(folder_path, mst);
+	load_MST(folder_path, mst);
 
 	if(is_newick_tree){
 		string output_newick_file = outputFile + ".newick.tree";
@@ -444,7 +544,7 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 	int **denseArr;
 	uint64_t* aniArr; //= new uint64_t[101];
 	int denseSpan = DENSE_SPAN;
-	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, no_dense, isContainment, threads, denseArr, denseSpan, aniArr, threshold);
+	vector<EdgeInfo> mst = compute_kssd_mst(sketches, 0,0,info, folder_path,  no_dense, isContainment, threads, denseArr, denseSpan, aniArr, threshold);
 	double t3 = get_sec();
 #ifdef Timer
 	cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
@@ -512,7 +612,21 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 	double t0 = get_sec();
 	if(sketchByFile){
 		//if(!sketchFiles(inputFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
-		if(!sketchFileWithKssd(inputFile, minLen, kmerSize, drlevel, sketches, info, threads)){
+
+		fprintf(stderr, "-----input fileList, sketch by file\n");
+		ifstream ifs(inputFile);
+		if(!ifs){
+			fprintf(stderr, "error open the inputFile: %s\n", inputFile.c_str());
+			exit(1);
+		}
+		vector<string> fileList;
+		string fileName;
+		while(getline(ifs, fileName)){
+			fileList.push_back(fileName);
+		}
+
+
+		if(!sketchFileWithKssd(fileList, minLen, kmerSize, drlevel, sketches, info, threads)){
 			cerr << "ERROR: sketchFileWithKssd(), cannot finish the sketch generation by genome files" << endl;
 			exit(1);
 		}
@@ -746,7 +860,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		uint64_t* aniArr; //= new uint64_t[101];
 		int denseSpan = DENSE_SPAN;
 		//vector<EdgeInfo> mst = modifyMST(sketches, 0, sketch_func_id, threads, denseArr, denseSpan, aniArr);
-		vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, no_dense, isContainment, threads, denseArr, denseSpan, aniArr, threshold);
+		vector<EdgeInfo> mst = compute_kssd_mst(sketches, 0,0,info, folder_path,  no_dense, isContainment, threads, denseArr, denseSpan, aniArr, threshold);
 		double time2 = get_sec();
 #ifdef Timer
 		cerr << "========time of generateMST is: " << time2 - time1 << "========" << endl;
@@ -792,7 +906,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		cerr << "========time of generator forest and cluster is: " << time3 - time2 << "========" << endl;
 #endif
 #endif
-}
+	}
 
 	void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, double threshold, int threads){
 		vector<SketchInfo> sketches;
@@ -994,4 +1108,309 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 	}
 
 
+
+	void compute_kssd_sketches_mpi(int my_rank, vector<KssdSketchInfo>& sketches, KssdParameters& info, bool isSave, const string inputFile, string& folder_path, bool sketchByFile, const int minLen, const int kmerSize, const int drlevel, int threads) {
+		double t0 = get_sec();
+
+		if (sketchByFile) {
+			vector<string> file_list;
+			ifstream ifs(inputFile);
+			if (!ifs.is_open()) {
+				cerr << "ERROR: cannot open input file list: " << inputFile << endl;
+
+			}
+			string line;
+			while (getline(ifs, line)) {
+				if (!line.empty()) file_list.push_back(line);
+			}
+			ifs.close();
+
+			int comm_sz;
+			MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
+			size_t total = file_list.size();
+			size_t chunk_size = (total + comm_sz - 1) / comm_sz;
+			size_t start = my_rank * chunk_size;
+			size_t end = min(start + chunk_size, total);
+			vector<string> local_files(file_list.begin() + start, file_list.begin() + end);
+			cerr << "Rank " << my_rank << " is processing files from index " << start << " to " << end - 1 << " (total files: " << total << ")" << endl;
+			if (!sketchFileWithKssd(local_files,  minLen, kmerSize, drlevel, sketches, info, threads)) {
+				cerr << "ERROR: compute_sketches(), cannot finish sketch generation by genome files" << endl;
+				exit(1);
+			}
+
+		} else {
+			if (sketchSequencesWithKssd(inputFile, minLen, kmerSize, drlevel, sketches, info, threads)) {
+				cerr << "ERROR: compute_sketches(), cannot finish sketch generation by genome sequences" << endl;
+				exit(1);
+			}
+		}
+
+		cerr << "-----the size of sketches (number of genomes or sequences) is: " << sketches.size() << endl;
+
+		double t1 = get_sec();
+#ifdef Timer
+		cerr << "========time of computing sketch is: " << t1 - t0 << "========" << endl;
+#endif
+
+		folder_path = currentDataTime()+ to_string(my_rank);
+		isSave = true;
+		if (isSave) {
+			string command = "mkdir -p " + folder_path;
+			system(command.c_str());
+			//saveSketches(sketches, folder_path, sketchByFile, sketchFunc, isContainment, containCompress, sketchSize, kmerSize);
+			saveKssdSketches(sketches, info, folder_path, sketchByFile);
+
+			double t2 = get_sec();
+#ifdef Timer
+			cerr << "========time of saveSketches is: " << t2 - t1 << "========" << endl;
+#endif
+		}
+	}
+
+
+
+	void distribute_compute_clusters(int my_rank, int comm_sz, vector<KssdSketchInfo>& sketches, const KssdParameters info,int start_index, int end_index, bool sketchByFile, string output_file, bool is_newick_tree, string folder_path, double threshold, bool isSave, int threads, bool no_dense, bool isContainment){
+		vector<vector<int>> cluster;
+		double t2 = get_sec();
+		int **denseArr;
+		uint64_t* aniArr; //= new uint64_t[101];
+		int denseSpan = DENSE_SPAN;
+		//======clust-mst=======================================================================
+		vector<EdgeInfo> my_mst = compute_kssd_mst(sketches, start_index, end_index, info, folder_path, no_dense, isContainment, threads, denseArr, denseSpan, aniArr, threshold);
+		double t3 = get_sec();
+#ifdef Timer
+		cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
+#endif
+		//string tmp_recv_mst_path = folder_path + "_mst_" + to_string(my_rank);
+		//string cmd0 = "mkdir -p " + tmp_recv_mst_path;
+		//system(cmd0.c_str());
+		isSave = true;
+		if(isSave){
+			saveKssdMST(sketches, my_mst, folder_path, sketchByFile);
+		}
+		double t4 = get_sec();
+#ifdef Timer
+		cerr << "========time of saveMST is: " << t4 - t3 << "========" << endl;
+#endif
+
+		string info_file = folder_path + '/' + "kssd.info.mst";
+		string edge_file = folder_path + '/' + "edge.mst";
+		char * info_buffer;
+		char * edge_buffer;
+		size_t info_size, edge_size;
+		build_message(info_buffer, info_size, info_file);
+		build_message(edge_buffer, edge_size, edge_file);
+		cerr << "finish the build_message in distribute_build_MST " << my_rank << endl;
+
+		string tmp_path = "tmp";
+		string cmd1 = "mkdir -p " + tmp_path;
+		system(cmd1.c_str());
+
+		if(my_rank != 0){
+			MPI_Send(&info_size, 1, MPI_UNSIGNED_LONG, 0, my_rank, MPI_COMM_WORLD);
+			MPI_Send(&edge_size, 1, MPI_UNSIGNED_LONG, 0, my_rank+comm_sz, MPI_COMM_WORLD);
+			MPI_Send(info_buffer, info_size, MPI_CHAR, 0, my_rank+comm_sz*2, MPI_COMM_WORLD);
+			MPI_Send(edge_buffer, edge_size, MPI_CHAR, 0, my_rank+comm_sz*3, MPI_COMM_WORLD);
+		}
+		else{
+			size_t recv_info_size, recv_edge_size;
+			vector<EdgeInfo> sum_mst;
+			sum_mst.insert(sum_mst.end(), my_mst.begin(), my_mst.end());
+			for(int id = 1; id < comm_sz; id++){
+				MPI_Recv(&recv_info_size, 1, MPI_UNSIGNED_LONG, id, id, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				MPI_Recv(&recv_edge_size, 1, MPI_UNSIGNED_LONG, id, id+comm_sz, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				char * recv_info_buffer = new char[recv_info_size];
+				char * recv_edge_buffer = new char[recv_edge_size];
+				MPI_Recv(recv_info_buffer, recv_info_size, MPI_CHAR, id, id+comm_sz*2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				MPI_Recv(recv_edge_buffer, recv_edge_size, MPI_CHAR, id, id+comm_sz*3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				vector<EdgeInfo> cur_MST;
+				format_MST(id, recv_edge_buffer, recv_edge_size, tmp_path, cur_MST);
+				sum_mst.insert(sum_mst.end(), cur_MST.begin(), cur_MST.end());
+				vector<EdgeInfo>().swap(cur_MST);
+			}
+			sort(sum_mst.begin(), sum_mst.end(), cmpEdge);
+			vector<EdgeInfo> final_mst = kruskalAlgorithm(sum_mst, sketches.size());
+			vector<EdgeInfo>().swap(sum_mst);
+			if(is_newick_tree){
+				string output_newick_file = output_file + ".newick.tree";
+				print_kssd_newick_tree(sketches, final_mst, sketchByFile, output_newick_file);
+				cerr << "-----write the newick tree into: " << output_newick_file << endl;
+			}
+			vector<EdgeInfo> forest = generateForest(final_mst, threshold);
+			vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
+			printKssdResult(tmpClust, sketches, sketchByFile, output_file);
+			cerr << "-----write the cluster result into: " << output_file << endl;
+			cerr << "-----the cluster number of: " << output_file << " is: " << tmpClust.size() << endl;
+		}
+		cerr << "finish the distribute_build_MST " << endl;
+
+	}
+
+
+
+
+	void clust_from_genomes_fast_MPI(int my_rank, int comm_sz, const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads){
+    bool isSave = !noSave;
+		vector<KssdSketchInfo> sketches;
+		int sketch_func_id;
+		string sketchFunc;
+		sketchFunc = "MinHash";
+		KssdParameters info;
+		if(sketchFunc == "MinHash")	sketch_func_id = 0;
+		else if(sketchFunc == "KSSD") sketch_func_id = 1;
+		compute_kssd_sketches_mpi(my_rank, sketches, info, isSave, inputFile, folder_path, sketchByFile, minLen, kmerSize, drlevel, threads);
+
+		size_t* info_size_arr = new size_t[comm_sz];
+		size_t* hash_size_arr = new size_t[comm_sz];
+		size_t* index_size_arr = new size_t[comm_sz];
+		string info_file = folder_path + '/' + "kssd.info.sketch";
+		string hash_file = folder_path + '/' + "kssd.hash.sketch";
+		string index_file = folder_path + '/' + "kssd.sketch.index";
+		char * info_buffer;
+		char * hash_buffer;
+		string final_folder;
+		size_t info_size, hash_size, index_size;
+		build_message(info_buffer, info_size, info_file);
+		build_message(hash_buffer, hash_size, hash_file);
+		cerr << "=====================finished the build_message " << my_rank << endl;
+		info_size_arr[my_rank] = info_size;
+		hash_size_arr[my_rank] = hash_size;
+		if(my_rank != 0){
+			//MPI_Send(info_buffer, info_size, MPI_CHAR, 0, 0, MPI_COMM_WORLD);
+			//MPI_Send(hash_buffer, hash_size, MPI_CHAR, 0, 1, MPI_COMM_WORLD);
+			MPI_Send(&info_size, 1, MPI_UNSIGNED_LONG, 0, my_rank, MPI_COMM_WORLD);
+			MPI_Send(&hash_size, 1, MPI_UNSIGNED_LONG, 0, my_rank+comm_sz, MPI_COMM_WORLD);
+			MPI_Send(info_buffer, info_size, MPI_CHAR, 0, my_rank+comm_sz*2, MPI_COMM_WORLD);
+			MPI_Send(hash_buffer, hash_size, MPI_CHAR, 0, my_rank+comm_sz*3, MPI_COMM_WORLD);
+
+			size_t sum_info_size, sum_hash_size, sum_index_size, sum_dict_size;
+			MPI_Recv(&sum_info_size, 1, MPI_UNSIGNED_LONG, 0, 101, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			MPI_Recv(&sum_index_size, 1, MPI_UNSIGNED_LONG, 0, 102, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			MPI_Recv(&sum_hash_size, 1, MPI_UNSIGNED_LONG, 0, 103, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			MPI_Recv(&sum_dict_size, 1, MPI_UNSIGNED_LONG, 0, 104, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			char * sum_info_buffer = new char[sum_info_size];
+			char * sum_hash_buffer = new char[sum_hash_size];
+			char * sum_index_buffer = new char[sum_index_size];
+			char * sum_dict_buffer = new char[sum_dict_size];
+			MPI_Recv(sum_info_buffer, sum_info_size, MPI_CHAR, 0, 201, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			MPI_Recv(sum_hash_buffer, sum_hash_size, MPI_CHAR, 0, 202, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			MPI_Recv(sum_index_buffer, sum_index_size, MPI_CHAR, 0, 203, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			MPI_Recv(sum_dict_buffer, sum_dict_size, MPI_CHAR, 0, 204, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			//string sum_folder = folder_path + '_' + "sum_" + to_string(my_rank);
+			//string cmd1 = "mkdir -p " + sum_folder;
+			//system(cmd1.c_str());
+			vector<KssdSketchInfo>().swap(sketches);
+			format_sketches_index(sum_info_buffer, sum_info_size, sum_hash_buffer, sum_hash_size, sum_index_buffer, sum_index_size, sum_dict_buffer, sum_dict_size, folder_path, sketches, sketchByFile, threads);
+		}
+		else{
+			//string tmp_recv_folder_path = folder_path + '_' + to_string(my_rank);
+			//string cmd0 = "mkdir -p " + tmp_recv_folder_path;
+			//system(cmd0.c_str());
+			for(int id = 1; id < comm_sz; id++){
+				MPI_Recv(&info_size_arr[id], 1, MPI_UNSIGNED_LONG, id, id, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				MPI_Recv(&hash_size_arr[id], 1, MPI_UNSIGNED_LONG, id, id+comm_sz, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				//cout << info_size_arr[id] << '\t' << hash_size_arr[id] << endl;
+				char * recv_info_buffer = new char[info_size_arr[id]];
+				char * recv_hash_buffer = new char[hash_size_arr[id]];
+				MPI_Recv(recv_info_buffer, info_size_arr[id], MPI_CHAR, id, id+comm_sz*2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				MPI_Recv(recv_hash_buffer, hash_size_arr[id], MPI_CHAR, id, id+comm_sz*3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				vector<KssdSketchInfo> cur_sketches;
+				format_sketches(recv_info_buffer, info_size_arr[id], recv_hash_buffer, hash_size_arr[id], folder_path, cur_sketches, sketchByFile, threads);
+				sketches.insert(sketches.end(), cur_sketches.begin(), cur_sketches.end());
+				vector<KssdSketchInfo>().swap(cur_sketches);
+			}
+			//string sum_folder = folder_path + '_' + "sum";
+			//final_folder = sum_folder;
+			//string cmd1 = "mkdir -p " + sum_folder;
+			//system(cmd1.c_str());
+			//saveSketches(sketches, sum_folder, sketchByFile, sketchFunc, isContainment, containCompress, sketchSize, kmerSize);
+			saveKssdSketches(sketches, info, folder_path, sketchByFile);
+			transSketches(sketches, info, folder_path, threads);
+			string sum_info_file = folder_path + '/' + "kssd.info.sketch";
+			string sum_hash_file = folder_path + '/' + "kssd.hash.sketch";
+			string sum_index_file = folder_path + '/' + "kssd.sketch.index";
+			string sum_dict_file = folder_path + '/' + "kssd.sketch.dict";
+			char * sum_info_buffer;
+			char * sum_hash_buffer;
+			char * sum_index_buffer;
+			char * sum_dict_buffer;
+			size_t sum_info_size, sum_hash_size, sum_index_size, sum_dict_size;
+			build_message(sum_info_buffer, sum_info_size, sum_info_file);
+			build_message(sum_index_buffer, sum_index_size, sum_index_file);
+			build_message(sum_hash_buffer, sum_hash_size, sum_hash_file);
+			build_message(sum_dict_buffer, sum_dict_size, sum_dict_file);
+			for(int id = 1; id < comm_sz; id++){
+				MPI_Send(&sum_info_size, 1, MPI_UNSIGNED_LONG, id, 101, MPI_COMM_WORLD);
+				MPI_Send(&sum_index_size, 1, MPI_UNSIGNED_LONG, id, 102, MPI_COMM_WORLD);
+				MPI_Send(&sum_hash_size, 1, MPI_UNSIGNED_LONG, id, 103, MPI_COMM_WORLD);
+				MPI_Send(&sum_dict_size, 1, MPI_UNSIGNED_LONG, id, 104, MPI_COMM_WORLD);
+				MPI_Send(sum_info_buffer, sum_info_size, MPI_CHAR, id, 201, MPI_COMM_WORLD);
+				MPI_Send(sum_hash_buffer, sum_hash_size, MPI_CHAR, id, 202, MPI_COMM_WORLD);
+				MPI_Send(sum_index_buffer, sum_index_size, MPI_CHAR, id, 203, MPI_COMM_WORLD);
+				MPI_Send(sum_dict_buffer, sum_dict_size, MPI_CHAR, id, 204, MPI_COMM_WORLD);
+			}
+
+		}
+		//MPI_Barrier(MPI_COMM_WORLD);
+		cerr << "the sketch size of rank " << my_rank << " is: " << sketches.size() << endl;
+
+
+
+
+
+		int start_index, end_index;
+		if(my_rank != 0){
+			MPI_Send(&threads, 1, MPI_INT, 0, my_rank+comm_sz*4, MPI_COMM_WORLD);
+			MPI_Recv(&start_index, 1, MPI_UNSIGNED_LONG, 0, my_rank+comm_sz*5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			MPI_Recv(&end_index, 1, MPI_UNSIGNED_LONG, 0, my_rank+comm_sz*6, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		}
+		else{
+			int* thread_arr = new int[comm_sz];
+			thread_arr[0] = threads;
+			int total_threads = 0;
+			total_threads += threads;
+			for(int id = 1; id < comm_sz; id++){
+				MPI_Recv(&thread_arr[id], 1, MPI_INT, id, id+comm_sz*4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				total_threads += thread_arr[id];
+			}
+			cerr << "the total threads is: " << total_threads << endl;
+			size_t N = sketches.size();
+			size_t total_distance_time = N*(N-1)/2;
+			//size_t total_distance_time = N;
+			size_t* task_arr = new size_t[comm_sz];
+			for(int i = 0; i < comm_sz; i++){
+				task_arr[i] = total_distance_time * thread_arr[i] / total_threads;
+			}
+			size_t* start_index_arr = new size_t[comm_sz];
+			size_t* end_index_arr = new size_t[comm_sz];
+			int cur_start_index = 0;
+			int cur_end_index = N-1;
+			size_t global_index = 0;
+			for(int i = 0; i < comm_sz; i++){
+				start_index_arr[i] = global_index;
+				size_t accumulate_time = 0;
+				while(accumulate_time < task_arr[i] && global_index < N){
+					//accumulate_time += N - global_index;
+					accumulate_time += global_index + 1;
+          global_index++;
+				}
+				end_index_arr[i] = global_index;
+			}
+			end_index_arr[comm_sz-1] = max(end_index_arr[comm_sz-1], N);
+			start_index = start_index_arr[0];
+			end_index = end_index_arr[0];
+			for(int i = 1; i < comm_sz; i++){
+				cerr << "start_index: " << start_index_arr[i] << '\t' << "end_index: " << end_index_arr[i] << endl;
+				MPI_Send(&start_index_arr[i], 1, MPI_UNSIGNED_LONG, i, i+comm_sz*5, MPI_COMM_WORLD);
+				MPI_Send(&end_index_arr[i], 1, MPI_UNSIGNED_LONG, i, i+comm_sz*6, MPI_COMM_WORLD);
+			}
+		}
+		string tmp_str = "++++++++++++my rank: " + to_string(my_rank) + ", start_index: " + to_string(start_index) + ", end_index: " + to_string(end_index);
+		cout << tmp_str << endl;
+		MPI_Barrier(MPI_COMM_WORLD);
+
+		//compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, folder_path, sketch_func_id, threshold, isSave, threads);
+		distribute_compute_clusters(my_rank, comm_sz, sketches, info, start_index, end_index, sketchByFile, outputFile, is_newick_tree, folder_path, threshold, isSave, threads, no_dense, isContainment);
+		MPI_Finalize();
+	}
 

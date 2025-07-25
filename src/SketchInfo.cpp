@@ -961,18 +961,18 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 	return true;
 }
 
-bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
-	fprintf(stderr, "-----input fileList, sketch by file\n");
-	ifstream ifs(inputFile);
-	if(!ifs){
-		fprintf(stderr, "error open the inputFile: %s\n", inputFile.c_str());
-		return false;
-	}
-	vector<string> fileList;
-	string fileName;
-	while(getline(ifs, fileName)){
-		fileList.push_back(fileName);
-	}
+bool sketchFileWithKssd(const vector<string> fileList, const uint64_t minLen, int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
+	//fprintf(stderr, "-----input fileList, sketch by file\n");
+	//ifstream ifs(inputFile);
+	//if(!ifs){
+	//	fprintf(stderr, "error open the inputFile: %s\n", inputFile.c_str());
+	//	return false;
+	//}
+	//vector<string> fileList;
+	//string fileName;
+	//while(getline(ifs, fileName)){
+	//	fileList.push_back(fileName);
+	//}
 
 	static const int BaseMap[128] = 
 	{

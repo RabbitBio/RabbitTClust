@@ -16,7 +16,7 @@ bool cmpNeighbor(NeighborNode n1, NeighborNode n2){
 }
 
 
-inline double calr(double D, int k) {
+double calculateMaxSizeRatio1(double D, int k) {
     if (D < 0) {
         throw std::runtime_error("Mash distance cannot be negative.");
     }
@@ -184,9 +184,10 @@ vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha){
 	return noiseArr;
 }
 
-vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold){
+vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, int start, int end, KssdParameters info, const string folder_path, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold){
 	// init from the dictFile and indexFile
-	int half_k = info.half_k;
+	int start_index = start;
+  int half_k = info.half_k;
 	int drlevel = info.drlevel;
 	bool use64 = half_k - drlevel > 8 ? true : false;
 	int kmer_size = half_k * 2;
@@ -194,7 +195,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 	uint32_t* sketchSizeArr = NULL;
 	size_t* offset = NULL;
 	uint32_t* indexArr = NULL;
-  int radio = calr(threshold, kmer_size-1); 
+  int radio = calculateMaxSizeRatio1(threshold, kmer_size-1); 
   if(use64)
     {
     size_t hash_number;
@@ -299,7 +300,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 	
 	//double step = threshold / denseSpan;
 	//cerr << "the threshold is: " << threshold << endl;
-	//cerr << "the step is: " << step << endl;
+	//cerr << "the step is: " << step << end;
 	int N = sketches.size();
 	denseArr = new int*[denseSpan];
 	int** denseLocalArr = new int*[denseSpan * threads];
@@ -331,17 +332,18 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 	int subSize = 8;
 	int id = 0;
 	//int tailNum = sketches.size() % subSize;
-	int tailNum = (N - start_index) % subSize;
+	int tailNum = (N - start) % subSize;
 	//int N = sketches.size();
 	//uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
-	uint64_t totalCompNum = (uint64_t)(N-start_index) * (uint64_t)(N+start_index)/2;
+	uint64_t totalCompNum = (uint64_t)(N-start) * (uint64_t)(N+start)/2;
 	uint64_t percentNum = totalCompNum / 100;
 	cerr << "---the percentNum is: " << percentNum << endl;
 	cerr << "---the start_index is: " << start_index << endl;
 	uint64_t percentId = 0;
 	#pragma omp parallel for num_threads(threads) schedule (dynamic)
-	for(id = start_index; id < sketches.size() - tailNum; id+=subSize){
-		int thread_id = omp_get_thread_num();
+	//for(id = start_index; id < sketches.size() - tailNum; id+=subSize){
+	for(id = start; id < end - tailNum; id+=subSize){
+    int thread_id = omp_get_thread_num();
 		for(int i = id; i < id+subSize; i++){
 			memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
 			if(use64){
@@ -476,7 +478,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 	}
 
 	if(tailNum != 0){
-		for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
+		for(int i = end-tailNum; i < end; i++){
 			memset(intersectionArr[0], 0, sketches.size() * sizeof(int));
 			if(use64){
 				for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
@@ -626,9 +628,11 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
 	int subSize = 8;
 	int id = 0;
 	int tailNum = sketches.size() % subSize;
-	//int N = sketches.size();
+	//int tailNum = (end_index - start_index) % subSize;
+  //int N = sketches.size();
 	uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
-	uint64_t percentNum = totalCompNum / 100;
+	//uint64_t totalCompNum = (uint64_t)(end_index - start_index) * (uint64_t)(end_index + start_index - 1) / 2;
+  uint64_t percentNum = totalCompNum / 100;
 	cerr << "---the percentNum is: " << percentNum << endl;
 	cerr << "---the start_index is: " << start_index << endl;
 	uint64_t percentId = 0;
