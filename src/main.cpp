@@ -84,7 +84,7 @@ int main(int argc, char * argv[]){
 	bool is_newick_tree = false;
 	bool is_fast = false;
 	bool no_dense = false;
-
+  int half_k = 10;
 	bool noSave = false;
 
 	auto option_threads = app.add_option("-t, --threads", threads,  "set the thread number, default all CPUs of the platform");
@@ -149,7 +149,9 @@ int main(int argc, char * argv[]){
 			return 0;
 		}
 		if(*option_presketched && !*option_append){
-			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, no_dense, isContainment, threshold, threads);
+			
+      clust_from_sketches_fast_MPI(my_rank, comm_sz, half_k, drlevel, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, threshold, noSave, threads);
+      //clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, no_dense, isContainment, threshold, threads);
 			return 0;
 		}
 		if(*option_append && !*option_premsted && !*option_presketched){
