@@ -29,6 +29,7 @@
 #include <math.h>
 #include "Sketch_IO.h"
 
+#include <mpi.h>
 #ifdef GREEDY_CLUST
 #include "greedy.h"
 #endif
@@ -40,7 +41,6 @@
 
 #include "CLI11.hpp"
 #include "sub_command.h"
-
 #ifdef GREEDY_CLUST
 #else
 #endif
@@ -49,7 +49,12 @@
 using namespace std;
 
 int main(int argc, char * argv[]){
-	#ifdef GREEDY_CLUST
+	int my_rank, comm_sz;
+	MPI_Init(&argc, &argv);
+	MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
+	MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);	
+  
+  #ifdef GREEDY_CLUST
 		CLI::App app{"clust-greedy v.2.2.1, greedy incremental clustering module for RabbitTClust"};
 	#else
 		CLI::App app{"clust-mst v.2.2.1, minimum-spanning-tree-based module for RabbitTClust"};
@@ -79,7 +84,7 @@ int main(int argc, char * argv[]){
 	bool is_newick_tree = false;
 	bool is_fast = false;
 	bool no_dense = false;
-
+  int half_k = 10;
 	bool noSave = false;
 
 	auto option_threads = app.add_option("-t, --threads", threads,  "set the thread number, default all CPUs of the platform");
@@ -144,7 +149,9 @@ int main(int argc, char * argv[]){
 			return 0;
 		}
 		if(*option_presketched && !*option_append){
-			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, no_dense, isContainment, threshold, threads);
+			
+      clust_from_sketches_fast_MPI(my_rank, comm_sz, half_k, drlevel, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, threshold, noSave, threads);
+      //clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, no_dense, isContainment, threshold, threads);
 			return 0;
 		}
 		if(*option_append && !*option_premsted && !*option_presketched){
@@ -158,8 +165,10 @@ int main(int argc, char * argv[]){
 		if(!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)){
 			return 1;
 		}
-		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
-		return 0;
+		//clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
+		
+	clust_from_genomes_fast_MPI(my_rank, comm_sz,inputFile, outputFile,folder_path, is_newick_tree, no_dense,sketchByFile, isContainment, kmerSize,threshold, drlevel, minLen, noSave, threads);
+    return 0;
 	}
 
 	if(*option_premsted && !*option_append){
@@ -210,7 +219,7 @@ int main(int argc, char * argv[]){
 
   }
 	
-	clust_from_genomes(inputFile, outputFile, is_newick_tree, sketchByFile, no_dense, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads);
+	clust_from_genomes_fast_MPI(my_rank, comm_sz,inputFile, outputFile,folder_path, is_newick_tree, no_dense,sketchByFile, isContainment, kmerSize,threshold, drlevel, minLen, noSave, threads);
 
 	return 0;
 }//end main

@@ -9,6 +9,18 @@ bool cmpIndex(SketchInfo s1, SketchInfo s2){
 	return s1.id < s2.id;
 }
 
+bool KssdcmpIndex(KssdSketchInfo s1, KssdSketchInfo s2){
+	return s1.id < s2.id;
+}
+
+bool cmpSketchSize(KssdSketchInfo s1, KssdSketchInfo s2){
+	if(s1.sketchsize > s2.sketchsize)	return true;
+	else if(s1.sketchsize == s2.sketchsize)	return s1.id < s2.id;
+	else	return false;
+}
+
+
+
 void read_sketch_parameters(string folder_path, int& sketch_func_id, int& kmer_size, bool& is_containment, int& contain_compress, int& sketch_size, int& half_k, int& half_subk, int& drlevel){
 	string hash_file = folder_path + '/' + "hash.sketch";
 	FILE * fp_hash = fopen(hash_file.c_str(), "r");
@@ -274,10 +286,11 @@ bool loadKssdSketches(string folderPath, int threads, vector<KssdSketchInfo>& sk
 			vector<uint32_t> hash_arr(buffer_hash_arr, buffer_hash_arr+cur_hash_number);
 			sketches[i].hash32_arr = hash_arr;
 			sketches[i].id = i;
-		}
+		  sketches[i].sketchsize = hash_arr.size(); 
+    }
 	}
-
-	//std::sort(sketches.begin(), sketches.end(), cmpIndex);
+   
+	//std::sort(sketches.begin(), sketches.end(), cmpSketchSize);
 	return sketch_by_file;
 }
 
@@ -442,7 +455,14 @@ bool load_kssd_genome_info(string folderPath, string type, vector<KssdSketchInfo
 				buffer_seq_comment = new char [max_seq_comment_length+1];
 			}
 			int cur_seq_name_length = fread(buffer_seq_name, sizeof(char), seq_name_length, fp_info);
-			assert(cur_seq_name_length == seq_name_length);
+			
+     
+if (cur_seq_name_length != seq_name_length) {
+    fprintf(stderr, "ERROR: Sequence name length mismatch!\n");
+    fprintf(stderr, "Expected length: %zu, but got length: %zu\n", seq_name_length, cur_seq_name_length);
+}
+      
+      assert(cur_seq_name_length == seq_name_length);
 			int cur_seq_comment_length = fread(buffer_seq_comment, sizeof(char), seq_comment_length, fp_info);
 			assert(cur_seq_comment_length == seq_comment_length);
 			string seq_name, seq_comment;
