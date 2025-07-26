@@ -1460,7 +1460,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 
     if (my_rank == 0) {
       sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
-      transSketches(sketches, info, folder_path, threads);
+      //transSketches(sketches, info, folder_path, threads);
 
       string sum_info_file = folder_path + '/' + "kssd.info.sketch";
       string sum_hash_file = folder_path + '/' + "kssd.hash.sketch";
