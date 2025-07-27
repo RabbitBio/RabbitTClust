@@ -1139,7 +1139,7 @@ bool sketchFileWithKssd(const vector<string> fileList, const uint64_t minLen, in
 		gzclose(fp1);
 		kseq_destroy(ks1);
 	}//end for
-	sort(sketches.begin(), sketches.end(), KssdcmpSketchSize);
+	//sort(sketches.begin(), sketches.end(), KssdcmpSketchSize);
 	return true;
 }
 
