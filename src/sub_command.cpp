@@ -1246,7 +1246,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 #ifdef Timer
     cerr << "========time of saveMST is: " << t4 - t3 << "========" << endl;
 #endif
-
+    MPI_Barrier(MPI_COMM_WORLD);
     string info_file = folder_path + '/' + "kssd.info.mst";
     string edge_file = folder_path + '/' + "edge.mst";
     char * info_buffer;
@@ -1261,8 +1261,8 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
     system(cmd1.c_str());
 
     if(my_rank != 0){
-      MPI_Send(&info_size, 1, MPI_UNSIGNED_LONG, 0, my_rank, MPI_COMM_WORLD);
-      MPI_Send(&edge_size, 1, MPI_UNSIGNED_LONG, 0, my_rank+comm_sz, MPI_COMM_WORLD);
+      MPI_Send(&info_size, 1, MPI_UINT64_T, 0, my_rank, MPI_COMM_WORLD);
+      MPI_Send(&edge_size, 1, MPI_UINT64_T, 0, my_rank+comm_sz, MPI_COMM_WORLD);
       MPI_Send(info_buffer, info_size, MPI_CHAR, 0, my_rank+comm_sz*2, MPI_COMM_WORLD);
       MPI_Send(edge_buffer, edge_size, MPI_CHAR, 0, my_rank+comm_sz*3, MPI_COMM_WORLD);
     }
@@ -1271,8 +1271,8 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
       vector<EdgeInfo> sum_mst;
       sum_mst.insert(sum_mst.end(), my_mst.begin(), my_mst.end());
       for(int id = 1; id < comm_sz; id++){
-        MPI_Recv(&recv_info_size, 1, MPI_UNSIGNED_LONG, id, id, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(&recv_edge_size, 1, MPI_UNSIGNED_LONG, id, id+comm_sz, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&recv_info_size, 1, MPI_UINT64_T, id, id, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&recv_edge_size, 1, MPI_UINT64_T, id, id+comm_sz, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         char * recv_info_buffer = new char[recv_info_size];
         char * recv_edge_buffer = new char[recv_edge_size];
         MPI_Recv(recv_info_buffer, recv_info_size, MPI_CHAR, id, id+comm_sz*2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -1332,16 +1332,16 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
     if(my_rank != 0){
       //MPI_Send(info_buffer, info_size, MPI_CHAR, 0, 0, MPI_COMM_WORLD);
       //MPI_Send(hash_buffer, hash_size, MPI_CHAR, 0, 1, MPI_COMM_WORLD);
-      MPI_Send(&info_size, 1, MPI_UNSIGNED_LONG, 0, my_rank, MPI_COMM_WORLD);
-      MPI_Send(&hash_size, 1, MPI_UNSIGNED_LONG, 0, my_rank+comm_sz, MPI_COMM_WORLD);
+      MPI_Send(&info_size, 1, MPI_UINT64_T, 0, my_rank, MPI_COMM_WORLD);
+      MPI_Send(&hash_size, 1, MPI_UINT64_T, 0, my_rank+comm_sz, MPI_COMM_WORLD);
       MPI_Send(info_buffer, info_size, MPI_CHAR, 0, my_rank+comm_sz*2, MPI_COMM_WORLD);
       MPI_Send(hash_buffer, hash_size, MPI_CHAR, 0, my_rank+comm_sz*3, MPI_COMM_WORLD);
 
       size_t sum_info_size, sum_hash_size, sum_index_size, sum_dict_size;
-      MPI_Recv(&sum_info_size, 1, MPI_UNSIGNED_LONG, 0, 101, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-      MPI_Recv(&sum_index_size, 1, MPI_UNSIGNED_LONG, 0, 102, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-      MPI_Recv(&sum_hash_size, 1, MPI_UNSIGNED_LONG, 0, 103, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-      MPI_Recv(&sum_dict_size, 1, MPI_UNSIGNED_LONG, 0, 104, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(&sum_info_size, 1, MPI_UINT64_T, 0, 101, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(&sum_index_size, 1, MPI_UINT64_T, 0, 102, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(&sum_hash_size, 1, MPI_UINT64_T, 0, 103, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(&sum_dict_size, 1, MPI_UINT64_T, 0, 104, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
       char * sum_info_buffer = new char[sum_info_size];
       char * sum_hash_buffer = new char[sum_hash_size];
       char * sum_index_buffer = new char[sum_index_size];
@@ -1361,8 +1361,8 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
       //string cmd0 = "mkdir -p " + tmp_recv_folder_path;
       //system(cmd0.c_str());
       for(int id = 1; id < comm_sz; id++){
-        MPI_Recv(&info_size_arr[id], 1, MPI_UNSIGNED_LONG, id, id, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(&hash_size_arr[id], 1, MPI_UNSIGNED_LONG, id, id+comm_sz, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&info_size_arr[id], 1, MPI_UINT64_T, id, id, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&hash_size_arr[id], 1, MPI_UINT64_T, id, id+comm_sz, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         //cout << info_size_arr[id] << '\t' << hash_size_arr[id] << endl;
         char * recv_info_buffer = new char[info_size_arr[id]];
         char * recv_hash_buffer = new char[hash_size_arr[id]];
@@ -1394,10 +1394,10 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
       build_message(sum_hash_buffer, sum_hash_size, sum_hash_file);
       build_message(sum_dict_buffer, sum_dict_size, sum_dict_file);
       for(int id = 1; id < comm_sz; id++){
-        MPI_Send(&sum_info_size, 1, MPI_UNSIGNED_LONG, id, 101, MPI_COMM_WORLD);
-        MPI_Send(&sum_index_size, 1, MPI_UNSIGNED_LONG, id, 102, MPI_COMM_WORLD);
-        MPI_Send(&sum_hash_size, 1, MPI_UNSIGNED_LONG, id, 103, MPI_COMM_WORLD);
-        MPI_Send(&sum_dict_size, 1, MPI_UNSIGNED_LONG, id, 104, MPI_COMM_WORLD);
+        MPI_Send(&sum_info_size, 1, MPI_UINT64_T, id, 101, MPI_COMM_WORLD);
+        MPI_Send(&sum_index_size, 1, MPI_UINT64_T, id, 102, MPI_COMM_WORLD);
+        MPI_Send(&sum_hash_size, 1, MPI_UINT64_T, id, 103, MPI_COMM_WORLD);
+        MPI_Send(&sum_dict_size, 1, MPI_UINT64_T, id, 104, MPI_COMM_WORLD);
         MPI_Send(sum_info_buffer, sum_info_size, MPI_CHAR, id, 201, MPI_COMM_WORLD);
         MPI_Send(sum_hash_buffer, sum_hash_size, MPI_CHAR, id, 202, MPI_COMM_WORLD);
         MPI_Send(sum_index_buffer, sum_index_size, MPI_CHAR, id, 203, MPI_COMM_WORLD);
@@ -1415,8 +1415,8 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
     int start_index, end_index;
     if(my_rank != 0){
       MPI_Send(&threads, 1, MPI_INT, 0, my_rank+comm_sz*4, MPI_COMM_WORLD);
-      MPI_Recv(&start_index, 1, MPI_UNSIGNED_LONG, 0, my_rank+comm_sz*5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-      MPI_Recv(&end_index, 1, MPI_UNSIGNED_LONG, 0, my_rank+comm_sz*6, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(&start_index, 1, MPI_UINT64_T, 0, my_rank+comm_sz*5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(&end_index, 1, MPI_UINT64_T, 0, my_rank+comm_sz*6, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
     else{
       int* thread_arr = new int[comm_sz];
@@ -1455,8 +1455,8 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
       end_index = end_index_arr[0];
       for(int i = 1; i < comm_sz; i++){
         cerr << "start_index: " << start_index_arr[i] << '\t' << "end_index: " << end_index_arr[i] << endl;
-        MPI_Send(&start_index_arr[i], 1, MPI_UNSIGNED_LONG, i, i+comm_sz*5, MPI_COMM_WORLD);
-        MPI_Send(&end_index_arr[i], 1, MPI_UNSIGNED_LONG, i, i+comm_sz*6, MPI_COMM_WORLD);
+        MPI_Send(&start_index_arr[i], 1, MPI_UINT64_T, i, i+comm_sz*5, MPI_COMM_WORLD);
+        MPI_Send(&end_index_arr[i], 1, MPI_UINT64_T, i, i+comm_sz*6, MPI_COMM_WORLD);
       }
     }
     string tmp_str = "++++++++++++my rank: " + to_string(my_rank) + ", start_index: " + to_string(start_index) + ", end_index: " + to_string(end_index);
@@ -1498,7 +1498,6 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
       info_size_arr[my_rank] = info_size;
       hash_size_arr[my_rank] = hash_size;
 
-      // 释放这部分不再需要的内存
       delete[] info_buffer;
       delete[] hash_buffer;
       info_buffer = nullptr;
@@ -1530,10 +1529,10 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 
     // Step 1: Rank 0 broadcasts the sizes of the buffers to all other processes.
 
-    MPI_Bcast(&sum_info_size, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&sum_index_size, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&sum_hash_size, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&sum_dict_size, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&sum_info_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&sum_index_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&sum_hash_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&sum_dict_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
 
 
     // Step 2: All processes (including rank 0) allocate memory based on the received sizes.
@@ -1574,71 +1573,11 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
     delete[] hash_size_arr; // Don't forget this one from the beginning 
     delete[] info_size_arr; // Don't forget this one from the beginning 
 
-
-    //build_message(info_buffer, info_size, info_file);
-    //build_message(hash_buffer, hash_size, hash_file);
-    //cerr << "=====================finished the build_message " << my_rank << endl;
-    //info_size_arr[my_rank] = info_size;
-    //hash_size_arr[my_rank] = hash_size;
-
-    //if (my_rank != 0) {
-    //    size_t sum_info_size, sum_hash_size, sum_index_size, sum_dict_size;
-    //    MPI_Recv(&sum_info_size, 1, MPI_UNSIGNED_LONG, 0, 101, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    //    MPI_Recv(&sum_index_size, 1, MPI_UNSIGNED_LONG, 0, 102, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    //    MPI_Recv(&sum_hash_size, 1, MPI_UNSIGNED_LONG, 0, 103, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    //    MPI_Recv(&sum_dict_size, 1, MPI_UNSIGNED_LONG, 0, 104, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    //    char* sum_info_buffer = new char[sum_info_size];
-    //    char* sum_hash_buffer = new char[sum_hash_size];
-    //    char* sum_index_buffer = new char[sum_index_size];
-    //    char* sum_dict_buffer = new char[sum_dict_size];
-    //    MPI_Recv(sum_info_buffer, sum_info_size, MPI_CHAR, 0, 201, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    //    MPI_Recv(sum_hash_buffer, sum_hash_size, MPI_CHAR, 0, 202, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    //    MPI_Recv(sum_index_buffer, sum_index_size, MPI_CHAR, 0, 203, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    //    MPI_Recv(sum_dict_buffer, sum_dict_size, MPI_CHAR, 0, 204, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-    //    vector<KssdSketchInfo>().swap(sketches);
-    //    format_sketches_index(sum_info_buffer, sum_info_size,
-    //                          sum_hash_buffer, sum_hash_size,
-    //                          sum_index_buffer, sum_index_size,
-    //                          sum_dict_buffer, sum_dict_size,
-    //                          folder_path, sketches, sketchByFile, threads);
-    //}
-    //else {
-    //    sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
-    //    transSketches(sketches, info, folder_path, threads);
-    //    string sum_info_file = folder_path + '/' + "kssd.info.sketch";
-    //    string sum_hash_file = folder_path + '/' + "kssd.hash.sketch";
-    //    string sum_index_file = folder_path + '/' + "kssd.sketch.index";
-    //    string sum_dict_file = folder_path + '/' + "kssd.sketch.dict";
-    //    char* sum_info_buffer;
-    //    char* sum_hash_buffer;
-    //    char* sum_index_buffer;
-    //    char* sum_dict_buffer;
-    //    size_t sum_info_size, sum_hash_size, sum_index_size, sum_dict_size;
-    //    build_message(sum_info_buffer, sum_info_size, sum_info_file);
-    //    build_message(sum_index_buffer, sum_index_size, sum_index_file);
-    //    build_message(sum_hash_buffer, sum_hash_size, sum_hash_file);
-    //    build_message(sum_dict_buffer, sum_dict_size, sum_dict_file);
-
-    //    for (int id = 1; id < comm_sz; id++) {
-    //        MPI_Send(&sum_info_size, 1, MPI_UNSIGNED_LONG, id, 101, MPI_COMM_WORLD);
-    //        MPI_Send(&sum_index_size, 1, MPI_UNSIGNED_LONG, id, 102, MPI_COMM_WORLD);
-    //        MPI_Send(&sum_hash_size, 1, MPI_UNSIGNED_LONG, id, 103, MPI_COMM_WORLD);
-    //        MPI_Send(&sum_dict_size, 1, MPI_UNSIGNED_LONG, id, 104, MPI_COMM_WORLD);
-    //        MPI_Send(sum_info_buffer, sum_info_size, MPI_CHAR, id, 201, MPI_COMM_WORLD);
-    //        MPI_Send(sum_hash_buffer, sum_hash_size, MPI_CHAR, id, 202, MPI_COMM_WORLD);
-    //        MPI_Send(sum_index_buffer, sum_index_size, MPI_CHAR, id, 203, MPI_COMM_WORLD);
-    //        MPI_Send(sum_dict_buffer, sum_dict_size, MPI_CHAR, id, 204, MPI_COMM_WORLD);
-    //    }
-    //}
-
-    //cerr << "the sketch size of rank " << my_rank << " is: " << sketches.size() << endl;
-
-    int start_index, end_index;
+    size_t start_index, end_index;
     if (my_rank != 0) {
       MPI_Send(&threads, 1, MPI_INT, 0, my_rank + comm_sz * 4, MPI_COMM_WORLD);
-      MPI_Recv(&start_index, 1, MPI_UNSIGNED_LONG, 0, my_rank + comm_sz * 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-      MPI_Recv(&end_index, 1, MPI_UNSIGNED_LONG, 0, my_rank + comm_sz * 6, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(&start_index, 1, MPI_UINT64_T, 0, my_rank + comm_sz * 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(&end_index, 1, MPI_UINT64_T, 0, my_rank + comm_sz * 6, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
     else {
       int* thread_arr = new int[comm_sz];
@@ -1671,43 +1610,12 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
         end_index_arr[i] = global_index;
       }
       end_index_arr[comm_sz - 1] = max(end_index_arr[comm_sz - 1], N);
-      //			std::vector<size_t> row_workload(N);
-      //			for (size_t r = 0; r < N; r++) {
-      //				row_workload[r] = sketches[r].hash32_arr.size() * (r + 1);
-      //			}
-      //
-      //			size_t total_workload = 0;
-      //			for (auto w : row_workload) total_workload += w;
-      //
-      //			size_t* task_arr = new size_t[comm_sz];
-      //			for (int i = 0; i < comm_sz; i++) {
-      //				task_arr[i] = total_workload * thread_arr[i] / total_threads;
-      //			}
-      //
-      //			size_t* start_index_arr = new size_t[comm_sz];
-      //			size_t* end_index_arr   = new size_t[comm_sz];
-      //
-      //			size_t global_index = 0;
-      //			for (int i = 0; i < comm_sz; i++) {
-      //				start_index_arr[i] = global_index;
-      //				size_t acc = 0;
-      //				while (acc < task_arr[i] && global_index < N) {
-      //					acc += row_workload[global_index];
-      //					global_index++;
-      //				}
-      //				end_index_arr[i] = global_index;
-      //			}
-      //
-      //			end_index_arr[comm_sz - 1] = std::max(end_index_arr[comm_sz - 1], N); 
-
-
-
       start_index = start_index_arr[0];
       end_index = end_index_arr[0];
       for (int i = 1; i < comm_sz; i++) {
         cerr << "start_index: " << start_index_arr[i] << '\t' << "end_index: " << end_index_arr[i] << endl;
-        MPI_Send(&start_index_arr[i], 1, MPI_UNSIGNED_LONG, i, i + comm_sz * 5, MPI_COMM_WORLD);
-        MPI_Send(&end_index_arr[i], 1, MPI_UNSIGNED_LONG, i, i + comm_sz * 6, MPI_COMM_WORLD);
+        MPI_Send(&start_index_arr[i], 1, MPI_UINT64_T, i, i + comm_sz * 5, MPI_COMM_WORLD);
+        MPI_Send(&end_index_arr[i], 1, MPI_UINT64_T, i, i + comm_sz * 6, MPI_COMM_WORLD);
       }
     }
 
