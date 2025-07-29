@@ -47,6 +47,7 @@ vector<EdgeInfo> append_MST(vector<SketchInfo>& pre_sketches, vector<SketchInfo>
 
 vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sketch_func_id, int threads, bool no_dense, int** &denseArr, int denseSpan, uint64_t* &aniArr);
 
+vector<EdgeInfo> compute_kssd_mst_mpi(vector<KssdSketchInfo>& sketches, int start_index, int end_index, KssdParameters info, const string folder_path,  bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold, char* index_buffer, size_t index_size, char* dict_buffer, size_t dict_size);
 vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, int start_index, int end_index, KssdParameters info, const string folder_path,  bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold);
 
 std::vector<EdgeInfo> generateForest(std::vector <EdgeInfo> mst, double threshhold);

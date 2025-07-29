@@ -93,6 +93,58 @@ void format_sketches_index(
 }
 
 
+void format_sketches_index_in_memory(
+    char* info_buffer, size_t info_size,
+    char* hash_buffer, size_t hash_size,
+    char* index_buffer, size_t index_size,
+    char* dict_buffer, size_t dict_size,
+    std::vector<KssdSketchInfo>& sketches)
+{
+  char* p_info = info_buffer;
+  size_t num_sequences;
+  memcpy(&num_sequences, p_info, sizeof(size_t));
+  p_info += sizeof(size_t);
+
+  sketches.resize(num_sequences); // 预先分配好内存
+
+  for (size_t i = 0; i < num_sequences; ++i) {
+    // 读取序列名
+    size_t name_len;
+    memcpy(&name_len, p_info, sizeof(size_t));
+    p_info += sizeof(size_t);
+    sketches[i].fileName.assign(p_info, name_len);
+    p_info += name_len;
+
+  }
+  char* p_index = index_buffer;
+  char* p_dict = dict_buffer;
+
+  size_t hash_number;
+  memcpy(&hash_number, p_index, sizeof(size_t));
+  p_index += sizeof(size_t);
+
+  uint64_t* hash_values = (uint64_t*)p_index;
+  p_index += hash_number * sizeof(uint64_t);
+
+  uint32_t* id_counts = (uint32_t*)p_index;
+
+  for (size_t i = 0; i < hash_number; ++i) {
+    uint64_t current_hash = hash_values[i];
+    uint32_t num_ids = id_counts[i];
+
+    uint32_t* id_list = (uint32_t*)p_dict;
+
+    for (uint32_t j = 0; j < num_ids; ++j) {
+      uint32_t sequence_index = id_list[j];
+      if (sequence_index < sketches.size()) {
+        sketches[sequence_index].hash32_arr.push_back(current_hash);
+      }
+    }
+
+    p_dict += num_ids * sizeof(uint32_t);
+  }
+}
+
 
 //void format_sketches_index(char* info_buffer, size_t info_size, char* hash_buffer, size_t hash_size, char* index_buffer, size_t index_size, char* dict_buffer, size_t dict_size, string folder_path, vector<KssdSketchInfo>& sketches, bool sketch_by_file, int threads){
 //  string info_file = folder_path + '/' + "kssd.info.sketch";
@@ -1223,14 +1275,14 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 
 
 
-  void distribute_compute_clusters(int my_rank, int comm_sz, vector<KssdSketchInfo>& sketches, const KssdParameters info,int start_index, int end_index, bool sketchByFile, string output_file, bool is_newick_tree, string folder_path, double threshold, bool isSave, int threads, bool no_dense, bool isContainment){
+  void distribute_compute_clusters(int my_rank, int comm_sz, vector<KssdSketchInfo>& sketches, const KssdParameters info,int start_index, int end_index, bool sketchByFile, string output_file, bool is_newick_tree, string folder_path, double threshold, bool isSave, int threads, bool no_dense, bool isContainment, char* index_buffer, size_t index_size,char* dict_buffer, size_t dict_size){
     vector<vector<int>> cluster;
     double t2 = get_sec();
     int **denseArr;
     uint64_t* aniArr; //= new uint64_t[101];
     int denseSpan = DENSE_SPAN;
     //======clust-mst=======================================================================
-    vector<EdgeInfo> my_mst = compute_kssd_mst(sketches, start_index, end_index, info, folder_path, no_dense, isContainment, threads, denseArr, denseSpan, aniArr, threshold);
+    vector<EdgeInfo> my_mst = compute_kssd_mst_mpi(sketches, start_index, end_index, info, folder_path, no_dense, isContainment, threads, denseArr, denseSpan, aniArr, threshold, index_buffer, index_size, dict_buffer, dict_size);
     double t3 = get_sec();
 #ifdef Timer
     cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
@@ -1464,7 +1516,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
     MPI_Barrier(MPI_COMM_WORLD);
 
     //compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, folder_path, sketch_func_id, threshold, isSave, threads);
-    distribute_compute_clusters(my_rank, comm_sz, sketches, info, start_index, end_index, sketchByFile, outputFile, is_newick_tree, folder_path, threshold, isSave, threads, no_dense, isContainment);
+    //distribute_compute_clusters(my_rank, comm_sz, sketches, info, start_index, end_index, sketchByFile, outputFile, is_newick_tree, folder_path, threshold, isSave, threads, no_dense, isContainment);
     MPI_Finalize();
   }
 
@@ -1478,33 +1530,8 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
     sketchFunc = "MinHash";
     KssdParameters info;
     if (sketchFunc == "MinHash") sketch_func_id = 0;
-    size_t* info_size_arr = new size_t[comm_sz];
-    size_t* hash_size_arr = new size_t[comm_sz];
-    size_t* index_size_arr = new size_t[comm_sz];
-    string info_file = folder_path + '/' + "kssd.info.sketch";
-    string hash_file = folder_path + '/' + "kssd.hash.sketch";
-    string index_file = folder_path + '/' + "kssd.sketch.index";
-    char* info_buffer;
-    char* hash_buffer;
-    string final_folder;
-    size_t info_size, hash_size, index_size;
     info.half_k = 10;
     info.drlevel = 3;
-
-    if(my_rank ==0){
-      build_message(info_buffer, info_size, info_file);
-      build_message(hash_buffer, hash_size, hash_file);
-      cerr << "=====================finished the build_message " << my_rank << endl;
-      info_size_arr[my_rank] = info_size;
-      hash_size_arr[my_rank] = hash_size;
-
-      delete[] info_buffer;
-      delete[] hash_buffer;
-      info_buffer = nullptr;
-      hash_buffer = nullptr;
-    }
-
-    // Broadcast Logic
     size_t sum_info_size = 0, sum_hash_size = 0, sum_index_size = 0, sum_dict_size = 0;
     char* sum_info_buffer = nullptr;
     char* sum_hash_buffer = nullptr;
@@ -1512,68 +1539,35 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
     char* sum_dict_buffer = nullptr;
 
     if (my_rank == 0) {
-      sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
-      transSketches(sketches, info, folder_path, threads);
-
-      string sum_info_file = folder_path + '/' + "kssd.info.sketch";
-      string sum_hash_file = folder_path + '/' + "kssd.hash.sketch";
-      string sum_index_file = folder_path + '/' + "kssd.sketch.index";
-      string sum_dict_file = folder_path + '/' + "kssd.sketch.dict";
-
-      // Rank 0 reads files to determine sizes and get content
-      build_message(sum_info_buffer, sum_info_size, sum_info_file);
-      build_message(sum_index_buffer, sum_index_size, sum_index_file);
-      build_message(sum_hash_buffer, sum_hash_size, sum_hash_file);
-      build_message(sum_dict_buffer, sum_dict_size, sum_dict_file);
+        sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
+        transSketches_in_memory(sketches, info, threads,
+                                sum_info_buffer, sum_info_size,
+                                sum_hash_buffer, sum_hash_size,
+                                sum_index_buffer, sum_index_size,
+                                sum_dict_buffer, sum_dict_size);
     }
 
-    // Step 1: Rank 0 broadcasts the sizes of the buffers to all other processes.
+    int num_sketches = (my_rank == 0) ? sketches.size() : 0;
+    MPI_Bcast(&num_sketches, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    
+    if (my_rank != 0) {
+        sketches.resize(num_sketches); 
+    }
+    
 
-    MPI_Bcast(&sum_info_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
     MPI_Bcast(&sum_index_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&sum_hash_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
     MPI_Bcast(&sum_dict_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-
-
-    // Step 2: All processes (including rank 0) allocate memory based on the received sizes.
+    
     if (my_rank != 0) {
-      sum_info_buffer = new char[sum_info_size];
-      sum_index_buffer = new char[sum_index_size];
-      sum_hash_buffer = new char[sum_hash_size];
-      sum_dict_buffer = new char[sum_dict_size];
+        if (sum_index_size > 0) sum_index_buffer = new char[sum_index_size];
+        if (sum_dict_size > 0) sum_dict_buffer = new char[sum_dict_size];
     }
+    
+    if (sum_index_size > 0) SafeBcast(sum_index_buffer, sum_index_size, 0, MPI_COMM_WORLD);
+    if (sum_dict_size > 0) SafeBcast(sum_dict_buffer, sum_dict_size, 0, MPI_COMM_WORLD);
 
-    // Step 3: Rank 0 broadcasts the actual data to all other processes.
-    SafeBcast(sum_info_buffer, sum_info_size, 0, MPI_COMM_WORLD);
-    SafeBcast(sum_hash_buffer, sum_hash_size, 0, MPI_COMM_WORLD);
-    SafeBcast(sum_index_buffer, sum_index_size, 0, MPI_COMM_WORLD);
-    SafeBcast(sum_dict_buffer, sum_dict_size, 0, MPI_COMM_WORLD);
 
-    char sketch_by_file_char = sketchByFile;
-    MPI_Bcast(&sketch_by_file_char, 1, MPI_CHAR, 0, MPI_COMM_WORLD);
-    sketchByFile = sketch_by_file_char;
-
-    // Now, all processes have a copy of the data.
-    // Non-zero ranks can proceed with their work.
-    if (my_rank != 0) {
-      vector<KssdSketchInfo>().swap(sketches);
-      format_sketches_index(sum_info_buffer, sum_info_size,
-          sum_hash_buffer, sum_hash_size,
-          sum_index_buffer, sum_index_size,
-          sum_dict_buffer, sum_dict_size,
-          folder_path, sketches, sketchByFile, threads,  my_rank);
-    }
-
-    // CRITICAL: Clean up all allocated memory before exiting.
-    delete[] sum_info_buffer;
-    delete[] sum_index_buffer;
-    delete[] sum_hash_buffer;
-    delete[] sum_dict_buffer;
-    delete[] index_size_arr; // Don't forget this one from the beginning 
-    delete[] hash_size_arr; // Don't forget this one from the beginning 
-    delete[] info_size_arr; // Don't forget this one from the beginning 
-
-    size_t start_index, end_index;
+    int start_index, end_index;
     if (my_rank != 0) {
       MPI_Send(&threads, 1, MPI_INT, 0, my_rank + comm_sz * 4, MPI_COMM_WORLD);
       MPI_Recv(&start_index, 1, MPI_UINT64_T, 0, my_rank + comm_sz * 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -1626,8 +1620,12 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
     distribute_compute_clusters(my_rank, comm_sz, sketches, info,
         start_index, end_index,
         sketchByFile, outputFile, is_newick_tree, folder_path,
-        threshold, isSave, threads, no_dense, isContainment);
+        threshold, isSave, threads, no_dense, isContainment,  sum_index_buffer, sum_index_size,  sum_dict_buffer,  sum_dict_size);
 
+    delete[] sum_info_buffer;
+    delete[] sum_index_buffer;
+    delete[] sum_hash_buffer;
+    delete[] sum_dict_buffer;
     MPI_Finalize();
   }
 
