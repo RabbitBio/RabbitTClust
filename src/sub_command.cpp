@@ -10,7 +10,8 @@ void SafeBcast(char* buf, size_t total_size, int root, MPI_Comm comm) {
   const size_t chunk = 512*1024*1024;  
   for (size_t offset = 0; offset < total_size; offset += chunk) {
     size_t send = std::min(chunk, total_size - offset);
-    MPI_Bcast(buf + offset, send, MPI_CHAR, root, comm);
+    //MPI_Bcast(buf + offset, send, MPI_CHAR, root, comm);
+    MPI_Bcast(buf + offset, static_cast<int>(send), MPI_CHAR, root, comm);
   }
 }
 
@@ -1277,6 +1278,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 
   void distribute_compute_clusters(int my_rank, int comm_sz, vector<KssdSketchInfo>& sketches, const KssdParameters info,int start_index, int end_index, bool sketchByFile, string output_file, bool is_newick_tree, string folder_path, double threshold, bool isSave, int threads, bool no_dense, bool isContainment, char* index_buffer, size_t index_size,char* dict_buffer, size_t dict_size){
     vector<vector<int>> cluster;
+    cerr << "======== sketch_size: " << sketches[0].hash32_arr.size() << "========" << endl;
     double t2 = get_sec();
     int **denseArr;
     uint64_t* aniArr; //= new uint64_t[101];
@@ -1538,33 +1540,33 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
     char* sum_index_buffer = nullptr;
     char* sum_dict_buffer = nullptr;
 
-    if (my_rank == 0) {
-        sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
-        transSketches_in_memory(sketches, info, threads,
+    //if (my_rank == 0) {
+    sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
+    transSketches_in_memory(sketches, info, threads,
                                 sum_info_buffer, sum_info_size,
                                 sum_hash_buffer, sum_hash_size,
                                 sum_index_buffer, sum_index_size,
                                 sum_dict_buffer, sum_dict_size);
-    }
+    //}
 
     int num_sketches = (my_rank == 0) ? sketches.size() : 0;
     MPI_Bcast(&num_sketches, 1, MPI_INT, 0, MPI_COMM_WORLD);
     
-    if (my_rank != 0) {
-        sketches.resize(num_sketches); 
-    }
+    //if (my_rank != 0) {
+    //    sketches.resize(num_sketches); 
+    //}
     
 
-    MPI_Bcast(&sum_index_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&sum_dict_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+    //MPI_Bcast(&sum_index_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+    //MPI_Bcast(&sum_dict_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
     
-    if (my_rank != 0) {
-        if (sum_index_size > 0) sum_index_buffer = new char[sum_index_size];
-        if (sum_dict_size > 0) sum_dict_buffer = new char[sum_dict_size];
-    }
-    
-    if (sum_index_size > 0) SafeBcast(sum_index_buffer, sum_index_size, 0, MPI_COMM_WORLD);
-    if (sum_dict_size > 0) SafeBcast(sum_dict_buffer, sum_dict_size, 0, MPI_COMM_WORLD);
+    //if (my_rank != 0) {
+    //    if (sum_index_size > 0) sum_index_buffer = new char[sum_index_size];
+    //    if (sum_dict_size > 0) sum_dict_buffer = new char[sum_dict_size];
+    //}
+    //
+    //if (sum_index_size > 0) SafeBcast(sum_index_buffer, sum_index_size, 0, MPI_COMM_WORLD);
+    //if (sum_dict_size > 0) SafeBcast(sum_dict_buffer, sum_dict_size, 0, MPI_COMM_WORLD);
 
 
     int start_index, end_index;

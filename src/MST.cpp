@@ -190,7 +190,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, int start, i
 	int start_index = start;
   int half_k = info.half_k;
 	int drlevel = info.drlevel;
-	bool use64 = half_k - drlevel > 8 ? true : false;
+  bool use64 = half_k - drlevel > 8 ? true : false;
 	int kmer_size = half_k * 2;
 	robin_hood::unordered_map<uint64_t, vector<uint32_t>> hash_map_arr;
 	uint32_t* sketchSizeArr = NULL;
