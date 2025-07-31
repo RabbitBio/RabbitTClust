@@ -188,18 +188,18 @@ vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha){
 vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, int start, int end, KssdParameters info, const string folder_path, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold){
 	// init from the dictFile and indexFile
 	int start_index = start;
-  int half_k = info.half_k;
+	int half_k = info.half_k;
 	int drlevel = info.drlevel;
-  bool use64 = half_k - drlevel > 8 ? true : false;
+	bool use64 = half_k - drlevel > 8 ? true : false;
 	int kmer_size = half_k * 2;
 	robin_hood::unordered_map<uint64_t, vector<uint32_t>> hash_map_arr;
 	uint32_t* sketchSizeArr = NULL;
 	size_t* offset = NULL;
 	uint32_t* indexArr = NULL;
-  int radio = calculateMaxSizeRatio1(threshold, kmer_size-1); 
-  if(use64)
-    {
-    size_t hash_number;
+	int radio = calculateMaxSizeRatio1(threshold, kmer_size-1); 
+	if(use64)
+	{
+		size_t hash_number;
 		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
 		FILE* fp_index = fopen(cur_index_file.c_str(), "rb");
 		if(!fp_index){
@@ -215,7 +215,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, int start, i
 			cerr << "ERROR: compute_kssd_mst(), error read hash_number, hash_arr, and hash_size_arr" << endl;
 			exit(1);
 		}
-		
+
 		fclose(fp_index);
 
 		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
@@ -298,7 +298,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, int start, i
 
 	//int denseSpan = 10;
 	double step = 1.0 / denseSpan;
-	
+
 	//double step = threshold / denseSpan;
 	//cerr << "the threshold is: " << threshold << endl;
 	//cerr << "the step is: " << step << end;
@@ -323,7 +323,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, int start, i
 		threadsANI[i] = new uint64_t[101];
 		memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
 	}
-		
+
 	// start to generate the sub_mst
 	vector<EdgeInfo> mstArr[threads];
 	int** intersectionArr = new int*[threads];
@@ -341,10 +341,10 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, int start, i
 	cerr << "---the percentNum is: " << percentNum << endl;
 	cerr << "---the start_index is: " << start_index << endl;
 	uint64_t percentId = 0;
-	#pragma omp parallel for num_threads(threads) schedule (dynamic)
+#pragma omp parallel for num_threads(threads) schedule (dynamic)
 	//for(id = start_index; id < sketches.size() - tailNum; id+=subSize){
 	for(id = start; id < end - tailNum; id+=subSize){
-    int thread_id = omp_get_thread_num();
+		int thread_id = omp_get_thread_num();
 		for(int i = id; i < id+subSize; i++){
 			memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
 			if(use64){
@@ -385,12 +385,12 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, int start, i
 					size0 = sketches[i].hash32_arr.size();
 					size1 = sketches[j].hash32_arr.size();
 				}
-				
+
 				if (std::max(size0, size1) > radio * std::min(size0, size1)) {
 					continue;
 				}
-        
-        if(!isContainment){
+
+				if(!isContainment){
 					int denom = size0 + size1 - common;
 					double jaccard;
 					if(size0 == 0 || size1 == 0)
@@ -435,7 +435,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, int start, i
 					assert(ANI < 101);
 					threadsANI[thread_id][ANI]++;
 				}
-					
+
 				EdgeInfo tmpE{i, j, tmpDist};
 				mstArr[thread_id].push_back(tmpE);
 			}
@@ -596,9 +596,10 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, int start, i
 
 
 
-vector<EdgeInfo> compute_kssd_mst_mpi(vector<KssdSketchInfo>& sketches, int start, int end, KssdParameters info, const string folder_path, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold, char* index_buffer, size_t index_size, char* dict_buffer, size_t dict_size){
+vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold, char* index_buffer, size_t index_size, char* dict_buffer, size_t dict_size){
 	// init from the dictFile and indexFile
-	int start_index = start;
+	int start = 0;
+  int start_index = start;
 	int half_k = info.half_k;
 	int drlevel = info.drlevel;
 	bool use64 = half_k - drlevel > 8 ? true : false;
@@ -608,21 +609,9 @@ vector<EdgeInfo> compute_kssd_mst_mpi(vector<KssdSketchInfo>& sketches, int star
 	size_t* offset = NULL;
 	uint32_t* indexArr = NULL;
 	int radio = calculateMaxSizeRatio1(threshold, kmer_size-1); 
-	//char* p_index = index_buffer;
-
-	//size_t hash_number;
-	//memcpy(&hash_number, p_index, sizeof(size_t));
-	//p_index += sizeof(size_t);
-
-	//uint32_t* hash_values = (uint32_t*)p_index;
-	//p_index += hash_number * sizeof(uint32_t);
-
-	//uint32_t* id_counts = (uint32_t*)p_index;
-
-	//uint32_t* dict_data = (uint32_t*)dict_buffer; 
 	if(use64)
-	  {
-	  size_t hash_number;
+	{
+		size_t hash_number;
 		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
 		FILE* fp_index = fopen(cur_index_file.c_str(), "rb");
 		if(!fp_index){
@@ -638,7 +627,7 @@ vector<EdgeInfo> compute_kssd_mst_mpi(vector<KssdSketchInfo>& sketches, int star
 			cerr << "ERROR: compute_kssd_mst(), error read hash_number, hash_arr, and hash_size_arr" << endl;
 			exit(1);
 		}
-		
+
 		fclose(fp_index);
 
 		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
@@ -670,21 +659,21 @@ vector<EdgeInfo> compute_kssd_mst_mpi(vector<KssdSketchInfo>& sketches, int star
 		fclose(fp_dict);
 	}
 	else{
-			cerr << "-----not use hash64 in compute_kssd_mst() " << endl;
-        char* p_index = index_buffer;
-        
-        size_t hashSize;
-        uint64_t totalIndex;
-        memcpy(&hashSize, p_index, sizeof(size_t));
-        p_index += sizeof(size_t);
-        memcpy(&totalIndex, p_index, sizeof(uint64_t));
-        p_index += sizeof(uint64_t);
+		cerr << "-----not use hash64 in compute_kssd_mst() " << endl;
+		char* p_index = index_buffer;
 
-        sketchSizeArr = new uint32_t[hashSize];
-        memcpy(sketchSizeArr, p_index, hashSize * sizeof(uint32_t));
+		size_t hashSize;
+		uint64_t totalIndex;
+		memcpy(&hashSize, p_index, sizeof(size_t));
+		p_index += sizeof(size_t);
+		memcpy(&totalIndex, p_index, sizeof(uint64_t));
+		p_index += sizeof(uint64_t);
 
-        indexArr = new uint32_t[totalIndex];
-        memcpy(indexArr, dict_buffer, totalIndex * sizeof(uint32_t));
+		sketchSizeArr = new uint32_t[hashSize];
+		memcpy(sketchSizeArr, p_index, hashSize * sizeof(uint32_t));
+
+		indexArr = new uint32_t[totalIndex];
+		memcpy(indexArr, dict_buffer, totalIndex * sizeof(uint32_t));
 
 		offset = new size_t[hashSize];
 		uint64_t totalHashNumber = 0;
@@ -697,60 +686,10 @@ vector<EdgeInfo> compute_kssd_mst_mpi(vector<KssdSketchInfo>& sketches, int star
 			cerr << "ERROR: compute_kssd_mst(), mismatched total hash number in memory" << endl;
 			exit(1);
 		}	
-	//	size_t hashSize;
-	//	uint64_t totalIndex;
-	//	string cur_index_file = folder_path + '/' + "kssd.sketch.index";
-	//	FILE * fp_index = fopen(cur_index_file.c_str(), "rb");
-	//	if(!fp_index){
-	//		cerr << "ERROR: compute_kssd_mst(), cannot open the index sketch file: " << cur_index_file << endl;
-	//		exit(1);
-	//	}
-	//	int read_hash_size = fread(&hashSize, sizeof(size_t), 1, fp_index);
-	//	int read_total_index = fread(&totalIndex, sizeof(uint64_t), 1, fp_index);
-	//	//sketchSizeArr = (uint32_t*)malloc(hashSize * sizeof(uint32_t));
-	//	sketchSizeArr = new uint32_t[hashSize];
-	//	size_t read_sketch_size_arr = fread(sketchSizeArr, sizeof(uint32_t), hashSize, fp_index);
-
-	//	//offset = (size_t*)malloc(hashSize * sizeof(size_t));
-	//	offset = new size_t[hashSize];
-	//	uint64_t totalHashNumber = 0;
-	//	for(size_t i = 0; i < hashSize; i++){
-	//		totalHashNumber += sketchSizeArr[i];
-	//		offset[i] = sketchSizeArr[i];
-	//		if(i > 0) offset[i] += offset[i-1];
-	//	}
-	//	if(totalHashNumber != totalIndex){
-	//		cerr << "ERROR: compute_kssd_mst(), mismatched total hash number" << endl;
-	//		exit(1);
-	//	}
-	//	fclose(fp_index);
-
-	//	//cerr << "the hashSize is: " << hashSize << endl;
-	//	//cerr << "totalIndex is: " << totalIndex << endl;
-	//	//cerr << "totalHashNumber is: " << totalHashNumber << endl;
-	//	//cerr << "offset[n-1] is: " << offset[hashSize-1] << endl;;
-
-	//	//indexArr = (uint32_t*)malloc(totalHashNumber * sizeof(uint32_t));
-	//	indexArr = new uint32_t[totalHashNumber];
-	//	string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
-	//	FILE * fp_dict = fopen(cur_dict_file.c_str(), "rb");
-	//	if(!fp_dict){
-	//		cerr << "ERROR: compute_kssd_mst(), cannot open the dictionary sketch file: " << cur_dict_file << endl;
-	//		exit(1);
-	//	}
-	//	size_t read_index_arr = fread(indexArr, sizeof(uint32_t), totalHashNumber, fp_dict);
-	//	if(read_hash_size != 1 || read_total_index != 1 || read_sketch_size_arr != hashSize || read_index_arr != totalHashNumber){
-	//		cerr << "ERROR: compute_kssd_mst(), error read hash_size, total_index, sketch_size_arr, index_arr" << endl;
-	//		exit(1);
-	//	}
 	}
 
-	//int denseSpan = 10;
 	double step = 1.0 / denseSpan;
 
-	//double step = threshold / denseSpan;
-	//cerr << "the threshold is: " << threshold << endl;
-	//cerr << "the step is: " << step << end;
 	int N = sketches.size();
 	denseArr = new int*[denseSpan];
 	int** denseLocalArr = new int*[denseSpan * threads];
@@ -764,7 +703,6 @@ vector<EdgeInfo> compute_kssd_mst_mpi(vector<KssdSketchInfo>& sketches, int star
 			memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
 		}
 	}
-	//for ANI distribution calculation.
 	aniArr = new uint64_t[101];
 	memset(aniArr, 0, 101 * sizeof(uint64_t));
 	uint64_t** threadsANI = new uint64_t*[threads];
@@ -773,32 +711,27 @@ vector<EdgeInfo> compute_kssd_mst_mpi(vector<KssdSketchInfo>& sketches, int star
 		memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
 	}
 
-	// start to generate the sub_mst
 	vector<EdgeInfo> mstArr[threads];
 	int** intersectionArr = new int*[threads];
 	for(int i = 0; i < threads; i++){
-		//	intersectionArr[i] = new int[sketches.size()];
 		intersectionArr[i] = new int[N];
 	}
 	int subSize = 8;
 	int id = 0;
-	//int tailNum = sketches.size() % subSize;
 	int tailNum = (N - start) % subSize;
-	//int N = sketches.size();
-	//uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
-	//uint64_t totalCompNum = (uint64_t)(N-start) * (uint64_t)(N+start)/2;
 	uint64_t totalCompNum = (uint64_t)N * N / 2 - (uint64_t)start * start / 2;
 	uint64_t percentNum = totalCompNum / 100;
 	cerr << "---the percentNum is: " << percentNum << endl;
 	cerr << "---the start_index is: " << start_index << endl;
 	uint64_t percentId = 0;
 #pragma omp parallel for num_threads(threads) schedule (dynamic)
-	//for(id = start_index; id < sketches.size() - tailNum; id+=subSize){
-	for(id = start; id < end - tailNum; id+=subSize){
+	for (size_t id = my_rank * subSize; id < sketches.size(); id += subSize * comm_sz){
 		int thread_id = omp_get_thread_num();
-		for(int i = id; i < id+subSize; i++){
+		size_t real_end = std::min(id + subSize, sketches.size());
+		for(int i = id; i < real_end; i++){
+		//	memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
 			memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
-			if(use64){
+      if(use64){
 				for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
 					uint64_t hash64 = sketches[i].hash64_arr[j];
 					//if(!(dict[hash64/64] & (0x8000000000000000LLU >> (hash64 % 64))))	continue;
@@ -891,20 +824,34 @@ vector<EdgeInfo> compute_kssd_mst_mpi(vector<KssdSketchInfo>& sketches, int star
 				mstArr[thread_id].push_back(tmpE);
 			}
 		}
-		if(thread_id == 0){
+		
+  // if (mstArr[thread_id].size() > sketches.size() * 2) {
+  //      std::sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
+  //      
+  //      if (mstArr[thread_id].size() > sketches.size()) {
+  //          mstArr[thread_id].resize(sketches.size());
+  //      }
+  //      
+  //      mstArr[thread_id].shrink_to_fit(); 
+  //  }
+    
+    
+    
+    
+    if(thread_id == 0){
 			//uint64_t computedNum = (uint64_t)(N - id) * (uint64_t)id + (uint64_t)id * (uint64_t)id / 2;
 			//uint64_t computedNum = (uint64_t)(id-start_index) * (uint64_t)(id+start_index) / 2;
 			uint64_t computedNum = (uint64_t)id * id / 2 - (uint64_t)start_index * start_index / 2;
-			if(computedNum >= percentId * percentNum){
+      if(computedNum >= percentId * percentNum){
 				fprintf(stderr, "---finish MST generation %d %\n", percentId);
 				percentId++;
 			}
 		}
 
-		sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
-		vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());
-		mstArr[thread_id].swap(tmpMst);
-		vector<EdgeInfo>().swap(tmpMst);
+		//sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
+		//vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());
+		//mstArr[thread_id].swap(tmpMst);
+		//vector<EdgeInfo>().swap(tmpMst);
 	}
 	cerr << "-----finish the 100 % multiThreads mst generate" << endl;
 
@@ -924,125 +871,35 @@ vector<EdgeInfo> compute_kssd_mst_mpi(vector<KssdSketchInfo>& sketches, int star
 		}
 	}
 	for(int i = 0; i < threads; i++){
-		delete(threadsANI[i]);
+		delete[](threadsANI[i]);
 	}
 	for(int i = 0; i < denseSpan * threads; i++){
-		delete(denseLocalArr[i]);
+		delete[](denseLocalArr[i]);
 	}
 
-	if(tailNum != 0){
-		for(int i = end-tailNum; i < end; i++){
-			memset(intersectionArr[0], 0, sketches.size() * sizeof(int));
-			if(use64){
-				for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
-					uint64_t hash64 = sketches[i].hash64_arr[j];
-					//if(!(dict[hash64/64] & (0x8000000000000000LLU >> (hash64 % 64))))	continue;
-					if(hash_map_arr.count(hash64) == 0) continue;
-					//for(auto x : hash_map_arr[hash64])
-					for(size_t k = 0; k < hash_map_arr[hash64].size(); k++){
-						size_t cur_index = hash_map_arr[hash64][k];
-						intersectionArr[0][cur_index]++;
-						//cerr << hash64 << '\t' << cur_index << endl;
-					}
-				}
-			}
-			else{
-				for(size_t j = 0; j < sketches[i].hash32_arr.size(); j++){
-					uint32_t hash = sketches[i].hash32_arr[j];
-					if(sketchSizeArr[hash] == 0) continue;
-					size_t start = hash > 0 ? offset[hash-1] : 0;
-					size_t end = offset[hash];
-					for(size_t k = start; k < end; k++){
-						size_t curIndex = indexArr[k];
-						intersectionArr[0][curIndex]++;
-					}
-				}
-			}
+	//vector<EdgeInfo> finalGraph;
+	//for(int i = 0; i < threads; i++){
+	//	finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
+	//	vector<EdgeInfo>().swap(mstArr[i]);
+	//}
 
-			for(int j = 0; j < i; j++){
-				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
-				double tmpDist;
-				int common = intersectionArr[0][j];
-				int size0, size1;
-				if(use64){
-					size0 = sketches[i].hash64_arr.size();
-					size1 = sketches[j].hash64_arr.size();
-				}
-				else{
-					size0 = sketches[i].hash32_arr.size();
-					size1 = sketches[j].hash32_arr.size();
-				}
-				if(!isContainment){
-					int denom = size0 + size1 - common;
-					double jaccard;
-					if(size0 == 0 || size1 == 0)
-						jaccard = 0.0;
-					else
-						jaccard = (double)common / denom;
-					double mashD;
-					if(jaccard == 1.0)
-						mashD = 0.0;
-					else if(jaccard == 0.0)
-						mashD = 1.0;
-					else
-						mashD = (double)-1.0 / kmer_size * log((2 * jaccard)/(1.0 + jaccard));
-					tmpDist = mashD;
-				}
-				else{
-					int denom = std::min(size0, size1);
-					double containment;
-					if(size0 == 0 || size1 == 0)
-						containment = 0.0;
-					else
-						containment = (double)common / denom;
-					double AafD;
-					if(containment == 1.0)
-						AafD = 0.0;
-					else if(containment == 0.0)
-						AafD = 1.0;
-					else
-						AafD = (double)-1.0 / kmer_size * log(containment);
-					tmpDist = AafD;
-				}
+	//sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
 
-				if(!no_dense){
-					for(int t = 0; t < denseSpan; t++){
-						if(tmpDist <= distRadius[t]){
-							denseArr[t][i]++;
-							denseArr[t][j]++;
-						}
-					}
-					double tmpANI = 1.0 - tmpDist;
-					int ANI = (int)(tmpANI/0.01);
-					assert(ANI < 101);
-					aniArr[ANI]++;
-				}
+	//vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
+    vector<EdgeInfo> finalGraph;
+    for(int i = 0; i < threads; i++){
+        finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
+    }
 
-				EdgeInfo tmpE{i, j, tmpDist};
-				mstArr[0].push_back(tmpE);
-			}
-		}
-		if(mstArr[0].size() != 0){
-			sort(mstArr[0].begin(), mstArr[0].end(), cmpEdge);
-			vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[0], sketches.size());
-			mstArr[0].swap(tmpMst);
-		}
+    sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
 
-	}
-
-	vector<EdgeInfo> finalGraph;
-	for(int i = 0; i < threads; i++){
-		finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
-		vector<EdgeInfo>().swap(mstArr[i]);
-	}
-
-	sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
-
-	vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
-	vector<EdgeInfo>().swap(finalGraph);
-   delete[] sketchSizeArr;
-    delete[] offset;
-    delete[] indexArr;
+    vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
+  
+      delete[] sketchSizeArr;
+          delete[] offset;
+              delete[] indexArr;
+  
+  vector<EdgeInfo>().swap(finalGraph);
 
 	return mst;
 }
