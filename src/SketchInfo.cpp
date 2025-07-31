@@ -4,7 +4,7 @@
 #include <sstream>
 #include <zlib.h>
 #include <sys/stat.h>
-
+#include <omp.h>
 #ifdef THREADPOOL_MINHASH
 #include "ThreadPool.h"
 #endif
@@ -1266,8 +1266,6 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 }
 
 
-
-
 void transSketches_in_memory(
     const std::vector<KssdSketchInfo>& sketches, 
     const KssdParameters& info, 
@@ -1281,6 +1279,10 @@ void transSketches_in_memory(
     sum_info_size_out = 0;
     sum_hash_buffer_out = nullptr;
     sum_hash_size_out = 0;
+    sum_index_buffer_out = nullptr;
+    sum_index_size_out = 0;
+    sum_dict_buffer_out = nullptr;
+    sum_dict_size_out = 0;
 
     int half_k = info.half_k;
     int drlevel = info.drlevel;
@@ -1289,52 +1291,43 @@ void transSketches_in_memory(
     if (use64) {
         // use64 logic needs to be implemented here if required
     } else {
-        robin_hood::unordered_map<uint32_t, std::vector<uint32_t>> hashMapId;
-        
+        std::vector<robin_hood::unordered_map<uint32_t, std::vector<uint32_t>>> local_maps(numThreads);
+
         #pragma omp parallel num_threads(numThreads)
         {
-            robin_hood::unordered_map<uint32_t, std::vector<uint32_t>> local_hashMapId;
+            int thread_id = omp_get_thread_num();
             #pragma omp for schedule(dynamic)
             for (size_t i = 0; i < sketches.size(); i++) {
                 for (size_t j = 0; j < sketches[i].hash32_arr.size(); j++) {
                     uint32_t hash = sketches[i].hash32_arr[j];
-                    local_hashMapId[hash].push_back(i);
-                }
-            }
-            #pragma omp critical
-            {
-                for (const auto& pair : local_hashMapId) {
-                    hashMapId[pair.first].insert(hashMapId[pair.first].end(), pair.second.begin(), pair.second.end());
+                    local_maps[thread_id][hash].push_back(i);
                 }
             }
         }
 
-        size_t hash_number = hashMapId.size();
-        uint64_t total_index_count = 0;
+        robin_hood::unordered_map<uint32_t, std::vector<uint32_t>> hashMapId;
+        for (int i = 0; i < numThreads; ++i) {
+            for (const auto& pair : local_maps[i]) {
+                hashMapId[pair.first].insert(hashMapId[pair.first].end(), pair.second.begin(), pair.second.end());
+            }
+        }
+        
+        std::vector<uint32_t> sorted_hashes;
+        sorted_hashes.reserve(hashMapId.size());
         for (const auto& pair : hashMapId) {
-            total_index_count += pair.second.size();
+            sorted_hashes.push_back(pair.first);
+        }
+        std::sort(sorted_hashes.begin(), sorted_hashes.end());
+        
+        uint64_t total_index_count = 0;
+        for (uint32_t hash_val : sorted_hashes) {
+            total_index_count += hashMapId.at(hash_val).size();
         }
 
         sum_dict_size_out = total_index_count * sizeof(uint32_t);
         sum_dict_buffer_out = new char[sum_dict_size_out];
         char* current_dict_ptr = sum_dict_buffer_out;
-
-        uint32_t* temp_hash_arr = new uint32_t[hash_number];
-        uint32_t* temp_hash_size_arr = new uint32_t[hash_number];
         
-        size_t cur_id = 0;
-        for (const auto& pair : hashMapId) {
-            temp_hash_arr[cur_id] = pair.first;
-            temp_hash_size_arr[cur_id] = pair.second.size();
-            
-            size_t bytes_to_copy = pair.second.size() * sizeof(uint32_t);
-            if (bytes_to_copy > 0) {
-                memcpy(current_dict_ptr, pair.second.data(), bytes_to_copy);
-                current_dict_ptr += bytes_to_copy;
-            }
-            cur_id++;
-        }
-
         size_t hashSize = 1LLU << (4 * (half_k - drlevel));
         uint64_t totalIndex = total_index_count;
         
@@ -1347,147 +1340,23 @@ void transSketches_in_memory(
         memcpy(current_index_ptr, &totalIndex, sizeof(uint64_t));
         current_index_ptr += sizeof(uint64_t);
         
-        uint32_t* offsetArr = (uint32_t*)(current_index_ptr);
-        memset(offsetArr, 0, hashSize * sizeof(uint32_t));
+        uint32_t* sizeArr = (uint32_t*)(current_index_ptr);
+        memset(sizeArr, 0, hashSize * sizeof(uint32_t));
 
-        for(size_t i = 0; i < hash_number; ++i) {
-            offsetArr[temp_hash_arr[i]] = temp_hash_size_arr[i];
+        for (uint32_t hash_val : sorted_hashes) {
+            const auto& id_list = hashMapId.at(hash_val);
+            size_t list_size = id_list.size();
+            
+            size_t bytes_to_copy = list_size * sizeof(uint32_t);
+            if (bytes_to_copy > 0) {
+                memcpy(current_dict_ptr, id_list.data(), bytes_to_copy);
+                current_dict_ptr += bytes_to_copy;
+            }
+            sizeArr[hash_val] = list_size;
         }
-
-        delete[] temp_hash_arr;
-        delete[] temp_hash_size_arr;
     }
 }
 
 
-//void transSketches_in_memory(
-//    const std::vector<KssdSketchInfo>& sketches, 
-//    const KssdParameters& info, 
-//    int numThreads,
-//    char*& sum_info_buffer_out, size_t& sum_info_size_out,
-//    char*& sum_hash_buffer_out, size_t& sum_hash_size_out,
-//    char*& sum_index_buffer_out, size_t& sum_index_size_out,
-//    char*& sum_dict_buffer_out, size_t& sum_dict_size_out) 
-//{
-//    sum_info_buffer_out = nullptr;
-//    sum_info_size_out = 0;
-//    sum_hash_buffer_out = nullptr;
-//    sum_hash_size_out = 0;
-//
-//    double t0 = get_sec();
-//    int half_k = info.half_k;
-//    int drlevel = info.drlevel;
-//    bool use64 = half_k - drlevel > 8;
-//
-//    if (use64) {
-//        cerr << "transSketches_in_memory: use64" << endl;
-//        robin_hood::unordered_map<uint64_t, std::vector<uint32_t>> hash_map_arr;
-//        for (size_t i = 0; i < sketches.size(); i++) {
-//            for (size_t j = 0; j < sketches[i].hash64_arr.size(); j++) {
-//                uint64_t cur_hash = sketches[i].hash64_arr[j];
-//                hash_map_arr.insert({cur_hash, std::vector<uint32_t>()});
-//                hash_map_arr[cur_hash].push_back(i);
-//            }
-//        }
-//
-//        size_t hash_number = hash_map_arr.size();
-//        cerr << "the hash_number is: " << hash_number << endl;
-//
-//        sum_dict_size_out = 0;
-//        for (const auto& pair : hash_map_arr) {
-//            sum_dict_size_out += pair.second.size() * sizeof(uint32_t);
-//        }
-//        sum_dict_buffer_out = new char[sum_dict_size_out];
-//        
-//        uint64_t* temp_hash_arr = new uint64_t[hash_number];
-//        uint32_t* temp_hash_size_arr = new uint32_t[hash_number];
-//
-//        char* current_dict_ptr = sum_dict_buffer_out;
-//        size_t cur_id = 0;
-//        for (const auto& pair : hash_map_arr) {
-//            temp_hash_arr[cur_id] = pair.first;
-//            temp_hash_size_arr[cur_id] = pair.second.size();
-//            size_t bytes_to_copy = pair.second.size() * sizeof(uint32_t);
-//            memcpy(current_dict_ptr, pair.second.data(), bytes_to_copy);
-//            current_dict_ptr += bytes_to_copy;
-//            cur_id++;
-//        }
-//        cerr << "the total dict size is: " << sum_dict_size_out << endl;
-//
-//        sum_index_size_out = sizeof(size_t) + (hash_number * sizeof(uint64_t)) + (hash_number * sizeof(uint32_t));
-//        sum_index_buffer_out = new char[sum_index_size_out];
-//        char* current_index_ptr = sum_index_buffer_out;
-//
-//        memcpy(current_index_ptr, &hash_number, sizeof(size_t));
-//        current_index_ptr += sizeof(size_t);
-//        memcpy(current_index_ptr, temp_hash_arr, hash_number * sizeof(uint64_t));
-//        current_index_ptr += hash_number * sizeof(uint64_t);
-//        memcpy(current_index_ptr, temp_hash_size_arr, hash_number * sizeof(uint32_t));
-//
-//        delete[] temp_hash_arr;
-//        delete[] temp_hash_size_arr;
-//
-//    } else { // 32-bit logic
-//				     cerr << "transSketches_in_memory: not use64" << endl;
-//        
-//        robin_hood::unordered_map<uint32_t, std::vector<uint32_t>> hashMapId;
-//        
-//        #pragma omp parallel num_threads(numThreads)
-//        {
-//            robin_hood::unordered_map<uint32_t, std::vector<uint32_t>> local_hashMapId;
-//            #pragma omp for schedule(dynamic)
-//            for (size_t i = 0; i < sketches.size(); i++) {
-//                for (size_t j = 0; j < sketches[i].hash32_arr.size(); j++) {
-//                    uint32_t hash = sketches[i].hash32_arr[j];
-//                    local_hashMapId[hash].push_back(i);
-//                }
-//            }
-//            #pragma omp critical
-//            {
-//                for (const auto& pair : local_hashMapId) {
-//                    hashMapId[pair.first].insert(hashMapId[pair.first].end(), pair.second.begin(), pair.second.end());
-//                }
-//            }
-//        }
-//
-//        size_t hash_number = hashMapId.size();
-//        uint64_t total_index_count = 0;
-//        for (const auto& pair : hashMapId) {
-//            total_index_count += pair.second.size();
-//        }
-//
-//        sum_dict_size_out = total_index_count * sizeof(uint32_t);
-//        sum_dict_buffer_out = new char[sum_dict_size_out];
-//        char* current_dict_ptr = sum_dict_buffer_out;
-//
-//        uint32_t* temp_hash_arr = new uint32_t[hash_number];
-//        uint32_t* temp_hash_size_arr = new uint32_t[hash_number];
-//        
-//        size_t cur_id = 0;
-//        for (const auto& pair : hashMapId) {
-//            temp_hash_arr[cur_id] = pair.first;
-//            temp_hash_size_arr[cur_id] = pair.second.size();
-//            size_t bytes_to_copy = pair.second.size() * sizeof(uint32_t);
-//            if (bytes_to_copy > 0) {
-//                memcpy(current_dict_ptr, pair.second.data(), bytes_to_copy);
-//                current_dict_ptr += bytes_to_copy;
-//            }
-//            cur_id++;
-//        }
-//
-//        sum_index_size_out = sizeof(size_t) + (hash_number * sizeof(uint32_t)) + (hash_number * sizeof(uint32_t));
-//        sum_index_buffer_out = new char[sum_index_size_out];
-//        char* current_index_ptr = sum_index_buffer_out;
-//
-//        memcpy(current_index_ptr, &hash_number, sizeof(size_t));
-//        current_index_ptr += sizeof(size_t);
-//        memcpy(current_index_ptr, temp_hash_arr, hash_number * sizeof(uint32_t));
-//        current_index_ptr += hash_number * sizeof(uint32_t);
-//        memcpy(current_index_ptr, temp_hash_size_arr, hash_number * sizeof(uint32_t));
-//
-//        delete[] temp_hash_arr;
-//        delete[] temp_hash_size_arr;
-//    }
-//
-//
-//}
+
+

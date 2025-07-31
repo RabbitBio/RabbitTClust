@@ -718,29 +718,25 @@ vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketc
 	}
 	int subSize = 8;
 	int id = 0;
-	int tailNum = (N - start) % subSize;
+	int tailNum = N % subSize*comm_sz;
 	uint64_t totalCompNum = (uint64_t)N * N / 2 - (uint64_t)start * start / 2;
 	uint64_t percentNum = totalCompNum / 100;
 	cerr << "---the percentNum is: " << percentNum << endl;
 	cerr << "---the start_index is: " << start_index << endl;
 	uint64_t percentId = 0;
 #pragma omp parallel for num_threads(threads) schedule (dynamic)
-	for (size_t id = my_rank * subSize; id < sketches.size(); id += subSize * comm_sz){
-		int thread_id = omp_get_thread_num();
-		size_t real_end = std::min(id + subSize, sketches.size());
+  for (id = my_rank * subSize; id < sketches.size() - tailNum; id += subSize * comm_sz){
+    int thread_id = omp_get_thread_num();
+		int real_end = std::min(id + subSize, N);
 		for(int i = id; i < real_end; i++){
-		//	memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
 			memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
       if(use64){
 				for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
 					uint64_t hash64 = sketches[i].hash64_arr[j];
-					//if(!(dict[hash64/64] & (0x8000000000000000LLU >> (hash64 % 64))))	continue;
 					if(hash_map_arr.count(hash64) == 0) continue;
-					//for(auto x : hash_map_arr[hash64])
 					for(size_t k = 0; k < hash_map_arr[hash64].size(); k++){
 						size_t cur_index = hash_map_arr[hash64][k];
 						intersectionArr[thread_id][cur_index]++;
-						//cerr << hash64 << '\t' << cur_index << endl;
 					}
 				}
 			}
@@ -824,23 +820,8 @@ vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketc
 				mstArr[thread_id].push_back(tmpE);
 			}
 		}
-		
-  // if (mstArr[thread_id].size() > sketches.size() * 2) {
-  //      std::sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
-  //      
-  //      if (mstArr[thread_id].size() > sketches.size()) {
-  //          mstArr[thread_id].resize(sketches.size());
-  //      }
-  //      
-  //      mstArr[thread_id].shrink_to_fit(); 
-  //  }
-    
-    
-    
     
     if(thread_id == 0){
-			//uint64_t computedNum = (uint64_t)(N - id) * (uint64_t)id + (uint64_t)id * (uint64_t)id / 2;
-			//uint64_t computedNum = (uint64_t)(id-start_index) * (uint64_t)(id+start_index) / 2;
 			uint64_t computedNum = (uint64_t)id * id / 2 - (uint64_t)start_index * start_index / 2;
       if(computedNum >= percentId * percentNum){
 				fprintf(stderr, "---finish MST generation %d %\n", percentId);
@@ -848,10 +829,10 @@ vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketc
 			}
 		}
 
-		//sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
-		//vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());
-		//mstArr[thread_id].swap(tmpMst);
-		//vector<EdgeInfo>().swap(tmpMst);
+		sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
+		vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());
+		mstArr[thread_id].swap(tmpMst);
+		vector<EdgeInfo>().swap(tmpMst);
 	}
 	cerr << "-----finish the 100 % multiThreads mst generate" << endl;
 
@@ -877,27 +858,15 @@ vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketc
 		delete[](denseLocalArr[i]);
 	}
 
-	//vector<EdgeInfo> finalGraph;
-	//for(int i = 0; i < threads; i++){
-	//	finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
-	//	vector<EdgeInfo>().swap(mstArr[i]);
-	//}
+	vector<EdgeInfo> finalGraph;
+	for(int i = 0; i < threads; i++){
+		finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
+		vector<EdgeInfo>().swap(mstArr[i]);
+	}
 
-	//sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
+	sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
 
-	//vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
-    vector<EdgeInfo> finalGraph;
-    for(int i = 0; i < threads; i++){
-        finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
-    }
-
-    sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
-
-    vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
-  
-      delete[] sketchSizeArr;
-          delete[] offset;
-              delete[] indexArr;
+	vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
   
   vector<EdgeInfo>().swap(finalGraph);
 
