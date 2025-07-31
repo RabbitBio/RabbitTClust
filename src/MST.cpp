@@ -717,19 +717,21 @@ vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketc
 		intersectionArr[i] = new int[N];
 	}
 	int subSize = 8;
-	int id = 0;
-	int tailNum = N % subSize*comm_sz;
+	int tailNum = N % (subSize*comm_sz);
 	uint64_t totalCompNum = (uint64_t)N * N / 2 - (uint64_t)start * start / 2;
 	uint64_t percentNum = totalCompNum / 100;
 	cerr << "---the percentNum is: " << percentNum << endl;
+	cerr << "---the tailNum is: " << tailNum << endl;
 	cerr << "---the start_index is: " << start_index << endl;
 	uint64_t percentId = 0;
 #pragma omp parallel for num_threads(threads) schedule (dynamic)
-  for (id = my_rank * subSize; id < sketches.size() - tailNum; id += subSize * comm_sz){
+  for (size_t id = my_rank * subSize; id < sketches.size(); id += subSize * comm_sz){
     int thread_id = omp_get_thread_num();
-		int real_end = std::min(id + subSize, N);
-		for(int i = id; i < real_end; i++){
-			memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
+		//int real_end = std::min(id + subSize, N);
+		int real_end = std::min(id + subSize, static_cast<size_t>(N));
+    for(int i = id; i < real_end; i++){
+	  
+      memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
       if(use64){
 				for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
 					uint64_t hash64 = sketches[i].hash64_arr[j];
@@ -835,6 +837,7 @@ vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketc
 		vector<EdgeInfo>().swap(tmpMst);
 	}
 	cerr << "-----finish the 100 % multiThreads mst generate" << endl;
+
 
 	if(!no_dense){
 		for(int i = 0; i < 101; i++){

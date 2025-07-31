@@ -1293,9 +1293,9 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		//string cmd0 = "mkdir -p " + tmp_recv_mst_path;
 		//system(cmd0.c_str());
 		isSave = true;
-		if(isSave){
-			saveKssdMST(sketches, my_mst, folder_path, sketchByFile);
-		}
+		//if(isSave){
+		//	saveKssdMST(sketches, my_mst, folder_path, sketchByFile);
+		//}
 		double t4 = get_sec();
 #ifdef Timer
 		cerr << "========time of saveMST is: " << t4 - t3 << "========" << endl;
@@ -1306,50 +1306,96 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		char * info_buffer;
 		char * edge_buffer;
 		size_t info_size, edge_size;
-		build_message(info_buffer, info_size, info_file);
-		build_message(edge_buffer, edge_size, edge_file);
+		//build_message(info_buffer, info_size, info_file);
+		//build_message(edge_buffer, edge_size, edge_file);
 		cerr << "finish the build_message in distribute_build_MST " << my_rank << endl;
 
 		string tmp_path = "tmp";
 		string cmd1 = "mkdir -p " + tmp_path;
 		system(cmd1.c_str());
 
-		if(my_rank != 0){
-			MPI_Send(&info_size, 1, MPI_UINT64_T, 0, my_rank, MPI_COMM_WORLD);
-			MPI_Send(&edge_size, 1, MPI_UINT64_T, 0, my_rank+comm_sz, MPI_COMM_WORLD);
-			MPI_Send(info_buffer, info_size, MPI_CHAR, 0, my_rank+comm_sz*2, MPI_COMM_WORLD);
-			MPI_Send(edge_buffer, edge_size, MPI_CHAR, 0, my_rank+comm_sz*3, MPI_COMM_WORLD);
-		}
-		else{
-			size_t recv_info_size, recv_edge_size;
-			vector<EdgeInfo> sum_mst;
-			sum_mst.insert(sum_mst.end(), my_mst.begin(), my_mst.end());
-			for(int id = 1; id < comm_sz; id++){
-				MPI_Recv(&recv_info_size, 1, MPI_UINT64_T, id, id, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				MPI_Recv(&recv_edge_size, 1, MPI_UINT64_T, id, id+comm_sz, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				char * recv_info_buffer = new char[recv_info_size];
-				char * recv_edge_buffer = new char[recv_edge_size];
-				MPI_Recv(recv_info_buffer, recv_info_size, MPI_CHAR, id, id+comm_sz*2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				MPI_Recv(recv_edge_buffer, recv_edge_size, MPI_CHAR, id, id+comm_sz*3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				vector<EdgeInfo> cur_MST;
-				format_MST(id, recv_edge_buffer, recv_edge_size, tmp_path, cur_MST);
-				sum_mst.insert(sum_mst.end(), cur_MST.begin(), cur_MST.end());
-				vector<EdgeInfo>().swap(cur_MST);
+			if (my_rank != 0) {
+
+				size_t edge_count = my_mst.size();
+
+				MPI_Send(&edge_count, 1, MPI_UINT64_T, 0, my_rank, MPI_COMM_WORLD);
+
+				if (edge_count > 0) {
+					MPI_Send(my_mst.data(), edge_count * sizeof(EdgeInfo), MPI_CHAR, 0, my_rank + comm_sz, MPI_COMM_WORLD);
+				}
+
+			} else {
+
+				vector<EdgeInfo> sum_mst;
+				sum_mst.insert(sum_mst.end(), my_mst.begin(), my_mst.end());
+
+				for (int id = 1; id < comm_sz; id++) {
+					size_t recv_edge_count;
+
+					MPI_Recv(&recv_edge_count, 1, MPI_UINT64_T, id, id, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+					if (recv_edge_count > 0) {
+						vector<EdgeInfo> cur_MST(recv_edge_count);
+						MPI_Recv(cur_MST.data(), recv_edge_count * sizeof(EdgeInfo), MPI_CHAR, id, id + comm_sz, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+						sum_mst.insert(sum_mst.end(), cur_MST.begin(), cur_MST.end());
+					}
+				}
+
+				sort(sum_mst.begin(), sum_mst.end(), cmpEdge);
+				vector<EdgeInfo> final_mst = kruskalAlgorithm(sum_mst, sketches.size());
+				vector<EdgeInfo>().swap(sum_mst);
+
+				if (is_newick_tree) {
+					string output_newick_file = output_file + ".newick.tree";
+					print_kssd_newick_tree(sketches, final_mst, sketchByFile, output_newick_file);
+					cerr << "-----write the newick tree into: " << output_newick_file << endl;
+				}
+
+				vector<EdgeInfo> forest = generateForest(final_mst, threshold);
+				vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
+				printKssdResult(tmpClust, sketches, sketchByFile, output_file);
+				cerr << "-----write the cluster result into: " << output_file << endl;
+				cerr << "-----the cluster number of: " << output_file << " is: " << tmpClust.size() << endl;
 			}
-			sort(sum_mst.begin(), sum_mst.end(), cmpEdge);
-			vector<EdgeInfo> final_mst = kruskalAlgorithm(sum_mst, sketches.size());
-			vector<EdgeInfo>().swap(sum_mst);
-			if(is_newick_tree){
-				string output_newick_file = output_file + ".newick.tree";
-				print_kssd_newick_tree(sketches, final_mst, sketchByFile, output_newick_file);
-				cerr << "-----write the newick tree into: " << output_newick_file << endl;
-			}
-			vector<EdgeInfo> forest = generateForest(final_mst, threshold);
-			vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
-			printKssdResult(tmpClust, sketches, sketchByFile, output_file);
-			cerr << "-----write the cluster result into: " << output_file << endl;
-			cerr << "-----the cluster number of: " << output_file << " is: " << tmpClust.size() << endl;
-		}
+
+
+		//if(my_rank != 0){
+		//	MPI_Send(&info_size, 1, MPI_UINT64_T, 0, my_rank, MPI_COMM_WORLD);
+		//	MPI_Send(&edge_size, 1, MPI_UINT64_T, 0, my_rank+comm_sz, MPI_COMM_WORLD);
+		//	MPI_Send(info_buffer, info_size, MPI_CHAR, 0, my_rank+comm_sz*2, MPI_COMM_WORLD);
+		//	MPI_Send(edge_buffer, edge_size, MPI_CHAR, 0, my_rank+comm_sz*3, MPI_COMM_WORLD);
+		//}
+		//else{
+		//	size_t recv_info_size, recv_edge_size;
+		//	vector<EdgeInfo> sum_mst;
+		//	sum_mst.insert(sum_mst.end(), my_mst.begin(), my_mst.end());
+		//	for(int id = 1; id < comm_sz; id++){
+		//		MPI_Recv(&recv_info_size, 1, MPI_UINT64_T, id, id, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		//		MPI_Recv(&recv_edge_size, 1, MPI_UINT64_T, id, id+comm_sz, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		//		char * recv_info_buffer = new char[recv_info_size];
+		//		char * recv_edge_buffer = new char[recv_edge_size];
+		//		MPI_Recv(recv_info_buffer, recv_info_size, MPI_CHAR, id, id+comm_sz*2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		//		MPI_Recv(recv_edge_buffer, recv_edge_size, MPI_CHAR, id, id+comm_sz*3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		//		vector<EdgeInfo> cur_MST;
+		//		format_MST(id, recv_edge_buffer, recv_edge_size, tmp_path, cur_MST);
+		//		sum_mst.insert(sum_mst.end(), cur_MST.begin(), cur_MST.end());
+		//		vector<EdgeInfo>().swap(cur_MST);
+		//	}
+		//	sort(sum_mst.begin(), sum_mst.end(), cmpEdge);
+		//	vector<EdgeInfo> final_mst = kruskalAlgorithm(sum_mst, sketches.size());
+		//	vector<EdgeInfo>().swap(sum_mst);
+		//	if(is_newick_tree){
+		//		string output_newick_file = output_file + ".newick.tree";
+		//		print_kssd_newick_tree(sketches, final_mst, sketchByFile, output_newick_file);
+		//		cerr << "-----write the newick tree into: " << output_newick_file << endl;
+		//	}
+		//	vector<EdgeInfo> forest = generateForest(final_mst, threshold);
+		//	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
+		//	printKssdResult(tmpClust, sketches, sketchByFile, output_file);
+		//	cerr << "-----write the cluster result into: " << output_file << endl;
+		//	cerr << "-----the cluster number of: " << output_file << " is: " << tmpClust.size() << endl;
+		//}
 		cerr << "finish the distribute_build_MST " << endl;
 
 	}
@@ -1545,22 +1591,22 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 
 		int chunkSize = 10000;
 		std::sort(sketches.begin(), sketches.end(), [](const KssdSketchInfo& a, const KssdSketchInfo& b) {
-        return a.hash32_arr.size() > b.hash32_arr.size();
-    });
+				return a.hash32_arr.size() > b.hash32_arr.size();
+				});
 
-    size_t total = sketches.size();
-    size_t numChunks = (total + chunkSize - 1) / chunkSize;  
+		size_t total = sketches.size();
+		size_t numChunks = (total + chunkSize - 1) / chunkSize;  
 
-    std::vector<std::vector<KssdSketchInfo>> buckets(numChunks);
+		std::vector<std::vector<KssdSketchInfo>> buckets(numChunks);
 
-    for (size_t i = 0; i < total; ++i) {
-        buckets[i % numChunks].push_back(sketches[i]);
-    }
+		for (size_t i = 0; i < total; ++i) {
+			buckets[i % numChunks].push_back(sketches[i]);
+		}
 
-    sketches.clear();
-    for (size_t i = 0; i < numChunks; ++i) {
-        sketches.insert(sketches.end(), buckets[i].begin(), buckets[i].end());
-    }
+		sketches.clear();
+		for (size_t i = 0; i < numChunks; ++i) {
+			sketches.insert(sketches.end(), buckets[i].begin(), buckets[i].end());
+		}
 
 
 
