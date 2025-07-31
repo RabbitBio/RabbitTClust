@@ -1591,7 +1591,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 
 		int chunkSize = 10000;
 		std::sort(sketches.begin(), sketches.end(), [](const KssdSketchInfo& a, const KssdSketchInfo& b) {
-				return a.hash32_arr.size() > b.hash32_arr.size();
+				return a.hash32_arr.size() <  b.hash32_arr.size();
 				});
 
 		size_t total = sketches.size();
@@ -1615,76 +1615,6 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 				sum_hash_buffer, sum_hash_size,
 				sum_index_buffer, sum_index_size,
 				sum_dict_buffer, sum_dict_size);
-		//}
-
-		int num_sketches = (my_rank == 0) ? sketches.size() : 0;
-		MPI_Bcast(&num_sketches, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-		//if (my_rank != 0) {
-		//    sketches.resize(num_sketches); 
-		//}
-
-
-		//MPI_Bcast(&sum_index_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-		//MPI_Bcast(&sum_dict_size, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-
-		//if (my_rank != 0) {
-		//    if (sum_index_size > 0) sum_index_buffer = new char[sum_index_size];
-		//    if (sum_dict_size > 0) sum_dict_buffer = new char[sum_dict_size];
-		//}
-		//
-		//if (sum_index_size > 0) SafeBcast(sum_index_buffer, sum_index_size, 0, MPI_COMM_WORLD);
-		//if (sum_dict_size > 0) SafeBcast(sum_dict_buffer, sum_dict_size, 0, MPI_COMM_WORLD);
-
-
-		int start_index, end_index;
-		//if (my_rank != 0) {
-		//	MPI_Send(&threads, 1, MPI_INT, 0, my_rank + comm_sz * 4, MPI_COMM_WORLD);
-		//	MPI_Recv(&start_index, 1, MPI_UINT64_T, 0, my_rank + comm_sz * 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-		//	MPI_Recv(&end_index, 1, MPI_UINT64_T, 0, my_rank + comm_sz * 6, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-		//}
-		//else {
-		//	int* thread_arr = new int[comm_sz];
-		//	thread_arr[0] = threads;
-		//	int total_threads = 0;
-		//	total_threads += threads;
-		//	for (int id = 1; id < comm_sz; id++) {
-		//		MPI_Recv(&thread_arr[id], 1, MPI_INT, id, id + comm_sz * 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-		//		total_threads += thread_arr[id];
-		//	}
-		//	cerr << "the total threads is: " << total_threads << endl;
-		//	size_t N = sketches.size();
-		//	size_t total_distance_time = N * (N - 1) / 2;
-		//	size_t* task_arr = new size_t[comm_sz];
-		//	for (int i = 0; i < comm_sz; i++) {
-		//		task_arr[i] = total_distance_time * thread_arr[i] / total_threads;
-		//	}
-		//	size_t* start_index_arr = new size_t[comm_sz];
-		//	size_t* end_index_arr = new size_t[comm_sz];
-		//	int cur_start_index = 0;
-		//	int cur_end_index = N - 1;
-		//	size_t global_index = 0;
-		//	for (int i = 0; i < comm_sz; i++) {
-		//		start_index_arr[i] = global_index;
-		//		size_t accumulate_time = 0;
-		//		while (accumulate_time < task_arr[i] && global_index < N) {
-		//			accumulate_time += global_index + 1;
-		//			global_index++;
-		//		}
-		//		end_index_arr[i] = global_index;
-		//	}
-		//	end_index_arr[comm_sz - 1] = max(end_index_arr[comm_sz - 1], N);
-		//	start_index = start_index_arr[0];
-		//	end_index = end_index_arr[0];
-		//	for (int i = 1; i < comm_sz; i++) {
-		//		cerr << "start_index: " << start_index_arr[i] << '\t' << "end_index: " << end_index_arr[i] << endl;
-		//		MPI_Send(&start_index_arr[i], 1, MPI_UINT64_T, i, i + comm_sz * 5, MPI_COMM_WORLD);
-		//		MPI_Send(&end_index_arr[i], 1, MPI_UINT64_T, i, i + comm_sz * 6, MPI_COMM_WORLD);
-		//	}
-		//}
-
-		//string tmp_str = "++++++++++++my rank: " + to_string(my_rank) + ", start_index: " + to_string(start_index) + ", end_index: " + to_string(end_index);
-		//cout << tmp_str << endl;
 		MPI_Barrier(MPI_COMM_WORLD);
 
 		distribute_compute_clusters(my_rank, comm_sz, sketches, info,
