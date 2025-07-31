@@ -63,10 +63,20 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen,
 bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads);
 bool cmpSketch(SketchInfo s1, SketchInfo s2);
 //bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, int threads);
-bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads);
+bool sketchFileWithKssd(const vector<string> inputFile, const uint64_t minLen, int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads);
 bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads);
 void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters& info, const string folder_path, int numThreads);
 
+void transSketches_in_memory(
+    const std::vector<KssdSketchInfo>& sketches, 
+    const KssdParameters& info, 
+    int numThreads,
+        char*& sum_info_buffer_out, size_t& sum_info_size_out,
+            char*& sum_hash_buffer_out, size_t& sum_hash_size_out,  
+    char*& sum_index_buffer_out, size_t& sum_index_size_out,
+    char*& sum_dict_buffer_out, size_t& sum_dict_size_out
+    
+    ); 
 
 
 #endif //H_SKETCH_INFO

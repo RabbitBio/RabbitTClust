@@ -410,9 +410,16 @@ vector<std::vector<int>> KssdgreedyCluster(std::vector<KssdSketchInfo>& sketches
     std::map<int, std::vector<int>> semiClust;
    	int radio = calculateMaxSizeRatio(threshold, 19); 
     if (numGenomes == 0) return cluster;
-
+    cerr<< "aaaaaaaaaaaaaaaaaaa"<<radio<<endl;
     representiveArr.push_back(0);
     semiClust.insert({0, std::vector<int>()});
+int count_to_print = std::min(100, (int)sketches.size());
+
+for (int i = 0; i < count_to_print; ++i) {
+    std::cout << "Sketch[" << i << "].hash32_arr.size() = " 
+                  << sketches[i].hash32_arr.size() << std::endl;
+                  }
+
 
     for(int j = 1; j < numGenomes; j++){
         std::map<double, int> distMapCenter;
@@ -426,7 +433,7 @@ vector<std::vector<int>> KssdgreedyCluster(std::vector<KssdSketchInfo>& sketches
             double dist;
             int sizeQry = sketches[repId].hash32_arr.size();
 
-            if ( (double)sizeQry / sizeRef > radio)
+            if ( std::max(sizeRef, sizeQry) > radio * std::min(sizeRef, sizeQry))
             {
                 #pragma omp critical
                 {
@@ -538,7 +545,7 @@ vector<vector<int>> greedyCluster(vector<SketchInfo>& sketches, int sketch_func_
       semiClust[repId].push_back(j);
     }
     map<double, int>().swap(distMapCenter);
-    if(j % 10000 == 0) cerr << "---finished cluster: " << j << endl;
+    if(j % 10000 == 0) cerr << "---finished cluster: " << j << " | Active reps: " << representiveArr.size() <<  endl;
 
   }//end for j
   //cerr << "the representiveArr size is : " << representiveArr.size() << endl;

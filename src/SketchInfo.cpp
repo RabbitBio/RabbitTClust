@@ -4,7 +4,7 @@
 #include <sstream>
 #include <zlib.h>
 #include <sys/stat.h>
-
+#include <omp.h>
 #ifdef THREADPOOL_MINHASH
 #include "ThreadPool.h"
 #endif
@@ -961,18 +961,18 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 	return true;
 }
 
-bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
-	fprintf(stderr, "-----input fileList, sketch by file\n");
-	ifstream ifs(inputFile);
-	if(!ifs){
-		fprintf(stderr, "error open the inputFile: %s\n", inputFile.c_str());
-		return false;
-	}
-	vector<string> fileList;
-	string fileName;
-	while(getline(ifs, fileName)){
-		fileList.push_back(fileName);
-	}
+bool sketchFileWithKssd(const vector<string> fileList, const uint64_t minLen, int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
+	//fprintf(stderr, "-----input fileList, sketch by file\n");
+	//ifstream ifs(inputFile);
+	//if(!ifs){
+	//	fprintf(stderr, "error open the inputFile: %s\n", inputFile.c_str());
+	//	return false;
+	//}
+	//vector<string> fileList;
+	//string fileName;
+	//while(getline(ifs, fileName)){
+	//	fileList.push_back(fileName);
+	//}
 
 	static const int BaseMap[128] = 
 	{
@@ -1139,7 +1139,7 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 		gzclose(fp1);
 		kseq_destroy(ks1);
 	}//end for
-	sort(sketches.begin(), sketches.end(), KssdcmpSketchSize);
+	//sort(sketches.begin(), sketches.end(), KssdcmpSketchSize);
 	return true;
 }
 
@@ -1265,6 +1265,97 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 	//cerr << "the totalIndex is: " << totalIndex << endl;
 }
 
+
+void transSketches_in_memory(
+    const std::vector<KssdSketchInfo>& sketches, 
+    const KssdParameters& info, 
+    int numThreads,
+    char*& sum_info_buffer_out, size_t& sum_info_size_out,
+    char*& sum_hash_buffer_out, size_t& sum_hash_size_out,
+    char*& sum_index_buffer_out, size_t& sum_index_size_out,
+    char*& sum_dict_buffer_out, size_t& sum_dict_size_out) 
+{
+    sum_info_buffer_out = nullptr;
+    sum_info_size_out = 0;
+    sum_hash_buffer_out = nullptr;
+    sum_hash_size_out = 0;
+    sum_index_buffer_out = nullptr;
+    sum_index_size_out = 0;
+    sum_dict_buffer_out = nullptr;
+    sum_dict_size_out = 0;
+
+    int half_k = info.half_k;
+    int drlevel = info.drlevel;
+    bool use64 = half_k - drlevel > 8;
+
+    if (use64) {
+        // use64 logic needs to be implemented here if required
+    } else {
+        std::vector<robin_hood::unordered_map<uint32_t, std::vector<uint32_t>>> local_maps(numThreads);
+
+        #pragma omp parallel num_threads(numThreads)
+        {
+            int thread_id = omp_get_thread_num();
+            #pragma omp for schedule(dynamic)
+            for (size_t i = 0; i < sketches.size(); i++) {
+                for (size_t j = 0; j < sketches[i].hash32_arr.size(); j++) {
+                    uint32_t hash = sketches[i].hash32_arr[j];
+                    local_maps[thread_id][hash].push_back(i);
+                }
+            }
+        }
+
+        robin_hood::unordered_map<uint32_t, std::vector<uint32_t>> hashMapId;
+        for (int i = 0; i < numThreads; ++i) {
+            for (const auto& pair : local_maps[i]) {
+                hashMapId[pair.first].insert(hashMapId[pair.first].end(), pair.second.begin(), pair.second.end());
+            }
+        }
+        
+        std::vector<uint32_t> sorted_hashes;
+        sorted_hashes.reserve(hashMapId.size());
+        for (const auto& pair : hashMapId) {
+            sorted_hashes.push_back(pair.first);
+        }
+        std::sort(sorted_hashes.begin(), sorted_hashes.end());
+        
+        uint64_t total_index_count = 0;
+        for (uint32_t hash_val : sorted_hashes) {
+            total_index_count += hashMapId.at(hash_val).size();
+        }
+
+        sum_dict_size_out = total_index_count * sizeof(uint32_t);
+        sum_dict_buffer_out = new char[sum_dict_size_out];
+        char* current_dict_ptr = sum_dict_buffer_out;
+        
+        size_t hashSize = 1LLU << (4 * (half_k - drlevel));
+        uint64_t totalIndex = total_index_count;
+        
+        sum_index_size_out = sizeof(size_t) + sizeof(uint64_t) + (hashSize * sizeof(uint32_t));
+        sum_index_buffer_out = new char[sum_index_size_out];
+        char* current_index_ptr = sum_index_buffer_out;
+
+        memcpy(current_index_ptr, &hashSize, sizeof(size_t));
+        current_index_ptr += sizeof(size_t);
+        memcpy(current_index_ptr, &totalIndex, sizeof(uint64_t));
+        current_index_ptr += sizeof(uint64_t);
+        
+        uint32_t* sizeArr = (uint32_t*)(current_index_ptr);
+        memset(sizeArr, 0, hashSize * sizeof(uint32_t));
+
+        for (uint32_t hash_val : sorted_hashes) {
+            const auto& id_list = hashMapId.at(hash_val);
+            size_t list_size = id_list.size();
+            
+            size_t bytes_to_copy = list_size * sizeof(uint32_t);
+            if (bytes_to_copy > 0) {
+                memcpy(current_dict_ptr, id_list.data(), bytes_to_copy);
+                current_dict_ptr += bytes_to_copy;
+            }
+            sizeArr[hash_val] = list_size;
+        }
+    }
+}
 
 
 

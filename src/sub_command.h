@@ -33,4 +33,14 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 
 void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads);
 void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, bool isContainment, double threshold, int threads);
+void clust_from_genomes_fast_MPI(int my_rank, int comm_sz, const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads);
+void compute_kssd_sketches_mpi(int my_rank, vector<SketchInfo>& sketches, string inputFile, string& folder_path, bool sketchByFile, int minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, bool isSave, int threads); 
+void distribute_compute_clusters(int my_rank, int comm_sz, vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, string output_file, bool is_newick_tree, string folder_path, double threshold, bool isSave, int threads, bool no_dense, bool isContainment,  char* index_buffer, size_t index_size,char* dict_buffer, size_t dict_size);
+void clust_from_sketches_fast_MPI(int my_rank, int comm_sz, int half_k, int drlevel,  string outputFile, string folder_path, bool is_newick_tree, bool no_dense, bool sketchByFile, bool isContainment,const double threshold, bool noSave, int threads);
 
+void format_sketches_index_in_memory(
+    char* info_buffer, size_t info_size,
+    char* hash_buffer, size_t hash_size,
+    char* index_buffer, size_t index_size,
+    char* dict_buffer, size_t dict_size,
+    std::vector<KssdSketchInfo>& sketches);
