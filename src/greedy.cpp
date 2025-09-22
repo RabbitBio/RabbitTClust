@@ -22,11 +22,11 @@ using namespace std;
  */
 
 
-//bool KssdcmpSketchSize(KssdSketchInfo s1, KssdSketchInfo s2){
-//	if(s1.sketchsize > s2.sketchsize)	return true;
-//	else if(s1.sketchsize == s2.sketchsize)	return s1.id < s2.id;
-//	else	return false;
-//}
+bool aKssdcmpSketchSize(KssdSketchInfo s1, KssdSketchInfo s2){
+	if(s1.sketchsize > s2.sketchsize)	return true;
+	else if(s1.sketchsize == s2.sketchsize)	return s1.id < s2.id;
+	else	return false;
+}
 uint64_t Kssdu32_intersect_scalar_stop(const uint32_t *list1, uint32_t size1, const uint32_t *list2, uint32_t size2, uint32_t size3,
 		uint64_t *i_a, uint64_t *i_b){
 	uint64_t counter=0;
@@ -409,6 +409,24 @@ vector<std::vector<int>> KssdgreedyCluster(std::vector<KssdSketchInfo>& sketches
     std::vector<int> representiveArr;
     std::map<int, std::vector<int>> semiClust;
    	int radio = calculateMaxSizeRatio(threshold, 19); 
+   	//for (auto& sketch : sketches) {
+    //    if (sketch.hash32_arr.size() > 1000) {
+    //        sketch.hash32_arr.resize(1000); 
+    //    }
+    //}
+    std::map<int, int> sketchSizeDistribution;
+    for (const auto& sketch : sketches) {
+        int size = sketch.hash32_arr.size();
+        int interval = (size / 1000) * 1000;
+        sketchSizeDistribution[interval]++;
+    }
+    
+	  //t@github.com:RabbitBio/RabbitTClust.gitsort(sketches.begin(), sketches.end(), aKssdcmpSketchSize);
+    std::cout << "Sketch size distribution (in intervals of 1000):" << std::endl;
+    for (const auto& pair : sketchSizeDistribution) {
+        std::cout << "[" << pair.first << " - " << (pair.first + 999) << "]: " << pair.second << " sketches" << std::endl;
+    } 
+
     if (numGenomes == 0) return cluster;
 
     representiveArr.push_back(0);
