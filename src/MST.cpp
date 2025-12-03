@@ -826,29 +826,29 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
 // 	children = '(' + children.substr(0, children.length()-1) + ')' + name;
 // 	return children;
 // }
-string build_newick_tree(vector<pair<int, double>>* G, bool* visited, const vector<SketchInfo>& sketches, bool sketch_by_file, int node){
-	visited[node] = true;
-	//if(G[node].size() == 0)	return to_string(node);
-	string name;
-	if(sketch_by_file) name = sketches[node].fileName;
-	else name = sketches[node].seqInfo.name;
-	if(G[node].size() == 0){
+// 递归：根据 children 数组构建 Newick（MinHash / 通用 SketchInfo 版本，只在叶子上写名字）
+static string build_newick_tree_recursive(
+	int node,
+	const vector<vector<pair<int,double>>>& children,
+	const vector<SketchInfo>& sketches,
+	bool sketch_by_file)
+{
+	if (children[node].empty()) {
+		string name = sketch_by_file ? sketches[node].fileName
+		                             : sketches[node].seqInfo.name;
 		return name;
 	}
-	string children("");
-	for(auto x : G[node]){
-		int cur_node = x.first;
-		double dist = x.second;
-		if(!visited[cur_node]){
-			string child = build_newick_tree(G, visited, sketches, sketch_by_file, cur_node);
-			children += child + ':' + to_string(dist) + ',';
-		}
+
+	string s = "(";
+	for (size_t i = 0; i < children[node].size(); ++i) {
+		int child = children[node][i].first;
+		double bl  = children[node][i].second;
+		if (i > 0) s += ",";
+		s += build_newick_tree_recursive(child, children, sketches, sketch_by_file);
+		s += ":" + to_string(bl);
 	}
-	//if(children.length() == 0) return to_string(node);
-	if(children.length() == 0) return name;
-	//children = '(' + children.substr(0, children.length()-1) + ')' + to_string(node);
-	children = '(' + children.substr(0, children.length()-1) + ')' + name;
-	return children;
+	s += ")";  // 内部节点不加名字
+	return s;
 }
 
 
@@ -872,21 +872,64 @@ string build_newick_tree(vector<pair<int, double>>* G, bool* visited, const vect
 // }
 
 string get_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file){
-	int vertice_number = sketches.size();
-	vector<pair<int, double>>* G = new vector<pair<int, double>> [vertice_number];
-	for(auto f : mst){
-		int u = f.preNode;
-		int v = f.sufNode;
-		double dist = f.dist;
-		G[u].push_back(make_pair(v, dist));
-		G[v].push_back(make_pair(u, dist));
+	int N = sketches.size();
+	if (N == 0) return ";";
+	if (N == 1) {
+		string name = sketch_by_file ? sketches[0].fileName
+		                             : sketches[0].seqInfo.name;
+		return name + ";";
 	}
-	bool* visited = new bool[vertice_number];
-	memset(visited, 0, vertice_number*sizeof(bool));
 
-	string newick_tree = build_newick_tree(G, visited, sketches, sketch_by_file, 0);
-	newick_tree += ';';
+	vector<EdgeInfo> edges = mst;
+	sort(edges.begin(), edges.end(),
+	     [](const EdgeInfo& a, const EdgeInfo& b){
+		     return a.dist < b.dist;
+	     });
 
+	int maxNodes = 2 * N - 1;
+	vector<vector<pair<int,double>>> children(maxNodes);
+	vector<double> height(maxNodes, 0.0);  
+	vector<int> repNode(maxNodes, -1);     
+	for (int i = 0; i < N; ++i) {
+		repNode[i] = i;  
+	}
+
+	DSU dsu(N);
+	int nextNode = N;  
+
+	for (const auto& e : edges) {
+		int u = e.preNode;
+		int v = e.sufNode;
+		double w = e.dist;
+
+		int ru = dsu.find(u);
+		int rv = dsu.find(v);
+		if (ru == rv) continue; 
+
+		int nodeU = repNode[ru];
+		int nodeV = repNode[rv];
+
+		double hU = height[nodeU];
+		double hV = height[nodeV];
+		double h  = w;  
+
+		double blU = max(0.0, h - hU);
+		double blV = max(0.0, h - hV);
+
+		int newNode = nextNode++;
+		children[newNode].push_back({nodeU, blU});
+		children[newNode].push_back({nodeV, blV});
+		height[newNode] = h;
+
+		int rNew = dsu.unite(ru, rv);
+		repNode[rNew] = newNode;
+	}
+
+	int rootRep = dsu.find(0);
+	int root    = repNode[rootRep];
+
+	string newick_tree = build_newick_tree_recursive(root, children, sketches, sketch_by_file);
+	newick_tree += ";";
 	return newick_tree;
 }
 
