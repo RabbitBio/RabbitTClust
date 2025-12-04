@@ -8,94 +8,94 @@
 using namespace std;
 
 bool cmpEdge(EdgeInfo e1, EdgeInfo e2){
-	return e1.dist < e2.dist;
+  return e1.dist < e2.dist;
 }
 
 bool cmpNeighbor(NeighborNode n1, NeighborNode n2){
-	return n1.distance < n2.distance;
+  return n1.distance < n2.distance;
 }
 
 
 inline double calr(double D, int k) {
-    if (D < 0) {
-        throw std::runtime_error("Mash distance cannot be negative.");
-    }
-    if (k <= 0) {
-        throw std::runtime_error("k-mer size must be positive.");
-    }
-    
-    // Formula derived from inverting Mash and Jaccard calculations:
-    // R_max = 2 * e^(D * k) - 1
-    return 2.0 * std::exp(D * k) - 1.0;
+  if (D < 0) {
+    throw std::runtime_error("Mash distance cannot be negative.");
+  }
+  if (k <= 0) {
+    throw std::runtime_error("k-mer size must be positive.");
+  }
+
+  // Formula derived from inverting Mash and Jaccard calculations:
+  // R_max = 2 * e^(D * k) - 1
+  return 2.0 * std::exp(D * k) - 1.0;
 }
 
 
 struct DSU {
-    std::vector<int> p, r;
-    DSU(int n) : p(n), r(n, 0) {
-        std::iota(p.begin(), p.end(), 0);
-    }
-    int find(int x) {
-        return p[x] == x ? x : p[x] = find(p[x]);
-    }
-    int unite(int a, int b) {
-        a = find(a); b = find(b);
-        if (a == b) return a;
-        if (r[a] < r[b]) std::swap(a, b);
-        p[b] = a;
-        if (r[a] == r[b]) r[a]++;
-        return a;
-    }
+  std::vector<int> p, r;
+  DSU(int n) : p(n), r(n, 0) {
+    std::iota(p.begin(), p.end(), 0);
+  }
+  int find(int x) {
+    return p[x] == x ? x : p[x] = find(p[x]);
+  }
+  int unite(int a, int b) {
+    a = find(a); b = find(b);
+    if (a == b) return a;
+    if (r[a] < r[b]) std::swap(a, b);
+    p[b] = a;
+    if (r[a] == r[b]) r[a]++;
+    return a;
+  }
 };
 
 
 vector<EdgeInfo> kruskalAlgorithm(vector<EdgeInfo>graph, int vertices){
-    UnionFind uf(vertices);
-    vector<EdgeInfo>spanningTree;
-	if(graph.size() <= 0) return spanningTree;
-    //sort(graph.begin(),graph.end(),comparator);
-    spanningTree.push_back(graph[0]);
-    uf.merge(graph[0].preNode,graph[0].sufNode);
-    for(int i=1;i<graph.size();i++){
-        if(!uf.connected(graph[i].preNode,graph[i].sufNode)){
-            uf.merge(graph[i].preNode,graph[i].sufNode);
-            spanningTree.push_back(graph[i]);
-        }
-		//if(spanningTree.size() == vertices - 1) break;
+  UnionFind uf(vertices);
+  vector<EdgeInfo>spanningTree;
+  if(graph.size() <= 0) return spanningTree;
+  //sort(graph.begin(),graph.end(),comparator);
+  spanningTree.push_back(graph[0]);
+  uf.merge(graph[0].preNode,graph[0].sufNode);
+  for(int i=1;i<graph.size();i++){
+    if(!uf.connected(graph[i].preNode,graph[i].sufNode)){
+      uf.merge(graph[i].preNode,graph[i].sufNode);
+      spanningTree.push_back(graph[i]);
     }
-	uf.clear();
-    return spanningTree;
+    //if(spanningTree.size() == vertices - 1) break;
+  }
+  uf.clear();
+  return spanningTree;
 }
 
 vector<EdgeInfo> generateForest(vector <EdgeInfo> mst, double threshhold){
-	vector<EdgeInfo> forest;
-	for(int i = 0; i < mst.size(); i++){
-		if(mst[i].dist <= threshhold){
-			forest.push_back(mst[i]);
-		}
-	}
-	return forest;
+  vector<EdgeInfo> forest;
+  for(int i = 0; i < mst.size(); i++){
+    if(mst[i].dist <= threshhold){
+      forest.push_back(mst[i]);
+    }
+  }
+  return forest;
 }
 
 vector<EdgeInfo> modifyForest(vector<EdgeInfo> forest, vector<int> noiseArr, int threads){
-	vector<EdgeInfo> newForest;
-	bool * removeTag = new bool[forest.size()];
-	#pragma omp parallel for num_threads(threads)
-	for(int i = 0; i < forest.size(); i++){
-		bool remove = false;
-		for(int j = 0; j < noiseArr.size(); j++){
-			if(forest[i].preNode == noiseArr[j] || forest[i].sufNode == noiseArr[j]){
-				remove = true;
-				break;
-			}
-		}
-		removeTag[i] = remove;
-	}
-	for(int i = 0; i < forest.size(); i++){
-		if(!removeTag[i])
-			newForest.push_back(forest[i]);
-	}
-	return newForest;
+  vector<EdgeInfo> newForest;
+  bool * removeTag = new bool[forest.size()];
+#pragma omp parallel for num_threads(threads)
+  for(int i = 0; i < forest.size(); i++){
+    bool remove = false;
+    for(int j = 0; j < noiseArr.size(); j++){
+      if(forest[i].preNode == noiseArr[j] || forest[i].sufNode == noiseArr[j]){
+        remove = true;
+        break;
+      }
+    }
+    removeTag[i] = remove;
+  }
+  for(int i = 0; i < forest.size(); i++){
+    if(!removeTag[i])
+      newForest.push_back(forest[i]);
+  }
+  return newForest;
 }
 
 
@@ -135,671 +135,671 @@ vector<vector<int>> generateClusterWithBfs(vector<EdgeInfo> forest, int vertices
 }
 
 vector<vector<int>> generateCluster(vector<EdgeInfo> forest, int vertices){
-	UnionFind uf(vertices);
-	vector<vector<int>> cluster;
-	for(int i = 0; i < forest.size(); i++){
-		uf.merge(forest[i].preNode, forest[i].sufNode);
-	}
+  UnionFind uf(vertices);
+  vector<vector<int>> cluster;
+  for(int i = 0; i < forest.size(); i++){
+    uf.merge(forest[i].preNode, forest[i].sufNode);
+  }
 
-	
-	vector<int> elements;
-	vector<int> remainElements;
-	vector<int> tmpCluster;
-	for(int i = 0; i < vertices; i++){
-		elements.push_back(i);
-	}
-	
-	while(!elements.empty()){
-		tmpCluster.push_back(elements[0]);
-		for(int i = 1; i < elements.size(); i++){
-			if(uf.connected(elements[0], elements[i])){
-				tmpCluster.push_back(elements[i]);
-			}
-			else{
-				remainElements.push_back(elements[i]);
-			}
 
-		}
-		if(elements.size() == 1){//the last element which has not been clustered.
-			cluster.push_back(elements);
-			elements.clear();
-			break;
-		}
-		cluster.push_back(tmpCluster);
-		tmpCluster.clear();
-		elements = remainElements;
-		remainElements.clear();
-	}
+  vector<int> elements;
+  vector<int> remainElements;
+  vector<int> tmpCluster;
+  for(int i = 0; i < vertices; i++){
+    elements.push_back(i);
+  }
 
-	return cluster;
+  while(!elements.empty()){
+    tmpCluster.push_back(elements[0]);
+    for(int i = 1; i < elements.size(); i++){
+      if(uf.connected(elements[0], elements[i])){
+        tmpCluster.push_back(elements[i]);
+      }
+      else{
+        remainElements.push_back(elements[i]);
+      }
+
+    }
+    if(elements.size() == 1){//the last element which has not been clustered.
+      cluster.push_back(elements);
+      elements.clear();
+      break;
+    }
+    cluster.push_back(tmpCluster);
+    tmpCluster.clear();
+    elements = remainElements;
+    remainElements.clear();
+  }
+
+  return cluster;
 }
 
 //typedef pair<int, int> PairInt;
 bool cmpPair(PairInt p1, PairInt p2){
-	return p1.second < p2.second;
+  return p1.second < p2.second;
 }
 
 vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha){
-	int clusterSize = densePairArr.size();
-	vector<int> noiseArr;
-	std::sort(densePairArr.begin(), densePairArr.end(), cmpPair);
+  int clusterSize = densePairArr.size();
+  vector<int> noiseArr;
+  std::sort(densePairArr.begin(), densePairArr.end(), cmpPair);
 
-	int sizeDense = densePairArr.size();
-	int indexQ1 = sizeDense / 4;
-	int denseQ1 = densePairArr[indexQ1].second;
-	//int thresholdDense = std::min((int)round(clusterSize*alpha), 2); 
-	int thresholdDense = alpha;
-	thresholdDense = std::min(denseQ1-1, thresholdDense);
-	thresholdDense = std::max(thresholdDense, 0);
+  int sizeDense = densePairArr.size();
+  int indexQ1 = sizeDense / 4;
+  int denseQ1 = densePairArr[indexQ1].second;
+  //int thresholdDense = std::min((int)round(clusterSize*alpha), 2); 
+  int thresholdDense = alpha;
+  thresholdDense = std::min(denseQ1-1, thresholdDense);
+  thresholdDense = std::max(thresholdDense, 0);
 
-	for(int i = 0; i < densePairArr.size(); i++){
-		if(densePairArr[i].second <= thresholdDense){
-			noiseArr.push_back(densePairArr[i].first);
-		}
-		else{
-			break;
-		}
-	}
-	return noiseArr;
+  for(int i = 0; i < densePairArr.size(); i++){
+    if(densePairArr[i].second <= thresholdDense){
+      noiseArr.push_back(densePairArr[i].first);
+    }
+    else{
+      break;
+    }
+  }
+  return noiseArr;
 }
 
 vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold){
-	// init from the dictFile and indexFile
-	int half_k = info.half_k;
-	int drlevel = info.drlevel;
-	bool use64 = half_k - drlevel > 8 ? true : false;
-	int kmer_size = half_k * 2;
-	robin_hood::unordered_map<uint64_t, vector<uint32_t>> hash_map_arr;
-	uint32_t* sketchSizeArr = NULL;
-	size_t* offset = NULL;
-	uint32_t* indexArr = NULL;
+  // init from the dictFile and indexFile
+  int half_k = info.half_k;
+  int drlevel = info.drlevel;
+  bool use64 = half_k - drlevel > 8 ? true : false;
+  int kmer_size = half_k * 2;
+  robin_hood::unordered_map<uint64_t, vector<uint32_t>> hash_map_arr;
+  uint32_t* sketchSizeArr = NULL;
+  size_t* offset = NULL;
+  uint32_t* indexArr = NULL;
   int radio = calr(threshold, kmer_size-1); 
   if(use64)
-    {
+  {
     size_t hash_number;
-		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
-		FILE* fp_index = fopen(cur_index_file.c_str(), "rb");
-		if(!fp_index){
-			cerr << "ERROR: compute_kssd_mst(), cannot open index file: " << cur_index_file << endl;
-			exit(1);
-		}
-		int read_hash_num = fread(&hash_number, sizeof(size_t), 1, fp_index);
-		uint64_t * hash_arr = new uint64_t[hash_number];
-		uint32_t * hash_size_arr = new uint32_t[hash_number];
-		size_t read_hash_arr = fread(hash_arr, sizeof(uint64_t), hash_number, fp_index);
-		size_t read_hash_size_arr = fread(hash_size_arr, sizeof(uint32_t), hash_number, fp_index);
-		if(read_hash_num != 1 || read_hash_arr != hash_number || read_hash_size_arr != hash_number){
-			cerr << "ERROR: compute_kssd_mst(), error read hash_number, hash_arr, and hash_size_arr" << endl;
-			exit(1);
-		}
-		
-		fclose(fp_index);
+    string cur_index_file = folder_path + '/' + "kssd.sketch.index";
+    FILE* fp_index = fopen(cur_index_file.c_str(), "rb");
+    if(!fp_index){
+      cerr << "ERROR: compute_kssd_mst(), cannot open index file: " << cur_index_file << endl;
+      exit(1);
+    }
+    int read_hash_num = fread(&hash_number, sizeof(size_t), 1, fp_index);
+    uint64_t * hash_arr = new uint64_t[hash_number];
+    uint32_t * hash_size_arr = new uint32_t[hash_number];
+    size_t read_hash_arr = fread(hash_arr, sizeof(uint64_t), hash_number, fp_index);
+    size_t read_hash_size_arr = fread(hash_size_arr, sizeof(uint32_t), hash_number, fp_index);
+    if(read_hash_num != 1 || read_hash_arr != hash_number || read_hash_size_arr != hash_number){
+      cerr << "ERROR: compute_kssd_mst(), error read hash_number, hash_arr, and hash_size_arr" << endl;
+      exit(1);
+    }
 
-		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
-		FILE* fp_dict = fopen(cur_dict_file.c_str(), "rb");
-		if(!fp_dict){
-			cerr << "ERROR: compute_kssd_mst(), cannot open dict file: " << cur_dict_file << endl;
-			exit(1);
-		}
-		uint32_t max_hash_size = 1LLU << 24;
-		uint32_t* cur_point = new uint32_t[max_hash_size];
-		for(size_t i = 0; i < hash_number; i++){
-			uint32_t cur_hash_size = hash_size_arr[i];
-			if(cur_hash_size > max_hash_size){
-				max_hash_size = cur_hash_size;
-				cur_point = new uint32_t[max_hash_size];
-			}
-			uint32_t hash_size = fread(cur_point, sizeof(uint32_t), cur_hash_size, fp_dict);
-			if(hash_size != cur_hash_size){
-				cerr << "ERROR: compute_kssd_mst(), the read hash number is not equal to the saved hash number information" << endl;
-				exit(1);
-			}
-			vector<uint32_t> cur_genome_arr(cur_point, cur_point + cur_hash_size);
-			uint64_t cur_hash = hash_arr[i];
-			hash_map_arr.insert({cur_hash, cur_genome_arr});
-		}
-		delete [] cur_point;
-		delete [] hash_arr;
-		delete [] hash_size_arr;
-		fclose(fp_dict);
-	}
-	else{
-		cerr << "-----not use hash64 in compute_kssd_mst() " << endl;
-		size_t hashSize;
-		uint64_t totalIndex;
-		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
-		FILE * fp_index = fopen(cur_index_file.c_str(), "rb");
-		if(!fp_index){
-			cerr << "ERROR: compute_kssd_mst(), cannot open the index sketch file: " << cur_index_file << endl;
-			exit(1);
-		}
-		int read_hash_size = fread(&hashSize, sizeof(size_t), 1, fp_index);
-		int read_total_index = fread(&totalIndex, sizeof(uint64_t), 1, fp_index);
-		//sketchSizeArr = (uint32_t*)malloc(hashSize * sizeof(uint32_t));
-		sketchSizeArr = new uint32_t[hashSize];
-		size_t read_sketch_size_arr = fread(sketchSizeArr, sizeof(uint32_t), hashSize, fp_index);
+    fclose(fp_index);
 
-		//offset = (size_t*)malloc(hashSize * sizeof(size_t));
-		offset = new size_t[hashSize];
-		uint64_t totalHashNumber = 0;
-		for(size_t i = 0; i < hashSize; i++){
-			totalHashNumber += sketchSizeArr[i];
-			offset[i] = sketchSizeArr[i];
-			if(i > 0) offset[i] += offset[i-1];
-		}
-		if(totalHashNumber != totalIndex){
-			cerr << "ERROR: compute_kssd_mst(), mismatched total hash number" << endl;
-			exit(1);
-		}
-		fclose(fp_index);
+    string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
+    FILE* fp_dict = fopen(cur_dict_file.c_str(), "rb");
+    if(!fp_dict){
+      cerr << "ERROR: compute_kssd_mst(), cannot open dict file: " << cur_dict_file << endl;
+      exit(1);
+    }
+    uint32_t max_hash_size = 1LLU << 24;
+    uint32_t* cur_point = new uint32_t[max_hash_size];
+    for(size_t i = 0; i < hash_number; i++){
+      uint32_t cur_hash_size = hash_size_arr[i];
+      if(cur_hash_size > max_hash_size){
+        max_hash_size = cur_hash_size;
+        cur_point = new uint32_t[max_hash_size];
+      }
+      uint32_t hash_size = fread(cur_point, sizeof(uint32_t), cur_hash_size, fp_dict);
+      if(hash_size != cur_hash_size){
+        cerr << "ERROR: compute_kssd_mst(), the read hash number is not equal to the saved hash number information" << endl;
+        exit(1);
+      }
+      vector<uint32_t> cur_genome_arr(cur_point, cur_point + cur_hash_size);
+      uint64_t cur_hash = hash_arr[i];
+      hash_map_arr.insert({cur_hash, cur_genome_arr});
+    }
+    delete [] cur_point;
+    delete [] hash_arr;
+    delete [] hash_size_arr;
+    fclose(fp_dict);
+  }
+  else{
+    cerr << "-----not use hash64 in compute_kssd_mst() " << endl;
+    size_t hashSize;
+    uint64_t totalIndex;
+    string cur_index_file = folder_path + '/' + "kssd.sketch.index";
+    FILE * fp_index = fopen(cur_index_file.c_str(), "rb");
+    if(!fp_index){
+      cerr << "ERROR: compute_kssd_mst(), cannot open the index sketch file: " << cur_index_file << endl;
+      exit(1);
+    }
+    int read_hash_size = fread(&hashSize, sizeof(size_t), 1, fp_index);
+    int read_total_index = fread(&totalIndex, sizeof(uint64_t), 1, fp_index);
+    //sketchSizeArr = (uint32_t*)malloc(hashSize * sizeof(uint32_t));
+    sketchSizeArr = new uint32_t[hashSize];
+    size_t read_sketch_size_arr = fread(sketchSizeArr, sizeof(uint32_t), hashSize, fp_index);
 
-		//cerr << "the hashSize is: " << hashSize << endl;
-		//cerr << "totalIndex is: " << totalIndex << endl;
-		//cerr << "totalHashNumber is: " << totalHashNumber << endl;
-		//cerr << "offset[n-1] is: " << offset[hashSize-1] << endl;;
+    //offset = (size_t*)malloc(hashSize * sizeof(size_t));
+    offset = new size_t[hashSize];
+    uint64_t totalHashNumber = 0;
+    for(size_t i = 0; i < hashSize; i++){
+      totalHashNumber += sketchSizeArr[i];
+      offset[i] = sketchSizeArr[i];
+      if(i > 0) offset[i] += offset[i-1];
+    }
+    if(totalHashNumber != totalIndex){
+      cerr << "ERROR: compute_kssd_mst(), mismatched total hash number" << endl;
+      exit(1);
+    }
+    fclose(fp_index);
 
-		//indexArr = (uint32_t*)malloc(totalHashNumber * sizeof(uint32_t));
-		indexArr = new uint32_t[totalHashNumber];
-		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
-		FILE * fp_dict = fopen(cur_dict_file.c_str(), "rb");
-		if(!fp_dict){
-			cerr << "ERROR: compute_kssd_mst(), cannot open the dictionary sketch file: " << cur_dict_file << endl;
-			exit(1);
-		}
-		size_t read_index_arr = fread(indexArr, sizeof(uint32_t), totalHashNumber, fp_dict);
-		if(read_hash_size != 1 || read_total_index != 1 || read_sketch_size_arr != hashSize || read_index_arr != totalHashNumber){
-			cerr << "ERROR: compute_kssd_mst(), error read hash_size, total_index, sketch_size_arr, index_arr" << endl;
-			exit(1);
-		}
-	}
+    //cerr << "the hashSize is: " << hashSize << endl;
+    //cerr << "totalIndex is: " << totalIndex << endl;
+    //cerr << "totalHashNumber is: " << totalHashNumber << endl;
+    //cerr << "offset[n-1] is: " << offset[hashSize-1] << endl;;
 
-	//int denseSpan = 10;
-	double step = 1.0 / denseSpan;
-	
-	//double step = threshold / denseSpan;
-	//cerr << "the threshold is: " << threshold << endl;
-	//cerr << "the step is: " << step << endl;
-	int N = sketches.size();
-	denseArr = new int*[denseSpan];
-	int** denseLocalArr = new int*[denseSpan * threads];
-	double distRadius[denseSpan];
-	for(int i = 0; i < denseSpan; i++){
-		distRadius[i] = step * i;
-		denseArr[i] = new int[N];
-		memset(denseArr[i], 0, N * sizeof(int));
-		for(int j = 0; j < threads; j++){
-			denseLocalArr[i * threads + j] = new int[N];
-			memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
-		}
-	}
-	//for ANI distribution calculation.
-	aniArr = new uint64_t[101];
-	memset(aniArr, 0, 101 * sizeof(uint64_t));
-	uint64_t** threadsANI = new uint64_t*[threads];
-	for(int i = 0; i < threads; i++){
-		threadsANI[i] = new uint64_t[101];
-		memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
-	}
-		
-	// start to generate the sub_mst
-	vector<EdgeInfo> mstArr[threads];
-	int** intersectionArr = new int*[threads];
-	for(int i = 0; i < threads; i++){
-		intersectionArr[i] = new int[sketches.size()];
-	}
-	int subSize = 8;
-	int id = 0;
-	//int tailNum = sketches.size() % subSize;
-	int tailNum = (N - start_index) % subSize;
-	//int N = sketches.size();
-	//uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
-	uint64_t totalCompNum = (uint64_t)(N-start_index) * (uint64_t)(N+start_index)/2;
-	uint64_t percentNum = totalCompNum / 100;
-	cerr << "---the percentNum is: " << percentNum << endl;
-	cerr << "---the start_index is: " << start_index << endl;
-	uint64_t percentId = 0;
-	#pragma omp parallel for num_threads(threads) schedule (dynamic)
-	for(id = start_index; id < sketches.size() - tailNum; id+=subSize){
-		int thread_id = omp_get_thread_num();
-		for(int i = id; i < id+subSize; i++){
-			memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
-			if(use64){
-				for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
-					uint64_t hash64 = sketches[i].hash64_arr[j];
-					//if(!(dict[hash64/64] & (0x8000000000000000LLU >> (hash64 % 64))))	continue;
-					if(hash_map_arr.count(hash64) == 0) continue;
-					//for(auto x : hash_map_arr[hash64])
-					for(size_t k = 0; k < hash_map_arr[hash64].size(); k++){
-						size_t cur_index = hash_map_arr[hash64][k];
-						intersectionArr[thread_id][cur_index]++;
-						//cerr << hash64 << '\t' << cur_index << endl;
-					}
-				}
-			}
-			else{
-				for(size_t j = 0; j < sketches[i].hash32_arr.size(); j++){
-					uint32_t hash = sketches[i].hash32_arr[j];
-					if(sketchSizeArr[hash] == 0) continue;
-					size_t start = hash > 0 ? offset[hash-1] : 0;
-					size_t end = offset[hash];
-					for(size_t k = start; k < end; k++){
-						size_t curIndex = indexArr[k];
-						intersectionArr[thread_id][curIndex]++;
-					}
-				}
-			}
+    //indexArr = (uint32_t*)malloc(totalHashNumber * sizeof(uint32_t));
+    indexArr = new uint32_t[totalHashNumber];
+    string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
+    FILE * fp_dict = fopen(cur_dict_file.c_str(), "rb");
+    if(!fp_dict){
+      cerr << "ERROR: compute_kssd_mst(), cannot open the dictionary sketch file: " << cur_dict_file << endl;
+      exit(1);
+    }
+    size_t read_index_arr = fread(indexArr, sizeof(uint32_t), totalHashNumber, fp_dict);
+    if(read_hash_size != 1 || read_total_index != 1 || read_sketch_size_arr != hashSize || read_index_arr != totalHashNumber){
+      cerr << "ERROR: compute_kssd_mst(), error read hash_size, total_index, sketch_size_arr, index_arr" << endl;
+      exit(1);
+    }
+  }
 
-			for(int j = 0; j < i; j++){
-				double tmpDist;
-				int common = intersectionArr[thread_id][j];
-				int size0, size1;
-				if(use64){
-					size0 = sketches[i].hash64_arr.size();
-					size1 = sketches[j].hash64_arr.size();
-				}
-				else{
-					size0 = sketches[i].hash32_arr.size();
-					size1 = sketches[j].hash32_arr.size();
-				}
-				
-				if (std::max(size0, size1) > radio * std::min(size0, size1)) {
-					continue;
-				}
-        
+  //int denseSpan = 10;
+  double step = 1.0 / denseSpan;
+
+  //double step = threshold / denseSpan;
+  //cerr << "the threshold is: " << threshold << endl;
+  //cerr << "the step is: " << step << endl;
+  int N = sketches.size();
+  denseArr = new int*[denseSpan];
+  int** denseLocalArr = new int*[denseSpan * threads];
+  double distRadius[denseSpan];
+  for(int i = 0; i < denseSpan; i++){
+    distRadius[i] = step * i;
+    denseArr[i] = new int[N];
+    memset(denseArr[i], 0, N * sizeof(int));
+    for(int j = 0; j < threads; j++){
+      denseLocalArr[i * threads + j] = new int[N];
+      memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
+    }
+  }
+  //for ANI distribution calculation.
+  aniArr = new uint64_t[101];
+  memset(aniArr, 0, 101 * sizeof(uint64_t));
+  uint64_t** threadsANI = new uint64_t*[threads];
+  for(int i = 0; i < threads; i++){
+    threadsANI[i] = new uint64_t[101];
+    memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+  }
+
+  // start to generate the sub_mst
+  vector<EdgeInfo> mstArr[threads];
+  int** intersectionArr = new int*[threads];
+  for(int i = 0; i < threads; i++){
+    intersectionArr[i] = new int[sketches.size()];
+  }
+  int subSize = 8;
+  int id = 0;
+  //int tailNum = sketches.size() % subSize;
+  int tailNum = (N - start_index) % subSize;
+  //int N = sketches.size();
+  //uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
+  uint64_t totalCompNum = (uint64_t)(N-start_index) * (uint64_t)(N+start_index)/2;
+  uint64_t percentNum = totalCompNum / 100;
+  cerr << "---the percentNum is: " << percentNum << endl;
+  cerr << "---the start_index is: " << start_index << endl;
+  uint64_t percentId = 0;
+#pragma omp parallel for num_threads(threads) schedule (dynamic)
+  for(id = start_index; id < sketches.size() - tailNum; id+=subSize){
+    int thread_id = omp_get_thread_num();
+    for(int i = id; i < id+subSize; i++){
+      memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
+      if(use64){
+        for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
+          uint64_t hash64 = sketches[i].hash64_arr[j];
+          //if(!(dict[hash64/64] & (0x8000000000000000LLU >> (hash64 % 64))))	continue;
+          if(hash_map_arr.count(hash64) == 0) continue;
+          //for(auto x : hash_map_arr[hash64])
+          for(size_t k = 0; k < hash_map_arr[hash64].size(); k++){
+            size_t cur_index = hash_map_arr[hash64][k];
+            intersectionArr[thread_id][cur_index]++;
+            //cerr << hash64 << '\t' << cur_index << endl;
+          }
+        }
+      }
+      else{
+        for(size_t j = 0; j < sketches[i].hash32_arr.size(); j++){
+          uint32_t hash = sketches[i].hash32_arr[j];
+          if(sketchSizeArr[hash] == 0) continue;
+          size_t start = hash > 0 ? offset[hash-1] : 0;
+          size_t end = offset[hash];
+          for(size_t k = start; k < end; k++){
+            size_t curIndex = indexArr[k];
+            intersectionArr[thread_id][curIndex]++;
+          }
+        }
+      }
+
+      for(int j = 0; j < i; j++){
+        double tmpDist;
+        int common = intersectionArr[thread_id][j];
+        int size0, size1;
+        if(use64){
+          size0 = sketches[i].hash64_arr.size();
+          size1 = sketches[j].hash64_arr.size();
+        }
+        else{
+          size0 = sketches[i].hash32_arr.size();
+          size1 = sketches[j].hash32_arr.size();
+        }
+
+        if (std::max(size0, size1) > radio * std::min(size0, size1)) {
+          continue;
+        }
+
         if(!isContainment){
-					int denom = size0 + size1 - common;
-					double jaccard;
-					if(size0 == 0 || size1 == 0)
-						jaccard = 0.0;
-					else
-						jaccard = (double)common / denom;
-					double mashD;
-					if(jaccard == 1.0)
-						mashD = 0.0;
-					else if(jaccard == 0.0)
-						mashD = 1.0;
-					else
-						mashD = (double)-1.0 / kmer_size * log((2 * jaccard)/(1.0 + jaccard));
-					tmpDist = mashD;
-				}
-				else{
-					int denom = std::min(size0, size1);
-					double containment;
-					if(size0 == 0 || size1 == 0)
-						containment = 0.0;
-					else
-						containment = (double)common / denom;
-					double AafD;
-					if(containment == 1.0)
-						AafD = 0.0;
-					else if(containment == 0.0)
-						AafD = 1.0;
-					else
-						AafD = (double)-1.0 / kmer_size * log(containment);
-					tmpDist = AafD;
-				}
+          int denom = size0 + size1 - common;
+          double jaccard;
+          if(size0 == 0 || size1 == 0)
+            jaccard = 0.0;
+          else
+            jaccard = (double)common / denom;
+          double mashD;
+          if(jaccard == 1.0)
+            mashD = 0.0;
+          else if(jaccard == 0.0)
+            mashD = 1.0;
+          else
+            mashD = (double)-1.0 / kmer_size * log((2 * jaccard)/(1.0 + jaccard));
+          tmpDist = mashD;
+        }
+        else{
+          int denom = std::min(size0, size1);
+          double containment;
+          if(size0 == 0 || size1 == 0)
+            containment = 0.0;
+          else
+            containment = (double)common / denom;
+          double AafD;
+          if(containment == 1.0)
+            AafD = 0.0;
+          else if(containment == 0.0)
+            AafD = 1.0;
+          else
+            AafD = (double)-1.0 / kmer_size * log(containment);
+          tmpDist = AafD;
+        }
 
-				if(!no_dense){
-					for(int t = 0; t < denseSpan; t++){
-						if(tmpDist <= distRadius[t]){
-							denseLocalArr[t * threads + thread_id][i]++;
-							denseLocalArr[t * threads + thread_id][j]++;
-						}
-					}
-					double tmpANI = 1.0 - tmpDist;
-					int ANI = (int)(tmpANI / 0.01);
-					assert(ANI < 101);
-					threadsANI[thread_id][ANI]++;
-				}
-					
-				EdgeInfo tmpE{i, j, tmpDist};
-				mstArr[thread_id].push_back(tmpE);
-			}
-		}
-		if(thread_id == 0){
-			//uint64_t computedNum = (uint64_t)(N - id) * (uint64_t)id + (uint64_t)id * (uint64_t)id / 2;
-			uint64_t computedNum = (uint64_t)(id-start_index) * (uint64_t)(id+start_index) / 2;
-			if(computedNum >= percentId * percentNum){
-				fprintf(stderr, "---finish MST generation %d %\n", percentId);
-				percentId++;
-			}
-		}
+        if(!no_dense){
+          for(int t = 0; t < denseSpan; t++){
+            if(tmpDist <= distRadius[t]){
+              denseLocalArr[t * threads + thread_id][i]++;
+              denseLocalArr[t * threads + thread_id][j]++;
+            }
+          }
+          double tmpANI = 1.0 - tmpDist;
+          int ANI = (int)(tmpANI / 0.01);
+          assert(ANI < 101);
+          threadsANI[thread_id][ANI]++;
+        }
 
-		sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
-		vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());
-		mstArr[thread_id].swap(tmpMst);
-		vector<EdgeInfo>().swap(tmpMst);
-	}
-	cerr << "-----finish the 100 % multiThreads mst generate" << endl;
+        EdgeInfo tmpE{i, j, tmpDist};
+        mstArr[thread_id].push_back(tmpE);
+      }
+    }
+    if(thread_id == 0){
+      //uint64_t computedNum = (uint64_t)(N - id) * (uint64_t)id + (uint64_t)id * (uint64_t)id / 2;
+      uint64_t computedNum = (uint64_t)(id-start_index) * (uint64_t)(id+start_index) / 2;
+      if(computedNum >= percentId * percentNum){
+        fprintf(stderr, "---finish MST generation %d %\n", percentId);
+        percentId++;
+      }
+    }
 
-	if(!no_dense){
-		for(int i = 0; i < 101; i++){
-			for(int j = 0; j < threads; j++){
-				aniArr[i] += threadsANI[j][i];
-			}
-		}
+    sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
+    vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());
+    mstArr[thread_id].swap(tmpMst);
+    vector<EdgeInfo>().swap(tmpMst);
+  }
+  cerr << "-----finish the 100 % multiThreads mst generate" << endl;
 
-		for(int i = 0; i < denseSpan; i++){
-			for(int j = 0; j < threads; j++){
-				for(int k = 0; k < N; k++){
-					denseArr[i][k] += denseLocalArr[i*threads+j][k];
-				}
-			}
-		}
-	}
-	for(int i = 0; i < threads; i++){
-		delete(threadsANI[i]);
-	}
-	for(int i = 0; i < denseSpan * threads; i++){
-		delete(denseLocalArr[i]);
-	}
+  if(!no_dense){
+    for(int i = 0; i < 101; i++){
+      for(int j = 0; j < threads; j++){
+        aniArr[i] += threadsANI[j][i];
+      }
+    }
 
-	if(tailNum != 0){
-		for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
-			memset(intersectionArr[0], 0, sketches.size() * sizeof(int));
-			if(use64){
-				for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
-					uint64_t hash64 = sketches[i].hash64_arr[j];
-					//if(!(dict[hash64/64] & (0x8000000000000000LLU >> (hash64 % 64))))	continue;
-					if(hash_map_arr.count(hash64) == 0) continue;
-					//for(auto x : hash_map_arr[hash64])
-					for(size_t k = 0; k < hash_map_arr[hash64].size(); k++){
-						size_t cur_index = hash_map_arr[hash64][k];
-						intersectionArr[0][cur_index]++;
-						//cerr << hash64 << '\t' << cur_index << endl;
-					}
-				}
-			}
-			else{
-				for(size_t j = 0; j < sketches[i].hash32_arr.size(); j++){
-					uint32_t hash = sketches[i].hash32_arr[j];
-					if(sketchSizeArr[hash] == 0) continue;
-					size_t start = hash > 0 ? offset[hash-1] : 0;
-					size_t end = offset[hash];
-					for(size_t k = start; k < end; k++){
-						size_t curIndex = indexArr[k];
-						intersectionArr[0][curIndex]++;
-					}
-				}
-			}
+    for(int i = 0; i < denseSpan; i++){
+      for(int j = 0; j < threads; j++){
+        for(int k = 0; k < N; k++){
+          denseArr[i][k] += denseLocalArr[i*threads+j][k];
+        }
+      }
+    }
+  }
+  for(int i = 0; i < threads; i++){
+    delete(threadsANI[i]);
+  }
+  for(int i = 0; i < denseSpan * threads; i++){
+    delete(denseLocalArr[i]);
+  }
 
-			for(int j = 0; j < i; j++){
-				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
-				double tmpDist;
-				int common = intersectionArr[0][j];
-				int size0, size1;
-				if(use64){
-					size0 = sketches[i].hash64_arr.size();
-					size1 = sketches[j].hash64_arr.size();
-				}
-				else{
-					size0 = sketches[i].hash32_arr.size();
-					size1 = sketches[j].hash32_arr.size();
-				}
-				if(!isContainment){
-					int denom = size0 + size1 - common;
-					double jaccard;
-					if(size0 == 0 || size1 == 0)
-						jaccard = 0.0;
-					else
-						jaccard = (double)common / denom;
-					double mashD;
-					if(jaccard == 1.0)
-						mashD = 0.0;
-					else if(jaccard == 0.0)
-						mashD = 1.0;
-					else
-						mashD = (double)-1.0 / kmer_size * log((2 * jaccard)/(1.0 + jaccard));
-					tmpDist = mashD;
-				}
-				else{
-					int denom = std::min(size0, size1);
-					double containment;
-					if(size0 == 0 || size1 == 0)
-						containment = 0.0;
-					else
-						containment = (double)common / denom;
-					double AafD;
-					if(containment == 1.0)
-						AafD = 0.0;
-					else if(containment == 0.0)
-						AafD = 1.0;
-					else
-						AafD = (double)-1.0 / kmer_size * log(containment);
-					tmpDist = AafD;
-				}
+  if(tailNum != 0){
+    for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
+      memset(intersectionArr[0], 0, sketches.size() * sizeof(int));
+      if(use64){
+        for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
+          uint64_t hash64 = sketches[i].hash64_arr[j];
+          //if(!(dict[hash64/64] & (0x8000000000000000LLU >> (hash64 % 64))))	continue;
+          if(hash_map_arr.count(hash64) == 0) continue;
+          //for(auto x : hash_map_arr[hash64])
+          for(size_t k = 0; k < hash_map_arr[hash64].size(); k++){
+            size_t cur_index = hash_map_arr[hash64][k];
+            intersectionArr[0][cur_index]++;
+            //cerr << hash64 << '\t' << cur_index << endl;
+          }
+        }
+      }
+      else{
+        for(size_t j = 0; j < sketches[i].hash32_arr.size(); j++){
+          uint32_t hash = sketches[i].hash32_arr[j];
+          if(sketchSizeArr[hash] == 0) continue;
+          size_t start = hash > 0 ? offset[hash-1] : 0;
+          size_t end = offset[hash];
+          for(size_t k = start; k < end; k++){
+            size_t curIndex = indexArr[k];
+            intersectionArr[0][curIndex]++;
+          }
+        }
+      }
 
-				if(!no_dense){
-					for(int t = 0; t < denseSpan; t++){
-						if(tmpDist <= distRadius[t]){
-							denseArr[t][i]++;
-							denseArr[t][j]++;
-						}
-					}
-					double tmpANI = 1.0 - tmpDist;
-					int ANI = (int)(tmpANI/0.01);
-					assert(ANI < 101);
-					aniArr[ANI]++;
-				}
+      for(int j = 0; j < i; j++){
+        //double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
+        double tmpDist;
+        int common = intersectionArr[0][j];
+        int size0, size1;
+        if(use64){
+          size0 = sketches[i].hash64_arr.size();
+          size1 = sketches[j].hash64_arr.size();
+        }
+        else{
+          size0 = sketches[i].hash32_arr.size();
+          size1 = sketches[j].hash32_arr.size();
+        }
+        if(!isContainment){
+          int denom = size0 + size1 - common;
+          double jaccard;
+          if(size0 == 0 || size1 == 0)
+            jaccard = 0.0;
+          else
+            jaccard = (double)common / denom;
+          double mashD;
+          if(jaccard == 1.0)
+            mashD = 0.0;
+          else if(jaccard == 0.0)
+            mashD = 1.0;
+          else
+            mashD = (double)-1.0 / kmer_size * log((2 * jaccard)/(1.0 + jaccard));
+          tmpDist = mashD;
+        }
+        else{
+          int denom = std::min(size0, size1);
+          double containment;
+          if(size0 == 0 || size1 == 0)
+            containment = 0.0;
+          else
+            containment = (double)common / denom;
+          double AafD;
+          if(containment == 1.0)
+            AafD = 0.0;
+          else if(containment == 0.0)
+            AafD = 1.0;
+          else
+            AafD = (double)-1.0 / kmer_size * log(containment);
+          tmpDist = AafD;
+        }
 
-				EdgeInfo tmpE{i, j, tmpDist};
-				mstArr[0].push_back(tmpE);
-			}
-		}
-		if(mstArr[0].size() != 0){
-			sort(mstArr[0].begin(), mstArr[0].end(), cmpEdge);
-			vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[0], sketches.size());
-			mstArr[0].swap(tmpMst);
-		}
+        if(!no_dense){
+          for(int t = 0; t < denseSpan; t++){
+            if(tmpDist <= distRadius[t]){
+              denseArr[t][i]++;
+              denseArr[t][j]++;
+            }
+          }
+          double tmpANI = 1.0 - tmpDist;
+          int ANI = (int)(tmpANI/0.01);
+          assert(ANI < 101);
+          aniArr[ANI]++;
+        }
 
-	}
+        EdgeInfo tmpE{i, j, tmpDist};
+        mstArr[0].push_back(tmpE);
+      }
+    }
+    if(mstArr[0].size() != 0){
+      sort(mstArr[0].begin(), mstArr[0].end(), cmpEdge);
+      vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[0], sketches.size());
+      mstArr[0].swap(tmpMst);
+    }
 
-	vector<EdgeInfo> finalGraph;
-	for(int i = 0; i < threads; i++){
-		finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
-		vector<EdgeInfo>().swap(mstArr[i]);
-	}
+  }
 
-	sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
+  vector<EdgeInfo> finalGraph;
+  for(int i = 0; i < threads; i++){
+    finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
+    vector<EdgeInfo>().swap(mstArr[i]);
+  }
 
-	vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
-	vector<EdgeInfo>().swap(finalGraph);
+  sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
 
-	return mst;
+  vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
+  vector<EdgeInfo>().swap(finalGraph);
+
+  return mst;
 }
 
 
 vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sketch_func_id, int threads, bool no_dense, int** &denseArr, int denseSpan, uint64_t* &aniArr){
-	//int denseSpan = 10;
-	double step = 1.0 / denseSpan;
-	
-	//double step = threshold / denseSpan;
-	//cerr << "the threshold is: " << threshold << endl;
-	//cerr << "the step is: " << step << endl;
-	int N = sketches.size();
-	denseArr = new int*[denseSpan];
-	int** denseLocalArr = new int*[denseSpan * threads];
-	double distRadius[denseSpan];
-	for(int i = 0; i < denseSpan; i++){
-		//distRadius[i] = 0.05 - 0.005 * i;
-		//distRadius[i] = threshold - step * i;
-		distRadius[i] = step * i;
-		denseArr[i] = new int[N];
-		memset(denseArr[i], 0, N * sizeof(int));
-		for(int j = 0; j < threads; j++){
-			denseLocalArr[i * threads + j] = new int[N];
-			memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
-		}
-	}
-	//for ANI distribution calculation.
-	aniArr = new uint64_t[101];
-	memset(aniArr, 0, 101 * sizeof(uint64_t));
-	uint64_t** threadsANI = new uint64_t*[threads];
-	//uint64_t threadsANI[threads][101];
-	for(int i = 0; i < threads; i++){
-		threadsANI[i] = new uint64_t[101];
-		memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
-	}
-		
-	vector<EdgeInfo> mstArr[threads];
-	int subSize = 8;
-	int id = 0;
-	int tailNum = sketches.size() % subSize;
-	//int N = sketches.size();
-	uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
-	uint64_t percentNum = totalCompNum / 100;
-	cerr << "---the percentNum is: " << percentNum << endl;
-	cerr << "---the start_index is: " << start_index << endl;
-	uint64_t percentId = 0;
-	#pragma omp parallel for num_threads(threads) schedule (dynamic)
-	for(id = 0; id < sketches.size() - tailNum; id+=subSize){
-		int thread_id = omp_get_thread_num();
-		for(int i = id; i < id+subSize; i++){
-			for(int j = max(i+1, start_index); j < sketches.size(); j++){
-				double tmpDist;
-				if(sketch_func_id == 0)
-				{
-					if(sketches[i].isContainment)
-					{
-						//tmpDist = 1.0 - sketches[i].minHash->containJaccard(sketches[j].minHash);
-						tmpDist = sketches[i].minHash->containDistance(sketches[j].minHash);
-					}
-					else
-					{
-						tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
-					}
-				}
-				else if(sketch_func_id == 1){
-					tmpDist = sketches[i].KSSD->distance(sketches[j].KSSD);
-				}
-				else if(sketch_func_id == 2){
-					tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
-				}
-				else if(sketch_func_id == 3){
-					tmpDist = sketches[i].HLL->distance(*sketches[j].HLL);
-				}
-				else if(sketch_func_id == 4){
-					tmpDist = sketches[i].OMH->distance(*sketches[j].OMH);
-				}
-				else	
-					break;
+  //int denseSpan = 10;
+  double step = 1.0 / denseSpan;
 
-				if(!no_dense){
-					for(int t = 0; t < denseSpan; t++){
-						if(tmpDist <= distRadius[t]){
-							denseLocalArr[t * threads + thread_id][i]++;
-							denseLocalArr[t * threads + thread_id][j]++;
-						}
-					}
-					double tmpANI = 1.0 - tmpDist;
-					int ANI = (int)(tmpANI / 0.01);
-					assert(ANI < 101);
-					threadsANI[thread_id][ANI]++;
-				}
-					
-				EdgeInfo tmpE{i, j, tmpDist};
-				mstArr[thread_id].push_back(tmpE);
-			}
-		}
-		if(thread_id == 0){
-			uint64_t computedNum = (uint64_t)(N - id) * (uint64_t)id + (uint64_t)id * (uint64_t)id / 2;
-			if(computedNum >= percentId * percentNum){
-				fprintf(stderr, "---finish MST generation %d %\n", percentId);
-				percentId++;
-			}
-		}
+  //double step = threshold / denseSpan;
+  //cerr << "the threshold is: " << threshold << endl;
+  //cerr << "the step is: " << step << endl;
+  int N = sketches.size();
+  denseArr = new int*[denseSpan];
+  int** denseLocalArr = new int*[denseSpan * threads];
+  double distRadius[denseSpan];
+  for(int i = 0; i < denseSpan; i++){
+    //distRadius[i] = 0.05 - 0.005 * i;
+    //distRadius[i] = threshold - step * i;
+    distRadius[i] = step * i;
+    denseArr[i] = new int[N];
+    memset(denseArr[i], 0, N * sizeof(int));
+    for(int j = 0; j < threads; j++){
+      denseLocalArr[i * threads + j] = new int[N];
+      memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
+    }
+  }
+  //for ANI distribution calculation.
+  aniArr = new uint64_t[101];
+  memset(aniArr, 0, 101 * sizeof(uint64_t));
+  uint64_t** threadsANI = new uint64_t*[threads];
+  //uint64_t threadsANI[threads][101];
+  for(int i = 0; i < threads; i++){
+    threadsANI[i] = new uint64_t[101];
+    memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+  }
 
-		sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
-		vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());
-		mstArr[thread_id].swap(tmpMst);
-		vector<EdgeInfo>().swap(tmpMst);
-	}
-	cerr << "-----finish the 100 % multiThreads mst generate" << endl;
+  vector<EdgeInfo> mstArr[threads];
+  int subSize = 8;
+  int id = 0;
+  int tailNum = sketches.size() % subSize;
+  //int N = sketches.size();
+  uint64_t totalCompNum = (uint64_t)N * (uint64_t)(N-1)/2;
+  uint64_t percentNum = totalCompNum / 100;
+  cerr << "---the percentNum is: " << percentNum << endl;
+  cerr << "---the start_index is: " << start_index << endl;
+  uint64_t percentId = 0;
+#pragma omp parallel for num_threads(threads) schedule (dynamic)
+  for(id = 0; id < sketches.size() - tailNum; id+=subSize){
+    int thread_id = omp_get_thread_num();
+    for(int i = id; i < id+subSize; i++){
+      for(int j = max(i+1, start_index); j < sketches.size(); j++){
+        double tmpDist;
+        if(sketch_func_id == 0)
+        {
+          if(sketches[i].isContainment)
+          {
+            //tmpDist = 1.0 - sketches[i].minHash->containJaccard(sketches[j].minHash);
+            tmpDist = sketches[i].minHash->containDistance(sketches[j].minHash);
+          }
+          else
+          {
+            tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
+          }
+        }
+        else if(sketch_func_id == 1){
+          tmpDist = sketches[i].KSSD->distance(sketches[j].KSSD);
+        }
+        else if(sketch_func_id == 2){
+          tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
+        }
+        else if(sketch_func_id == 3){
+          tmpDist = sketches[i].HLL->distance(*sketches[j].HLL);
+        }
+        else if(sketch_func_id == 4){
+          tmpDist = sketches[i].OMH->distance(*sketches[j].OMH);
+        }
+        else	
+          break;
 
-	if(!no_dense){
-		for(int i = 0; i < 101; i++){
-			for(int j = 0; j < threads; j++){
-				aniArr[i] += threadsANI[j][i];
-			}
-		}
-		for(int i = 0; i < denseSpan; i++){
-			for(int j = 0; j < threads; j++){
-				for(int k = 0; k < N; k++){
-					denseArr[i][k] += denseLocalArr[i*threads+j][k];
-				}
-			}
-		}
-	}
-	for(int i = 0; i < threads; i++){
-		delete(threadsANI[i]);
-	}
+        if(!no_dense){
+          for(int t = 0; t < denseSpan; t++){
+            if(tmpDist <= distRadius[t]){
+              denseLocalArr[t * threads + thread_id][i]++;
+              denseLocalArr[t * threads + thread_id][j]++;
+            }
+          }
+          double tmpANI = 1.0 - tmpDist;
+          int ANI = (int)(tmpANI / 0.01);
+          assert(ANI < 101);
+          threadsANI[thread_id][ANI]++;
+        }
 
-	for(int i = 0; i < denseSpan * threads; i++){
-		delete(denseLocalArr[i]);
-	}
+        EdgeInfo tmpE{i, j, tmpDist};
+        mstArr[thread_id].push_back(tmpE);
+      }
+    }
+    if(thread_id == 0){
+      uint64_t computedNum = (uint64_t)(N - id) * (uint64_t)id + (uint64_t)id * (uint64_t)id / 2;
+      if(computedNum >= percentId * percentNum){
+        fprintf(stderr, "---finish MST generation %d %\n", percentId);
+        percentId++;
+      }
+    }
 
-	if(tailNum != 0){
-		for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
-			for(int j = i+1; j < sketches.size(); j++){
-				//double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
-				double tmpDist;
-				if(sketch_func_id == 0){
-					if(sketches[i].isContainment)
-						//tmpDist = 1.0 - sketches[i].minHash->containJaccard(sketches[j].minHash);
-						tmpDist = sketches[i].minHash->containDistance(sketches[j].minHash);
-					else
-					{
-						tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
-					}
-				}
-				else if(sketch_func_id == 1)
-					tmpDist = sketches[i].KSSD->distance(sketches[j].KSSD);
-				else if(sketch_func_id == 2) 
-					tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
-				else if(sketch_func_id == 3)
-					tmpDist = sketches[i].HLL->distance(*sketches[j].HLL);
-				else if(sketch_func_id == 4)
-					tmpDist = sketches[i].OMH->distance(*sketches[j].OMH);
-				else	
-					break;
-				
-				if(!no_dense){
-					for(int t = 0; t < denseSpan; t++){
-						if(tmpDist <= distRadius[t]){
-							denseArr[t][i]++;
-							denseArr[t][j]++;
-						}
-					}
-					double tmpANI = 1.0 - tmpDist;
-					int ANI = (int)(tmpANI/0.01);
-					assert(ANI < 101);
-					aniArr[ANI]++;
-				}
+    sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
+    vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());
+    mstArr[thread_id].swap(tmpMst);
+    vector<EdgeInfo>().swap(tmpMst);
+  }
+  cerr << "-----finish the 100 % multiThreads mst generate" << endl;
 
-				EdgeInfo tmpE{i, j, tmpDist};
-				mstArr[0].push_back(tmpE);
-			}
-		}
-		if(mstArr[0].size() != 0){
-			sort(mstArr[0].begin(), mstArr[0].end(), cmpEdge);
-			vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[0], sketches.size());
-			mstArr[0].swap(tmpMst);
-		}
+  if(!no_dense){
+    for(int i = 0; i < 101; i++){
+      for(int j = 0; j < threads; j++){
+        aniArr[i] += threadsANI[j][i];
+      }
+    }
+    for(int i = 0; i < denseSpan; i++){
+      for(int j = 0; j < threads; j++){
+        for(int k = 0; k < N; k++){
+          denseArr[i][k] += denseLocalArr[i*threads+j][k];
+        }
+      }
+    }
+  }
+  for(int i = 0; i < threads; i++){
+    delete(threadsANI[i]);
+  }
 
-	}
+  for(int i = 0; i < denseSpan * threads; i++){
+    delete(denseLocalArr[i]);
+  }
 
-	vector<EdgeInfo> finalGraph;
-	for(int i = 0; i < threads; i++){
-		finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
-		vector<EdgeInfo>().swap(mstArr[i]);
-	}
+  if(tailNum != 0){
+    for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
+      for(int j = i+1; j < sketches.size(); j++){
+        //double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
+        double tmpDist;
+        if(sketch_func_id == 0){
+          if(sketches[i].isContainment)
+            //tmpDist = 1.0 - sketches[i].minHash->containJaccard(sketches[j].minHash);
+            tmpDist = sketches[i].minHash->containDistance(sketches[j].minHash);
+          else
+          {
+            tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
+          }
+        }
+        else if(sketch_func_id == 1)
+          tmpDist = sketches[i].KSSD->distance(sketches[j].KSSD);
+        else if(sketch_func_id == 2) 
+          tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
+        else if(sketch_func_id == 3)
+          tmpDist = sketches[i].HLL->distance(*sketches[j].HLL);
+        else if(sketch_func_id == 4)
+          tmpDist = sketches[i].OMH->distance(*sketches[j].OMH);
+        else	
+          break;
 
-	sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
+        if(!no_dense){
+          for(int t = 0; t < denseSpan; t++){
+            if(tmpDist <= distRadius[t]){
+              denseArr[t][i]++;
+              denseArr[t][j]++;
+            }
+          }
+          double tmpANI = 1.0 - tmpDist;
+          int ANI = (int)(tmpANI/0.01);
+          assert(ANI < 101);
+          aniArr[ANI]++;
+        }
 
-	vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
-	vector<EdgeInfo>().swap(finalGraph);
+        EdgeInfo tmpE{i, j, tmpDist};
+        mstArr[0].push_back(tmpE);
+      }
+    }
+    if(mstArr[0].size() != 0){
+      sort(mstArr[0].begin(), mstArr[0].end(), cmpEdge);
+      vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[0], sketches.size());
+      mstArr[0].swap(tmpMst);
+    }
 
-	return mst;
+  }
+
+  vector<EdgeInfo> finalGraph;
+  for(int i = 0; i < threads; i++){
+    finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
+    vector<EdgeInfo>().swap(mstArr[i]);
+  }
+
+  sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
+
+  vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
+  vector<EdgeInfo>().swap(finalGraph);
+
+  return mst;
 }
 
 // string build_kssd_newick_tree(vector<pair<int, double>>* G, bool* visited, const vector<KssdSketchInfo>& sketches, bool sketch_by_file, int node){
@@ -826,29 +826,28 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
 // 	children = '(' + children.substr(0, children.length()-1) + ')' + name;
 // 	return children;
 // }
-// 递归：根据 children 数组构建 Newick（MinHash / 通用 SketchInfo 版本，只在叶子上写名字）
 static string build_newick_tree_recursive(
-	int node,
-	const vector<vector<pair<int,double>>>& children,
-	const vector<SketchInfo>& sketches,
-	bool sketch_by_file)
+    int node,
+    const vector<vector<pair<int,double>>>& children,
+    const vector<SketchInfo>& sketches,
+    bool sketch_by_file)
 {
-	if (children[node].empty()) {
-		string name = sketch_by_file ? sketches[node].fileName
-		                             : sketches[node].seqInfo.name;
-		return name;
-	}
+  if (children[node].empty()) {
+    string name = sketch_by_file ? sketches[node].fileName
+      : sketches[node].seqInfo.name;
+    return name;
+  }
 
-	string s = "(";
-	for (size_t i = 0; i < children[node].size(); ++i) {
-		int child = children[node][i].first;
-		double bl  = children[node][i].second;
-		if (i > 0) s += ",";
-		s += build_newick_tree_recursive(child, children, sketches, sketch_by_file);
-		s += ":" + to_string(bl);
-	}
-	s += ")";  // 内部节点不加名字
-	return s;
+  string s = "(";
+  for (size_t i = 0; i < children[node].size(); ++i) {
+    int child = children[node][i].first;
+    double bl  = children[node][i].second;
+    if (i > 0) s += ",";
+    s += build_newick_tree_recursive(child, children, sketches, sketch_by_file);
+    s += ":" + to_string(bl);
+  }
+  s += ")";  
+  return s;
 }
 
 
@@ -872,154 +871,203 @@ static string build_newick_tree_recursive(
 // }
 
 string get_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file){
-	int N = sketches.size();
-	if (N == 0) return ";";
-	if (N == 1) {
-		string name = sketch_by_file ? sketches[0].fileName
-		                             : sketches[0].seqInfo.name;
-		return name + ";";
-	}
+  int N = sketches.size();
+  if (N == 0) return ";";
+  if (N == 1) {
+    string name = sketch_by_file ? sketches[0].fileName
+      : sketches[0].seqInfo.name;
+    return name + ";";
+  }
 
-	vector<EdgeInfo> edges = mst;
-	sort(edges.begin(), edges.end(),
-	     [](const EdgeInfo& a, const EdgeInfo& b){
-		     return a.dist < b.dist;
-	     });
+  vector<EdgeInfo> edges = mst;
+  sort(edges.begin(), edges.end(),
+      [](const EdgeInfo& a, const EdgeInfo& b){
+      return a.dist < b.dist;
+      });
 
-	int maxNodes = 2 * N - 1;
-	vector<vector<pair<int,double>>> children(maxNodes);
-	vector<double> height(maxNodes, 0.0);  
-	vector<int> repNode(maxNodes, -1);     
-	for (int i = 0; i < N; ++i) {
-		repNode[i] = i;  
-	}
+  int maxNodes = 2 * N - 1;
+  vector<vector<pair<int,double>>> children(maxNodes);
+  vector<double> height(maxNodes, 0.0);  
+  vector<int> repNode(maxNodes, -1);     
+  for (int i = 0; i < N; ++i) {
+    repNode[i] = i;  
+  }
 
-	DSU dsu(N);
-	int nextNode = N;  
+  DSU dsu(N);
+  int nextNode = N;  
 
-	for (const auto& e : edges) {
-		int u = e.preNode;
-		int v = e.sufNode;
-		double w = e.dist;
+  for (const auto& e : edges) {
+    int u = e.preNode;
+    int v = e.sufNode;
+    double w = e.dist;
 
-		int ru = dsu.find(u);
-		int rv = dsu.find(v);
-		if (ru == rv) continue; 
+    int ru = dsu.find(u);
+    int rv = dsu.find(v);
+    if (ru == rv) continue; 
 
-		int nodeU = repNode[ru];
-		int nodeV = repNode[rv];
+    int nodeU = repNode[ru];
+    int nodeV = repNode[rv];
 
-		double hU = height[nodeU];
-		double hV = height[nodeV];
-		double h  = w;  
+    double hU = height[nodeU];
+    double hV = height[nodeV];
+    double h  = w;  
 
-		double blU = max(0.0, h - hU);
-		double blV = max(0.0, h - hV);
+    double blU = max(0.0, h - hU);
+    double blV = max(0.0, h - hV);
 
-		int newNode = nextNode++;
-		children[newNode].push_back({nodeU, blU});
-		children[newNode].push_back({nodeV, blV});
-		height[newNode] = h;
+    int newNode = nextNode++;
+    children[newNode].push_back({nodeU, blU});
+    children[newNode].push_back({nodeV, blV});
+    height[newNode] = h;
 
-		int rNew = dsu.unite(ru, rv);
-		repNode[rNew] = newNode;
-	}
+    int rNew = dsu.unite(ru, rv);
+    repNode[rNew] = newNode;
+  }
 
-	int rootRep = dsu.find(0);
-	int root    = repNode[rootRep];
+  int rootRep = dsu.find(0);
+  int root    = repNode[rootRep];
 
-	string newick_tree = build_newick_tree_recursive(root, children, sketches, sketch_by_file);
-	newick_tree += ";";
-	return newick_tree;
+  string newick_tree = build_newick_tree_recursive(root, children, sketches, sketch_by_file);
+  newick_tree += ";";
+  return newick_tree;
 }
 
 static std::string build_kssd_newick_tree(
-	int node,
-	const std::vector<std::vector<std::pair<int,double>>>& children,
-	const std::vector<KssdSketchInfo>& sketches,
-	bool sketch_by_file)
+    int node,
+    const std::vector<std::vector<std::pair<int,double>>>& children,
+    const std::vector<KssdSketchInfo>& sketches,
+    bool sketch_by_file)
 {
-if (children[node].empty()) {
-	std::string name = sketch_by_file ? sketches[node].fileName
-									  : sketches[node].seqInfo.name;
-	return name;
-}
+  if (children[node].empty()) {
+    std::string name = sketch_by_file ? sketches[node].fileName
+      : sketches[node].seqInfo.name;
+    return name;
+  }
 
-std::string s = "(";
-for (size_t i = 0; i < children[node].size(); ++i) {
-	int child = children[node][i].first;
-	double bl  = children[node][i].second;
-	if (i > 0) s += ",";
-	s += build_kssd_newick_tree(child, children, sketches, sketch_by_file);
-	s += ":" + std::to_string(bl);
-}
-s += ")"; 
-return s;
+  std::string s = "(";
+  for (size_t i = 0; i < children[node].size(); ++i) {
+    int child = children[node][i].first;
+    double bl  = children[node][i].second;
+    if (i > 0) s += ",";
+    s += build_kssd_newick_tree(child, children, sketches, sketch_by_file);
+    s += ":" + std::to_string(bl);
+  }
+  s += ")"; 
+  return s;
 }
 
 std::string get_kssd_newick_tree(const std::vector<KssdSketchInfo>& sketches,
-							 const std::vector<EdgeInfo>& mst,
-							 bool sketch_by_file)
+    const std::vector<EdgeInfo>& mst,
+    bool sketch_by_file)
 {
-int N = sketches.size();
-if (N == 0) return ";";
-if (N == 1) {
-	std::string name = sketch_by_file ? sketches[0].fileName
-									  : sketches[0].seqInfo.name;
-	return name + ";";
+  int N = sketches.size();
+  if (N == 0) return ";";
+  if (N == 1) {
+    std::string name = sketch_by_file ? sketches[0].fileName
+      : sketches[0].seqInfo.name;
+    return name + ";";
+  }
+
+  std::vector<EdgeInfo> edges = mst;
+  std::sort(edges.begin(), edges.end(),
+      [](const EdgeInfo& a, const EdgeInfo& b){
+      return a.dist < b.dist;
+      });
+
+
+  int maxNodes = 2 * N - 1;
+  std::vector<std::vector<std::pair<int,double>>> children(maxNodes);
+  std::vector<double> height(maxNodes, 0.0);     
+  std::vector<int> repNode(maxNodes, -1);       
+  for (int i = 0; i < N; ++i) {
+    repNode[i] = i;   
+  }
+
+  DSU dsu(N);
+  int nextNode = N;      
+
+  for (const auto& e : edges) {
+    int u = e.preNode;
+    int v = e.sufNode;
+    double w = e.dist;
+
+    int ru = dsu.find(u);
+    int rv = dsu.find(v);
+    if (ru == rv) continue; 
+
+    int nodeU = repNode[ru];
+    int nodeV = repNode[rv];
+
+    double hU = height[nodeU];
+    double hV = height[nodeV];
+    double h  = w;  
+
+    double blU = std::max(0.0, h - hU);
+    double blV = std::max(0.0, h - hV);
+
+    int newNode = nextNode++;
+    children[newNode].push_back({nodeU, blU});
+    children[newNode].push_back({nodeV, blV});
+    height[newNode] = h;
+
+    int rNew = dsu.unite(ru, rv);
+    repNode[rNew] = newNode;
+  }
+
+  int rootRep = dsu.find(0);
+  int root    = repNode[rootRep];
+
+  std::string newick_tree = build_kssd_newick_tree(root, children, sketches, sketch_by_file);
+  newick_tree += ";";
+  return newick_tree;
 }
 
-std::vector<EdgeInfo> edges = mst;
-std::sort(edges.begin(), edges.end(),
-		  [](const EdgeInfo& a, const EdgeInfo& b){
-			  return a.dist < b.dist;
-		  });
+// 从 MST 构造 single-linkage linkage matrix
+vector<LinkageRow> get_linkage_from_mst(int N, const vector<EdgeInfo>& mst){
+  vector<LinkageRow> Z;
+  if (N <= 1) return Z;
 
+  vector<EdgeInfo> edges = mst;
+  sort(edges.begin(), edges.end(),
+      [](const EdgeInfo& a, const EdgeInfo& b){
+      return a.dist < b.dist;
+      });
 
-int maxNodes = 2 * N - 1;
-std::vector<std::vector<std::pair<int,double>>> children(maxNodes);
-std::vector<double> height(maxNodes, 0.0);     
-std::vector<int> repNode(maxNodes, -1);       
-for (int i = 0; i < N; ++i) {
-	repNode[i] = i;   
-}
+  DSU dsu(N);
+  int next_cluster_id = N;
+  vector<int> cluster_id(N);
+  vector<int> cluster_size(2 * N - 1);
 
-DSU dsu(N);
-int nextNode = N;      
+  for (int i = 0; i < N; ++i) {
+    cluster_id[i]   = i;
+    cluster_size[i] = 1;
+  }
 
-for (const auto& e : edges) {
-	int u = e.preNode;
-	int v = e.sufNode;
-	double w = e.dist;
+  Z.reserve(N - 1);
 
-	int ru = dsu.find(u);
-	int rv = dsu.find(v);
-	if (ru == rv) continue; 
+  for (const auto& e : edges) {
+    int ru = dsu.find(e.preNode);
+    int rv = dsu.find(e.sufNode);
+    if (ru == rv) continue;
 
-	int nodeU = repNode[ru];
-	int nodeV = repNode[rv];
+    int id_u = cluster_id[ru];
+    int id_v = cluster_id[rv];
 
-	double hU = height[nodeU];
-	double hV = height[nodeV];
-	double h  = w;  
+    int new_id   = next_cluster_id++;
+    int new_size = cluster_size[id_u] + cluster_size[id_v];
 
-	double blU = std::max(0.0, h - hU);
-	double blV = std::max(0.0, h - hV);
+    LinkageRow row;
+    row.c1   = id_u;
+    row.c2   = id_v;
+    row.dist = e.dist;
+    row.size = new_size;
+    Z.push_back(row);
 
-	int newNode = nextNode++;
-	children[newNode].push_back({nodeU, blU});
-	children[newNode].push_back({nodeV, blV});
-	height[newNode] = h;
+    int rNew = dsu.unite(ru, rv);
+    cluster_id[rNew] = new_id;
+    cluster_size[new_id] = new_size;
+  }
 
-	int rNew = dsu.unite(ru, rv);
-	repNode[rNew] = newNode;
-}
-
-int rootRep = dsu.find(0);
-int root    = repNode[rootRep];
-
-std::string newick_tree = build_kssd_newick_tree(root, children, sketches, sketch_by_file);
-newick_tree += ";";
-return newick_tree;
+  return Z;
 }
 

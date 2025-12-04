@@ -65,7 +65,7 @@ void append_clust_greedy(string folder_path, string input_file, string output_fi
 #endif
 
 #ifndef GREEDY_CLUST
-void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool no_dense, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads){
+void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads){
 	bool isSave = !no_save;
 	int sketch_func_id_0; 
 	vector<KssdSketchInfo> pre_sketches; 
@@ -128,6 +128,12 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 		cerr << "-----write the newick tree into: " << output_newick_file << endl;
 	}
 
+	if(is_linkage_matrix){
+		string output_linkage_file = output_file + ".linkage.txt";
+		print_kssd_linkage_matrix(final_sketches, final_mst, output_linkage_file);
+		cerr << "-----write the linkage matrix into: " << output_linkage_file << endl;
+	}
+
 	vector<EdgeInfo> forest = generateForest(final_mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, final_sketches.size());
 	printKssdResult(tmpClust, final_sketches, pre_sketch_by_file, output_file);
@@ -179,7 +185,7 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 
 }
 
-void append_clust_mst(string folder_path, string input_file, string output_file, bool is_newick_tree, bool no_dense, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
+void append_clust_mst(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
 	int sketch_func_id_0; 
 	vector<SketchInfo> pre_sketches; 
 	bool pre_sketch_by_file = loadSketches(folder_path, threads, pre_sketches, sketch_func_id_0); 
@@ -258,6 +264,12 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 
 	}
 
+	if(is_linkage_matrix){
+		string output_linkage_file = output_file + ".linkage.txt";
+		print_linkage_matrix(final_sketches, final_mst, output_linkage_file);
+		cerr << "-----write the linkage matrix into: " << output_linkage_file << endl;
+	}
+
 	vector<EdgeInfo> forest = generateForest(final_mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, final_sketches.size());
 	printResult(tmpClust, final_sketches, pre_sketch_by_file, output_file);
@@ -307,7 +319,7 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 	}
 
 }
-void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, double threshold, int threads){
+void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, double threshold, int threads){
 	vector<KssdSketchInfo> sketches;
 	vector<EdgeInfo> mst;
 	vector<vector<int>> cluster;
@@ -318,6 +330,12 @@ void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_t
 		string output_newick_file = outputFile + ".newick.tree";
 		print_kssd_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 		cerr << "-----write the newick tree into: " << output_newick_file << endl;
+	}
+
+	if(is_linkage_matrix){
+		string output_linkage_file = outputFile + ".linkage.txt";
+		print_kssd_linkage_matrix(sketches, mst, output_linkage_file);
+		cerr << "-----write the linkage matrix into: " << output_linkage_file << endl;
 	}
 
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
@@ -356,7 +374,7 @@ void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_t
 	}
 }
 
-void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, double threshold, int threads){
+void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, double threshold, int threads){
 	vector<SketchInfo> sketches;
 	vector<EdgeInfo> mst;
 	vector<vector<int>> cluster;
@@ -367,6 +385,12 @@ void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, 
 		string output_newick_file = outputFile + ".newick.tree";
 		print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 		cerr << "-----write the newick tree into: " << output_newick_file << endl;
+	}
+
+	if(is_linkage_matrix){
+		string output_linkage_file = outputFile + ".linkage.txt";
+		print_linkage_matrix(sketches, mst, output_linkage_file);
+		cerr << "-----write the linkage matrix into: " << output_linkage_file << endl;
 	}
 
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
@@ -407,7 +431,7 @@ void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, 
 }
 #endif
 
-void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads){
+void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads){
 	bool isSave = !noSave;
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
@@ -416,11 +440,11 @@ void clust_from_genome_fast(const string inputFile, string outputFile, string fo
 	transSketches(sketches, info, folder_path, threads);
 #else
 #endif
-	compute_kssd_clusters(sketches, info, sketchByFile, no_dense, isContainment, folder_path, outputFile, is_newick_tree, threshold, isSave, threads);
+	compute_kssd_clusters(sketches, info, sketchByFile, no_dense, isContainment, folder_path, outputFile, is_newick_tree, is_linkage_matrix, threshold, isSave, threads);
 
 }
 
-void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, double threshold, bool isSave, int threads){
+void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, double threshold, bool isSave, int threads){
 	vector<vector<int>> cluster;
 	double t2 = get_sec();
 
@@ -467,6 +491,12 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 		string output_newick_file = outputFile + ".newick.tree";
 		print_kssd_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 		cerr << "-----write the newick tree into: " << output_newick_file << endl;
+	}
+
+	if(is_linkage_matrix){
+		string output_linkage_file = outputFile + ".linkage.txt";
+		print_kssd_linkage_matrix(sketches, mst, output_linkage_file);
+		cerr << "-----write the linkage matrix into: " << output_linkage_file << endl;
 	}
 
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
@@ -542,7 +572,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 
 	}
 
-	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads){
+	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads){
 		bool isSave = !noSave;
 		vector<SketchInfo> sketches;
 		int sketch_func_id;
@@ -551,7 +581,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 
 		compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, isSave, threads);
 
-		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, no_dense, folder_path, sketch_func_id, threshold, isSave, threads);
+		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_linkage_matrix, no_dense, folder_path, sketch_func_id, threshold, isSave, threads);
 	}
 
 	bool tune_kssd_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, int& kmerSize, double& threshold, int &drlevel){
@@ -706,7 +736,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		return true;
 	}
 
-	void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, bool isContainment, double threshold, int threads){
+	void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool isContainment, double threshold, int threads){
 		vector<KssdSketchInfo> sketches;
 		vector<vector<int>> cluster;
 		bool sketchByFile;
@@ -755,6 +785,12 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 			string output_newick_file = outputFile + ".newick.tree";
 			print_kssd_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 			cerr << "-----write the newick tree into: " << output_newick_file << endl;
+		}
+
+		if(is_linkage_matrix){
+			string output_linkage_file = outputFile + ".linkage.txt";
+			print_kssd_linkage_matrix(sketches, mst, output_linkage_file);
+			cerr << "-----write the linkage matrix into: " << output_linkage_file << endl;
 		}
 		vector<EdgeInfo> forest = generateForest(mst, threshold);
 		vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
@@ -909,7 +945,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		}
 	}
 
-	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads){
+	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads){
 		vector<vector<int>> cluster;
 		double t2 = get_sec();
 #ifdef GREEDY_CLUST
@@ -946,6 +982,12 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 			string output_newick_file = outputFile + ".newick.tree";
 			print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 			cerr << "-----write the newick tree into: " << output_newick_file << endl;
+		}
+
+		if(is_linkage_matrix){
+			string output_linkage_file = outputFile + ".linkage.txt";
+			print_linkage_matrix(sketches, mst, output_linkage_file);
+			cerr << "-----write the linkage matrix into: " << output_linkage_file << endl;
 		}
 
 		vector<EdgeInfo> forest = generateForest(mst, threshold);

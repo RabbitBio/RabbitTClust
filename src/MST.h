@@ -60,6 +60,15 @@ vector<EdgeInfo> modifyForest(vector<EdgeInfo> forset, vector<int> noiseArr, int
 typedef pair<int, int> PairInt;
 vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha);
 
+struct LinkageRow{
+	int c1;      // first cluster id
+	int c2;      // second cluster id
+	double dist; // distance at merge
+	int size;    // size of new cluster
+};
+
+std::vector<LinkageRow> get_linkage_from_mst(int N, const std::vector<EdgeInfo>& mst);
+
 string get_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file);
 string get_kssd_newick_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file);
 

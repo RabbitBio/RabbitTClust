@@ -237,5 +237,36 @@ void print_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo
 	fclose(fp_tree);
 }
 
+void print_kssd_linkage_matrix(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, string output){
+	int N = sketches.size();
+	vector<LinkageRow> Z = get_linkage_from_mst(N, mst);
+
+	FILE* fp = fopen(output.c_str(), "w");
+	if(!fp){
+		cerr << "ERROR: print_kssd_linkage_matrix(), cannot write file: " << output << endl;
+		exit(1);
+	}
+	// 每行：cluster1  cluster2  dist  size
+	for(const auto& row : Z){
+		fprintf(fp, "%d\t%d\t%.6f\t%d\n", row.c1, row.c2, row.dist, row.size);
+	}
+	fclose(fp);
+}
+
+void print_linkage_matrix(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, string output){
+	int N = sketches.size();
+	vector<LinkageRow> Z = get_linkage_from_mst(N, mst);
+
+	FILE* fp = fopen(output.c_str(), "w");
+	if(!fp){
+		cerr << "ERROR: print_linkage_matrix(), cannot write file: " << output << endl;
+		exit(1);
+	}
+	for(const auto& row : Z){
+		fprintf(fp, "%d\t%d\t%.6f\t%d\n", row.c1, row.c2, row.dist, row.size);
+	}
+	fclose(fp);
+}
+
 
 
