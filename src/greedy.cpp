@@ -1,9 +1,12 @@
 #ifdef GREEDY_CLUST
 #include "greedy.h"
 #include <map>
+#include <unordered_map>  // For unordered_map (O(1) operations)
+#include <unordered_set>  // For unordered_set
 #include <vector>
 #include <immintrin.h>
 #include <algorithm> // For std::min, std::max, sorting
+#include <limits>    // For numeric_limits
 #include <omp.h>  // For OpenMP parallel processing
 #include <iostream>  // For debugging/logging
 using namespace std;
@@ -323,69 +326,6 @@ double distance(const std::vector<uint32_t>& hashesRef, const std::vector<uint32
 
 
 
-
-
-
-
-//vector<vector<int>> KssdgreedyCluster(vector<KssdSketchInfo>& sketches, int sketch_func_id, double threshold, int threads)
-//{
-//  int numGenomes = sketches.size();
-//  int * clustLabels = new int[numGenomes];
-//  memset(clustLabels, 0, numGenomes*sizeof(int));
-//  vector<vector<int> > cluster;
-//  vector<int> representiveArr;
-//  map<int, vector<int> > semiClust;
-//  representiveArr.push_back(0);
-//  semiClust.insert({0, vector<int>()});
-//
-//  for(int j = 1; j < numGenomes; j++){
-//    map<double, int> distMapCenter;
-//    int sizeRef = sketches[j].hash32_arr.size();
-//    //std::sort(representiveArr.begin(), representiveArr.end(),KssdcmpSketchSize);
-//#pragma omp parallel for num_threads(threads)
-//    for(int i = 0; i < representiveArr.size(); i++){
-//      int repId = representiveArr[i];
-//      double dist;
-//      int sizeQry = sketches[repId].hash32_arr.size();
-//      if(sizeRef/sizeQry > 1.5 || sizeQry/sizeRef > 1.5)
-//        continue;
-//
-//      dist = distance(sketches[repId].hash32_arr, sketches[j].hash32_arr, 19);
-//      if(dist <= threshold){
-//        clustLabels[j] = 1;
-//#pragma omp critical
-//        {
-//          distMapCenter.insert({dist, repId});
-//        }
-//        //break;
-//      }
-//    }//end for i
-//    if(clustLabels[j] == 0){//this genome is a representative genome
-//      representiveArr.push_back(j);
-//      semiClust.insert({j, vector<int>()});
-//    }
-//    else{//this genome is a redundant genome, get the nearest representive genome as its center
-//      auto it = distMapCenter.begin();
-//      int repId = it->second;
-//      semiClust[repId].push_back(j);
-//    }
-//    map<double, int>().swap(distMapCenter);
-//    if(j % 10000 == 0) cerr << "---finished cluster: " << j << endl;
-//
-//  }//end for j
-//  //cerr << "the representiveArr size is : " << representiveArr.size() << endl;
-//
-//  for(auto x : semiClust){
-//    int center = x.first;
-//    vector<int> redundantArr = x.second;
-//    vector<int> curClust;
-//    curClust.push_back(center);
-//    curClust.insert(curClust.end(), redundantArr.begin(), redundantArr.end());
-//    cluster.push_back(curClust);
-//  }
-//  return cluster;
-//}
-
 double calculateMaxSizeRatio(double D, int k) {
     if (D < 0) {
         throw std::runtime_error("Mash distance cannot be negative.");
@@ -403,100 +343,103 @@ double calculateMaxSizeRatio(double D, int k) {
 vector<std::vector<int>> KssdgreedyCluster(std::vector<KssdSketchInfo>& sketches, int sketch_func_id, double threshold, int threads)
 {
     int numGenomes = sketches.size();
-    int * clustLabels = new int[numGenomes];
-    memset(clustLabels, 0, numGenomes * sizeof(int));
+    if (numGenomes == 0) return std::vector<std::vector<int>>();
+
+    // Use modern C++ memory management
+    std::vector<int> clustLabels(numGenomes, 0);
     std::vector<std::vector<int>> cluster;
     std::vector<int> representiveArr;
-    std::map<int, std::vector<int>> semiClust;
-   	int radio = calculateMaxSizeRatio(threshold, 19); 
-   	//for (auto& sketch : sketches) {
-    //    if (sketch.hash32_arr.size() > 1000) {
-    //        sketch.hash32_arr.resize(1000); 
-    //    }
-    //}
+    
+    // Use unordered_map for O(1) average insert/lookup instead of O(log n) for map
+    std::unordered_map<int, std::vector<int>> semiClust;
+    
+    double radio = calculateMaxSizeRatio(threshold, 19);
+    
+    // Optional: Debug output (controlled by environment variable or flag)
+    #ifdef DEBUG_SKETCH_DISTRIBUTION
     std::map<int, int> sketchSizeDistribution;
     for (const auto& sketch : sketches) {
         int size = sketch.hash32_arr.size();
         int interval = (size / 1000) * 1000;
         sketchSizeDistribution[interval]++;
     }
-    
-	  //t@github.com:RabbitBio/RabbitTClust.gitsort(sketches.begin(), sketches.end(), aKssdcmpSketchSize);
     std::cout << "Sketch size distribution (in intervals of 1000):" << std::endl;
     for (const auto& pair : sketchSizeDistribution) {
         std::cout << "[" << pair.first << " - " << (pair.first + 999) << "]: " << pair.second << " sketches" << std::endl;
-    } 
-
-    if (numGenomes == 0) return cluster;
+    }
+    #endif
 
     representiveArr.push_back(0);
-    semiClust.insert({0, std::vector<int>()});
+    semiClust[0] = std::vector<int>();
+    
+    // Pre-allocate thread-local storage for best matches to avoid critical section
+    std::vector<std::pair<double, int>> thread_best_matches;
 
     for(int j = 1; j < numGenomes; j++){
-        std::map<double, int> distMapCenter;
         int sizeRef = sketches[j].hash32_arr.size();
         
-        std::vector<int> reps_to_blacklist; 
+        // Resize thread_best_matches for current number of threads
+        thread_best_matches.assign(threads, {std::numeric_limits<double>::max(), -1});
 
-#pragma omp parallel for num_threads(threads)
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 64)
         for(int i = 0; i < representiveArr.size(); i++){
             int repId = representiveArr[i];
-            double dist;
             int sizeQry = sketches[repId].hash32_arr.size();
 
-            if ( (double)sizeQry / sizeRef > radio)
-            {
-                #pragma omp critical
-                {
-                    reps_to_blacklist.push_back(repId);
-                }
+            // Bi-directional size ratio filtering (skip if ratio too large in either direction)
+            double ratio = (double)sizeQry / sizeRef;
+            if (ratio > radio || ratio < 1.0 / radio) {
                 continue;
             }
 
-            dist = distance(sketches[repId].hash32_arr, sketches[j].hash32_arr, 19);
+            // Calculate distance
+            double dist = distance(sketches[repId].hash32_arr, sketches[j].hash32_arr, 19);
+            
             if(dist <= threshold){
-                clustLabels[j] = 1;
-                #pragma omp critical
-                {
-                    distMapCenter.insert({dist, repId});
+                // Use thread-local storage to avoid critical section
+                int tid = omp_get_thread_num();
+                if(dist < thread_best_matches[tid].first){
+                    thread_best_matches[tid] = {dist, repId};
                 }
             }
         }
 
-        if(clustLabels[j] == 0){
-            representiveArr.push_back(j);
-            semiClust.insert({j, std::vector<int>()});
+        // Find best match across all threads (serial, but minimal work)
+        double best_dist = std::numeric_limits<double>::max();
+        int best_rep = -1;
+        for(const auto& match : thread_best_matches){
+            if(match.second != -1 && match.first < best_dist){
+                best_dist = match.first;
+                best_rep = match.second;
+            }
+        }
+
+        if(best_rep != -1){
+            // This genome belongs to an existing cluster
+            clustLabels[j] = 1;
+            semiClust[best_rep].push_back(j);
         }
         else{
-            auto it = distMapCenter.begin();
-            int repId = it->second;
-            semiClust[repId].push_back(j);
+            // This genome is a new representative
+            representiveArr.push_back(j);
+            semiClust[j] = std::vector<int>();
         }
         
-        std::map<double, int>().swap(distMapCenter);
-        if(j % 10000 == 0) std::cerr << "--- finished cluster: " << j << " | Active reps: " << representiveArr.size() << std::endl;
-
-        if (!reps_to_blacklist.empty()) {
-            std::unordered_set<int> blacklist_set(reps_to_blacklist.begin(), reps_to_blacklist.end());
-
-            representiveArr.erase(
-                std::remove_if(representiveArr.begin(), representiveArr.end(),
-                               [&blacklist_set](int repId) {
-                                   return blacklist_set.count(repId);
-                               }),
-                representiveArr.end()
-            );
+        if(j % 10000 == 0) {
+            std::cerr << "--- finished cluster: " << j << " | Active reps: " << representiveArr.size() << std::endl;
         }
     }
 
-    delete[] clustLabels;
-
+    // Build final clusters
+    cluster.reserve(semiClust.size());
     for(auto const& [center, redundantArr] : semiClust){
         std::vector<int> curClust;
+        curClust.reserve(1 + redundantArr.size());
         curClust.push_back(center);
         curClust.insert(curClust.end(), redundantArr.begin(), redundantArr.end());
-        cluster.push_back(curClust);
+        cluster.push_back(std::move(curClust));
     }
+    
     return cluster;
 }
 
@@ -577,3 +520,4 @@ vector<vector<int>> greedyCluster(vector<SketchInfo>& sketches, int sketch_func_
 
 
 #endif
+
