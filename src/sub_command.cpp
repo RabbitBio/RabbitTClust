@@ -1,5 +1,6 @@
 #include "sub_command.h"
 #include <assert.h>
+#include "cluster_postprocess.h"
 
 using namespace std;
 
@@ -431,7 +432,7 @@ void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, 
 }
 #endif
 
-void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads){
+void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads, double dedup_dist, int reps_per_cluster){
 	bool isSave = !noSave;
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
@@ -440,11 +441,11 @@ void clust_from_genome_fast(const string inputFile, string outputFile, string fo
 	transSketches(sketches, info, folder_path, threads);
 #else
 #endif
-	compute_kssd_clusters(sketches, info, sketchByFile, no_dense, isContainment, folder_path, outputFile, is_newick_tree, is_linkage_matrix, threshold, isSave, threads);
+	compute_kssd_clusters(sketches, info, sketchByFile, no_dense, isContainment, folder_path, outputFile, is_newick_tree, is_linkage_matrix, threshold, isSave, threads, dedup_dist, reps_per_cluster);
 
 }
 
-void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, double threshold, bool isSave, int threads){
+void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, double threshold, bool isSave, int threads, double dedup_dist, int reps_per_cluster){
 	vector<vector<int>> cluster;
 	double t2 = get_sec();
 
@@ -504,6 +505,22 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 	printKssdResult(tmpClust, sketches, sketchByFile, outputFile);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
 	cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
+
+	if(dedup_dist > 0 || reps_per_cluster > 0){
+		vector<int> node_to_rep;
+		vector<vector<int>> candidates = build_dedup_candidates_per_cluster(tmpClust, forest, sketches, sketchByFile, dedup_dist, node_to_rep);
+		if(dedup_dist > 0){
+			string outputDedup = outputFile + ".dedup";
+			printKssdResult(candidates, sketches, sketchByFile, outputDedup);
+			cerr << "-----write the deduped cluster result into: " << outputDedup << endl;
+		}
+		if(reps_per_cluster > 0){
+			vector<vector<int>> reps = select_k_reps_per_cluster_tree(tmpClust, candidates, forest, sketches.size(), node_to_rep, reps_per_cluster);
+			string outputReps = outputFile + ".reps";
+			printKssdResult(reps, sketches, sketchByFile, outputReps);
+			cerr << "-----write the reps-per-cluster result into: " << outputReps << endl;
+		}
+	}
 	//tune cluster by noise cluster
 	if(!no_dense){
 		int alpha = 2;
@@ -529,6 +546,22 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 		printKssdResult(cluster, sketches, sketchByFile, outputFileNew);
 		cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
 		cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
+
+		if(dedup_dist > 0 || reps_per_cluster > 0){
+			vector<int> node_to_rep;
+			vector<vector<int>> candidates = build_dedup_candidates_per_cluster(cluster, forest, sketches, sketchByFile, dedup_dist, node_to_rep);
+			if(dedup_dist > 0){
+				string outputDedup = outputFileNew + ".dedup";
+				printKssdResult(candidates, sketches, sketchByFile, outputDedup);
+				cerr << "-----write the deduped cluster result into: " << outputDedup << endl;
+			}
+			if(reps_per_cluster > 0){
+				vector<vector<int>> reps = select_k_reps_per_cluster_tree(cluster, candidates, forest, sketches.size(), node_to_rep, reps_per_cluster);
+				string outputReps = outputFileNew + ".reps";
+				printKssdResult(reps, sketches, sketchByFile, outputReps);
+				cerr << "-----write the reps-per-cluster result into: " << outputReps << endl;
+			}
+		}
 		double t5 = get_sec();
 #ifdef Timer
 		cerr << "========time of tuning cluster is: " << t5 - t4 << "========" << endl;
@@ -736,7 +769,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		return true;
 	}
 
-	void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool isContainment, double threshold, int threads){
+	void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool isContainment, double threshold, int threads, double dedup_dist, int reps_per_cluster){
 		vector<KssdSketchInfo> sketches;
 		vector<vector<int>> cluster;
 		bool sketchByFile;
@@ -798,6 +831,22 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		cerr << "-----write the cluster result into: " << outputFile << endl;
 		cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
 
+		if(dedup_dist > 0 || reps_per_cluster > 0){
+			vector<int> node_to_rep;
+			vector<vector<int>> candidates = build_dedup_candidates_per_cluster(tmpClust, forest, sketches, sketchByFile, dedup_dist, node_to_rep);
+			if(dedup_dist > 0){
+				string outputDedup = outputFile + ".dedup";
+				printKssdResult(candidates, sketches, sketchByFile, outputDedup);
+				cerr << "-----write the deduped cluster result into: " << outputDedup << endl;
+			}
+			if(reps_per_cluster > 0){
+				vector<vector<int>> reps = select_k_reps_per_cluster_tree(tmpClust, candidates, forest, sketches.size(), node_to_rep, reps_per_cluster);
+				string outputReps = outputFile + ".reps";
+				printKssdResult(reps, sketches, sketchByFile, outputReps);
+				cerr << "-----write the reps-per-cluster result into: " << outputReps << endl;
+			}
+		}
+
 		if(!no_dense){
 			int alpha = 2;
 			int denseIndex = threshold / 0.01;
@@ -822,6 +871,22 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 			printKssdResult(cluster, sketches, sketchByFile, outputFileNew);
 			cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
 			cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
+
+			if(dedup_dist > 0 || reps_per_cluster > 0){
+				vector<int> node_to_rep;
+				vector<vector<int>> candidates = build_dedup_candidates_per_cluster(cluster, forest, sketches, sketchByFile, dedup_dist, node_to_rep);
+				if(dedup_dist > 0){
+					string outputDedup = outputFileNew + ".dedup";
+					printKssdResult(candidates, sketches, sketchByFile, outputDedup);
+					cerr << "-----write the deduped cluster result into: " << outputDedup << endl;
+				}
+				if(reps_per_cluster > 0){
+					vector<vector<int>> reps = select_k_reps_per_cluster_tree(cluster, candidates, forest, sketches.size(), node_to_rep, reps_per_cluster);
+					string outputReps = outputFileNew + ".reps";
+					printKssdResult(reps, sketches, sketchByFile, outputReps);
+					cerr << "-----write the reps-per-cluster result into: " << outputReps << endl;
+				}
+			}
 		}
 		double time3 = get_sec();
 #ifdef Timer

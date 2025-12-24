@@ -21,6 +21,8 @@
 
 #include "common.hpp"
 
+#include <omp.h>
+
 #define _64MASK 0xffffffffffffffffLLU
 
 KSEQ_INIT(gzFile, gzread);

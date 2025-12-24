@@ -80,6 +80,8 @@ int main(int argc, char * argv[]){
 	bool is_linkage_matrix = false;
 	bool is_fast = false;
 	bool no_dense = false;
+	double dedup_dist = -1.0;
+	int reps_per_cluster = 0;
 
 	bool noSave = false;
 
@@ -103,6 +105,8 @@ int main(int argc, char * argv[]){
 	auto flag_linkage_matrix = app.add_flag("--linkage-matrix", is_linkage_matrix, "output the single-linkage linkage matrix for clust-mst");
 	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
 	auto flag_no_dense = app.add_flag("--no-dense", no_dense, "not calculate the density and ANI datas");
+	auto option_dedup_dist = app.add_option("--dedup-dist", dedup_dist, "within each cluster, collapse near-duplicate nodes connected by forest edges with dist <= dedup-dist; output to <output>.dedup");
+	auto option_reps_per_cluster = app.add_option("--reps-per-cluster", reps_per_cluster, "select up to k representatives per cluster (after optional dedup); output to <output>.reps");
 #endif
 	auto option_append = app.add_option("--append", inputFile, "append genome file or file list with the pre-generated sketch or MST files");
 
@@ -146,7 +150,7 @@ int main(int argc, char * argv[]){
 			return 0;
 		}
 		if(*option_presketched && !*option_append){
-			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads);
+			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster);
 			return 0;
 		}
 		if(*option_append && !*option_premsted && !*option_presketched){
@@ -160,7 +164,7 @@ int main(int argc, char * argv[]){
 		if(!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)){
 			return 1;
 		}
-		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
+		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster);
 		return 0;
 	}
 
@@ -181,7 +185,7 @@ int main(int argc, char * argv[]){
 //======clust-greedy======================================================================
 	
  if (is_fast && *option_presketched && !*option_append) {
-    clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads);
+    clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster);
     return 0;
 } 
 
@@ -207,7 +211,7 @@ int main(int argc, char * argv[]){
 	}
   if(is_fast){
   
-    clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
+    clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster);
     return 1;
 
   }
