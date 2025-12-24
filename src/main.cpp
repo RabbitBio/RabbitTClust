@@ -82,6 +82,7 @@ int main(int argc, char * argv[]){
 	bool no_dense = false;
 	double dedup_dist = -1.0;
 	int reps_per_cluster = 0;
+	string buildDB_folder;
 
 	bool noSave = false;
 
@@ -107,13 +108,19 @@ int main(int argc, char * argv[]){
 	auto flag_no_dense = app.add_flag("--no-dense", no_dense, "not calculate the density and ANI datas");
 	auto option_dedup_dist = app.add_option("--dedup-dist", dedup_dist, "within each cluster, collapse near-duplicate nodes connected by forest edges with dist <= dedup-dist; output to <output>.dedup");
 	auto option_reps_per_cluster = app.add_option("--reps-per-cluster", reps_per_cluster, "select up to k representatives per cluster (after optional dedup); output to <output>.reps");
+	auto option_buildDB = app.add_option("--buildDB", buildDB_folder, "build a reusable KSSD sketch+index database into the given folder and exit (clust-mst --fast only)");
 #endif
 	auto option_append = app.add_option("--append", inputFile, "append genome file or file list with the pre-generated sketch or MST files");
 
-	option_output->required();
 	option_append->excludes(option_input);
 
 	CLI11_PARSE(app, argc, argv);
+
+	// Manual validation: output is required unless we're in --buildDB mode.
+	if(buildDB_folder.empty() && option_output->count() == 0){
+		cerr << "ERROR: option -o/--output is required (unless --buildDB is used)" << endl;
+		return 1;
+	}
 
 	if(threads < 1){
 		fprintf(stderr, "-----Invalid thread number %d\n", threads);
@@ -145,6 +152,18 @@ int main(int argc, char * argv[]){
 #ifndef GREEDY_CLUST
 //======clust-mst=========================================================================
 	if(is_fast){
+		if(!buildDB_folder.empty()){
+			if(!sketchByFile){
+				cerr << "ERROR: --buildDB currently requires -l/--list (genome file list or cluster output with file paths)" << endl;
+				return 1;
+			}
+			if(option_input->count() == 0){
+				cerr << "ERROR: --buildDB requires -i/--input (a genome list or a *.cluster/*.cluster.dedup file)" << endl;
+				return 1;
+			}
+			build_kssd_db_fast(inputFile, buildDB_folder, isSetKmer, isContainment, (int)minLen, kmerSize, drlevel, threads);
+			return 0;
+		}
 		if(*option_premsted && !*option_append){
 			clust_from_mst_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, threshold, threads);
 			return 0;

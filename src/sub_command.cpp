@@ -1,6 +1,9 @@
 #include "sub_command.h"
 #include <assert.h>
 #include "cluster_postprocess.h"
+#include <fstream>
+#include <sstream>
+#include <unordered_set>
 
 using namespace std;
 
@@ -592,7 +595,9 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 #ifdef Timer
 		cerr << "========time of computing sketch is: " << t1 - t0 << "========" << endl;
 #endif
-		folder_path = currentDataTime();
+		if(folder_path.empty()){
+			folder_path = currentDataTime();
+		}
 		if(isSave){
 			string command = "mkdir -p " + folder_path;
 			system(command.c_str());
@@ -603,6 +608,84 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 #endif
 		}
 
+	}
+
+	static bool looks_like_cluster_result_file(const string& filePath){
+		std::ifstream in(filePath);
+		if(!in.good()) return false;
+		string line;
+		while(std::getline(in, line)){
+			bool allSpace = true;
+			for(char c : line){
+				if(!isspace((unsigned char)c)){ allSpace = false; break; }
+			}
+			if(allSpace) continue;
+			if(line.rfind("the cluster", 0) == 0) return true;
+			return false;
+		}
+		return false;
+	}
+
+	static string materialize_file_list_from_cluster(const string& clusterFile, const string& outListFile){
+		std::ifstream in(clusterFile);
+		if(!in.good()){
+			cerr << "ERROR: build_kssd_db_fast(), cannot open cluster file: " << clusterFile << endl;
+			exit(1);
+		}
+		std::ofstream out(outListFile);
+		if(!out.good()){
+			cerr << "ERROR: build_kssd_db_fast(), cannot write list file: " << outListFile << endl;
+			exit(1);
+		}
+
+		std::unordered_set<string> seen;
+		string line;
+		while(std::getline(in, line)){
+			if(line.empty()) continue;
+			if(line.rfind("the cluster", 0) == 0) continue;
+			if(!(line[0] == '\t' || line[0] == ' ')) continue;
+
+			std::istringstream iss(line);
+			string localIdx, globalId, lenNt, filePath;
+			if(!(iss >> localIdx >> globalId >> lenNt >> filePath)) continue;
+			if(seen.insert(filePath).second){
+				out << filePath << "\n";
+			}
+		}
+		return outListFile;
+	}
+
+	void build_kssd_db_fast(const string input_file, const string db_folder, bool isSetKmer, bool& isContainment, int minLen, int& kmerSize, int& drlevel, int threads){
+		string command = "mkdir -p " + db_folder;
+		system(command.c_str());
+
+		string listFile = input_file;
+		if(looks_like_cluster_result_file(input_file)){
+			string outList = db_folder + "/builddb.list";
+			listFile = materialize_file_list_from_cluster(input_file, outList);
+			cerr << "-----buildDB: extracted genome paths from cluster file into: " << listFile << endl;
+		}else{
+			cerr << "-----buildDB: using input as genome file list: " << listFile << endl;
+		}
+
+		// Tune kmerSize/drlevel using the materialized list (cluster files are not compatible with tuning directly)
+		{
+			double dummyThreshold = 0.0;
+			bool sketchByFile = true;
+			if(!tune_kssd_parameters(sketchByFile, isSetKmer, listFile, threads, minLen, isContainment, kmerSize, dummyThreshold, drlevel)){
+				cerr << "ERROR: build_kssd_db_fast(), failed to tune KSSD parameters" << endl;
+				exit(1);
+			}
+		}
+
+		vector<KssdSketchInfo> sketches;
+		KssdParameters info;
+		string folder_path = db_folder;
+		bool sketchByFile = true;
+		bool isSave = true;
+		compute_kssd_sketches(sketches, info, isSave, listFile, folder_path, sketchByFile, minLen, kmerSize, drlevel, threads);
+		transSketches(sketches, info, folder_path, threads);
+		cerr << "-----buildDB: finished building KSSD DB at: " << folder_path << endl;
 	}
 
 	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads){

@@ -34,3 +34,9 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads, double dedup_dist, int reps_per_cluster);
 void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool isContainment, double threshold, int threads, double dedup_dist, int reps_per_cluster);
 
+// Build a reusable KSSD sketch + inverted index "database" into db_folder and exit.
+// input_file can be either:
+// - a plain genome file list (-l), one path per line
+// - a RabbitTClust cluster output (e.g. *.cluster / *.cluster.dedup), from which genome paths will be extracted.
+void build_kssd_db_fast(const string input_file, const string db_folder, bool isSetKmer, bool& isContainment, int minLen, int& kmerSize, int& drlevel, int threads);
+
