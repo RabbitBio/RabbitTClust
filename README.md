@@ -57,6 +57,8 @@ Options:
   --premsted TEXT             clustering by the pre-generated mst files rather than genomes for clust-mst
   --newick-tree               output the newick tree format file for clust-mst
   --fast                      use the kssd algorithm for sketching and distance computing for clust-mst
+  --dedup-dist FLOAT          within each cluster, collapse near-duplicate nodes connected by forest edges with dist <= dedup-dist; output to <output>.dedup
+  --reps-per-cluster INT      select up to k representatives per cluster (after optional dedup); output to <output>.reps
   --append TEXT Excludes: --input
                               append genome file or file list with the pre-generated sketch or MST files
 
@@ -122,6 +124,10 @@ Options:
 # v.2.3.0 or later
 # use the efficient Kssd sketch strategy for clust-mst, use the --fast flag.
 ./clust-mst --fast -l -i bacteria.list -o bacteria.fast.mst.clust
+
+# v.2.4.0 or later
+# clust-greedy also supports the efficient Kssd sketch strategy with the --fast flag.
+./clust-greedy --fast -l -i bacteria.list -o bacteria.fast.greedy.clust
 ```
 ## Output
 The output file is in a CD-HIT output format and is slightly different when running with or without `-l` input option.  
