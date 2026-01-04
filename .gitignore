@@ -13,6 +13,7 @@
 !version_history
 !version_history/*
 
+!benchmark/
 !benchmark/README.md
 !benchmark/download_genomes.py
 !benchmark/generateList.sh
@@ -35,4 +36,7 @@
 !benchmark/evaluation/getNMI.py
 !benchmark/evaluation/src/
 !benchmark/evaluation/src/*
+
+!benchmark/analysis/
+!benchmark/analysis/*
 
