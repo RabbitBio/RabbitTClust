@@ -13,7 +13,6 @@
 !version_history
 !version_history/*
 
-!benchmark/
 !benchmark/README.md
 !benchmark/download_genomes.py
 !benchmark/generateList.sh
