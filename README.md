@@ -9,13 +9,13 @@ https://anaconda.org/bioconda/rabbittclust/badges/downloads.svg)](https://anacon
 
 ![RabbitTClust](rabbittclust.png)
 
-# `RabbitTClust v.2.3.0`
+# `RabbitTClust v.2.4.0`
 RabbitTClust is a fast and memory-efficient genome clustering tool based on sketch-based distance estimations.
 It enables processing of large-scale datasets by combining dimensionality reduction techniques with streaming and parallelization on modern multi-core platforms.
 RabbitTClust supports classical single-linkage hierarchical (clust-mst) and greedy incremental clustering (clust-greedy) algorithms for different scenarios. 
 
 ## Installation
-`RabbitTClust v.2.3.0` can only support 64-bit Linux Systems.
+`RabbitTClust v.2.4.0` can only support 64-bit Linux Systems.
 
 The detailed update information for this version, as well as the version history, can be found in the [`version_history`](version_history/history.md) document.
 
