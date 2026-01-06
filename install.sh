@@ -22,6 +22,12 @@ cd ../ &&
 
 #compile the clust-mst
 cd build &&
-cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF .. &&
+cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF -DUSE_LEIDEN=OFF .. &&
+make -j8 && make install &&
+cd ../ &&
+
+#compile the clust-leiden
+cd build &&
+cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF -DUSE_LEIDEN=ON .. &&
 make -j8 && make install &&
 cd ../ 
