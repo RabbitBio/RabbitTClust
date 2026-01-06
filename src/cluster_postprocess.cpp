@@ -25,66 +25,6 @@ static vector<vector<pair<int, double>>> build_adj_from_forest(int N, const vect
   return adj;
 }
 
-std::vector<std::vector<int>> build_dedup_candidates_per_cluster(
-    const std::vector<std::vector<int>>& clusters,
-    const std::vector<EdgeInfo>& forest,
-    const std::vector<KssdSketchInfo>& sketches,
-    bool sketchByFile,
-    double dedup_dist,
-    std::vector<int>& node_to_rep) {
-  const int N = (int)sketches.size();
-  node_to_rep.assign(N, -1);
-
-  // No-op: identity mapping, candidates = clusters
-  if (dedup_dist <= 0) {
-    for (int i = 0; i < N; i++) node_to_rep[i] = i;
-    return clusters;
-  }
-
-  UnionFind uf(N);
-  for (const auto& e : forest) {
-    if (e.dist <= dedup_dist) {
-      uf.merge(e.preNode, e.sufNode);
-    }
-  }
-
-  vector<int> bestRep(N, -1);
-  vector<uint64_t> bestLen(N, 0);
-
-  // Choose a representative per UF root by max length (tie: smaller id)
-  for (int i = 0; i < N; i++) {
-    int r = uf.find(i);
-    uint64_t len = get_seq_len(sketches[i], sketchByFile);
-    if (bestRep[r] == -1 || len > bestLen[r] || (len == bestLen[r] && i < bestRep[r])) {
-      bestRep[r] = i;
-      bestLen[r] = len;
-    }
-  }
-
-  for (int i = 0; i < N; i++) {
-    int r = uf.find(i);
-    node_to_rep[i] = bestRep[r] == -1 ? i : bestRep[r];
-  }
-  uf.clear();
-
-  vector<vector<int>> candidates;
-  candidates.reserve(clusters.size());
-  for (const auto& cl : clusters) {
-    std::unordered_set<int> seen;
-    vector<int> cand;
-    cand.reserve(cl.size());
-    for (int node : cl) {
-      if (node < 0 || node >= N) continue;
-      int rep = node_to_rep[node];
-      if (rep < 0) rep = node;
-      if (seen.insert(rep).second) cand.push_back(rep);
-    }
-    std::sort(cand.begin(), cand.end());
-    candidates.push_back(std::move(cand));
-  }
-  return candidates;
-}
-
 static void distances_from(int start,
                            const vector<vector<pair<int, double>>>& ladj,
                            vector<double>& dist) {
@@ -107,6 +47,106 @@ static void distances_from(int start,
       st.push_back(v);
     }
   }
+}
+
+std::vector<std::vector<int>> build_dedup_candidates_per_cluster(
+    const std::vector<std::vector<int>>& clusters,
+    const std::vector<EdgeInfo>& forest,
+    const std::vector<KssdSketchInfo>& sketches,
+    bool sketchByFile,
+    double dedup_dist,
+    std::vector<int>& node_to_rep) {
+  const int N = (int)sketches.size();
+  node_to_rep.assign(N, -1);
+
+  // No-op: identity mapping, candidates = clusters
+  if (dedup_dist <= 0) {
+    for (int i = 0; i < N; i++) node_to_rep[i] = i;
+    return clusters;
+  }
+
+  // Build dedup subgraph adjacency list (only edges with dist <= dedup_dist)
+  vector<vector<pair<int, double>>> dedupAdj(N);
+  UnionFind uf(N);
+  for (const auto& e : forest) {
+    if (e.dist <= dedup_dist) {
+      uf.merge(e.preNode, e.sufNode);
+      if (e.preNode >= 0 && e.preNode < N && e.sufNode >= 0 && e.sufNode < N) {
+        dedupAdj[e.preNode].push_back({e.sufNode, e.dist});
+        dedupAdj[e.sufNode].push_back({e.preNode, e.dist});
+      }
+    }
+  }
+
+  // Group members by UF root
+  std::unordered_map<int, vector<int>> groups;
+  for (int i = 0; i < N; i++) {
+    int r = uf.find(i);
+    groups[r].push_back(i);
+  }
+
+  vector<int> bestRep(N, -1);
+
+  // For each UF group, select tree-medoid (node with minimum total tree distance to others in group)
+  for (const auto& kv : groups) {
+    const vector<int>& members = kv.second;
+    if (members.size() == 1) {
+      bestRep[kv.first] = members[0];
+      continue;
+    }
+
+    int chosenRep = members[0];
+    double minTotalDist = std::numeric_limits<double>::infinity();
+    uint64_t chosenLen = 0;
+
+    for (int cand : members) {
+      // Compute tree distances from cand to all nodes in N
+      vector<double> dist;
+      distances_from(cand, dedupAdj, dist);
+
+      // Sum distances to other members in this group
+      double totalDist = 0.0;
+      for (int m : members) {
+        if (m != cand && dist[m] >= 0) {
+          totalDist += dist[m];
+        }
+      }
+
+      uint64_t candLen = get_seq_len(sketches[cand], sketchByFile);
+      // Choose if: smaller total distance, or tie + longer sequence, or tie + smaller id
+      if (totalDist < minTotalDist ||
+          (totalDist == minTotalDist && (candLen > chosenLen || (candLen == chosenLen && cand < chosenRep)))) {
+        minTotalDist = totalDist;
+        chosenRep = cand;
+        chosenLen = candLen;
+      }
+    }
+
+    bestRep[kv.first] = chosenRep;
+  }
+
+  for (int i = 0; i < N; i++) {
+    int r = uf.find(i);
+    node_to_rep[i] = (bestRep[r] == -1) ? i : bestRep[r];
+  }
+  uf.clear();
+
+  vector<vector<int>> candidates;
+  candidates.reserve(clusters.size());
+  for (const auto& cl : clusters) {
+    std::unordered_set<int> seen;
+    vector<int> cand;
+    cand.reserve(cl.size());
+    for (int node : cl) {
+      if (node < 0 || node >= N) continue;
+      int rep = node_to_rep[node];
+      if (rep < 0) rep = node;
+      if (seen.insert(rep).second) cand.push_back(rep);
+    }
+    std::sort(cand.begin(), cand.end());
+    candidates.push_back(std::move(cand));
+  }
+  return candidates;
 }
 
 static int farthest_node(int start,

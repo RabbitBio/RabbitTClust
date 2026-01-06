@@ -214,7 +214,11 @@ int main(int argc, char * argv[]){
 		return 1;
 	}
 	if(*option_append && *option_presketched){
-		append_clust_greedy(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
+		if(is_fast){
+			append_clust_greedy_fast(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
+		} else {
+			append_clust_greedy(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
+		}
 		return 0;
 	}
 //======clust-greedy======================================================================

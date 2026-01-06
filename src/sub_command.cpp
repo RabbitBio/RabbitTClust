@@ -66,6 +66,56 @@ void append_clust_greedy(string folder_path, string input_file, string output_fi
 	cerr << "-----write the cluster result into: " << output_file << endl;
 	cerr << "-----the cluster number of " << output_file << " is: " << cluster.size() << endl;
 }
+
+void append_clust_greedy_fast(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
+	bool isSave = !no_save;
+	vector<KssdSketchInfo> pre_sketches; 
+	KssdParameters pre_info;
+	bool pre_sketch_by_file = loadKssdSketches(folder_path, threads, pre_sketches, pre_info); 
+	if(pre_sketch_by_file != sketch_by_file){
+		cerr << "Warning: append_clust_greedy_fast(), the input format of append genomes and pre-sketched genome is not same (single input genome vs. genome list)" << endl;
+		cerr << "the output cluster file may not have the genome file name" << endl;
+	}
+	
+	int kmer_size = pre_info.half_k * 2;
+	int drlevel = pre_info.drlevel;
+	
+	cerr << "-----use the same sketch parameters with pre-generated sketches" << endl;
+	cerr << "---use the KSSD sketches" << endl;
+	cerr << "---the half_k is: " << pre_info.half_k << endl;
+	cerr << "---the half_subk is: " << pre_info.half_subk << endl;
+	cerr << "---the drlevel is: " << drlevel << endl;
+	cerr << "---the thread number is: " << threads << endl;
+	cerr << "---the threshold is: " << threshold << endl;
+	
+	vector<KssdSketchInfo> append_sketches;
+	KssdParameters append_info;
+	string append_folder_path;
+	compute_kssd_sketches(append_sketches, append_info, isSave, input_file, append_folder_path, sketch_by_file, min_len, kmer_size, drlevel, threads);
+	
+	vector<KssdSketchInfo> final_sketches;
+	final_sketches.insert(final_sketches.end(), pre_sketches.begin(), pre_sketches.end());
+	final_sketches.insert(final_sketches.end(), append_sketches.begin(), append_sketches.end());
+	
+	vector<KssdSketchInfo>().swap(pre_sketches);
+	vector<KssdSketchInfo>().swap(append_sketches);
+	
+	string new_folder_path = currentDataTime();
+	if(!no_save){
+		string command = "mkdir -p " + new_folder_path;
+		system(command.c_str());
+		saveKssdSketches(final_sketches, append_info, new_folder_path, sketch_by_file);
+	}
+	
+	transSketches(final_sketches, append_info, new_folder_path, threads);
+	
+	vector<vector<int>> cluster;
+	// 使用倒排索引优化版本
+	cluster = KssdGreedyClusterWithInvertedIndex(final_sketches, 0, threshold, threads, kmer_size);
+	printKssdResult(cluster, final_sketches, sketch_by_file, output_file);
+	cerr << "-----write the cluster result into: " << output_file << endl;
+	cerr << "-----the cluster number of " << output_file << " is: " << cluster.size() << endl;
+}
 #endif
 
 #ifndef GREEDY_CLUST
@@ -455,7 +505,9 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 #ifdef GREEDY_CLUST
 	//======clust-greedy====================================================================
 	int sketch_func_id = 0;
-	cluster = KssdgreedyCluster(sketches, sketch_func_id, threshold, threads);
+	int kmer_size = info.half_k * 2;  // 获取k-mer大小
+	// 使用倒排索引优化版本
+	cluster = KssdGreedyClusterWithInvertedIndex(sketches, sketch_func_id, threshold, threads, kmer_size);
 	printKssdResult(cluster, sketches, sketchByFile, outputFile);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
 	cerr << "-----the cluster number of " << outputFile << " is: " << cluster.size() << endl;
@@ -866,7 +918,9 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 #ifdef Timer
 		cerr << "========time of load genome Infos and sketch Infos is: " << time1 - time0 << endl;
 #endif
-		cluster = KssdgreedyCluster(sketches, 0, threshold, threads);
+		int kmer_size = info.half_k * 2;  // 获取k-mer大小
+		// 使用倒排索引优化版本
+		cluster = KssdGreedyClusterWithInvertedIndex(sketches, 0, threshold, threads, kmer_size);
 		printKssdResult(cluster, sketches, sketchByFile, outputFile);
 		cerr << "-----write the cluster result into: " << outputFile << endl;
 		cerr << "-----the cluster number of " << outputFile << " is: " << cluster.size() << endl;

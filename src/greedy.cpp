@@ -9,6 +9,9 @@
 #include <limits>    // For numeric_limits
 #include <omp.h>  // For OpenMP parallel processing
 #include <iostream>  // For debugging/logging
+#include <iomanip>   // For std::setprecision
+#include <cmath>     // For log, exp
+#include <cstring>   // For memset
 using namespace std;
 
 
@@ -516,7 +519,474 @@ vector<vector<int>> greedyCluster(vector<SketchInfo>& sketches, int sketch_func_
 }
 
 
+// ==================== KSSD Greedy Incremental Clustering with Inverted Index ====================
 
+/**
+ * Dynamic Inverted Index Manager
+ * Maintains hash -> representative sequence IDs mapping
+ * Used for fast intersection computation between query and all representatives
+ */
+class DynamicInvertedIndex {
+private:
+    // Inverted index: hash -> list of representative IDs containing this hash
+    std::unordered_map<uint32_t, std::vector<uint32_t>> index_map;
+    
+    // Set of representative sequences for fast lookup
+    std::unordered_set<int> representative_set;
+    
+public:
+    DynamicInvertedIndex() {}
+    
+    // Add a new representative to the inverted index
+    void add_representative(int rep_id, const std::vector<uint32_t>& hash_array) {
+        representative_set.insert(rep_id);
+        
+        // Insert all hashes of this representative into the index
+        for(uint32_t hash : hash_array) {
+            index_map[hash].push_back(rep_id);
+        }
+    }
+    
+    // Check if a sequence is a representative
+    bool is_representative(int id) const {
+        return representative_set.count(id) > 0;
+    }
+    
+    /**
+     * Compute intersection sizes with all representatives (sparse version)
+     * @param hash_array Query sequence's hash array
+     * @param intersection_map Output: map[rep_id] = intersection size (only representatives)
+     */
+    void calculate_intersections_sparse(
+        const std::vector<uint32_t>& hash_array,
+        std::unordered_map<int, int>& intersection_map) const
+    {
+        // Clear previous results
+        intersection_map.clear();
+        
+        // Iterate through each hash of current sequence
+        for(uint32_t hash : hash_array) {
+            auto it = index_map.find(hash);
+            if(it != index_map.end()) {
+                // Found representatives containing this hash, increment their counts
+                // Only representatives are added to map, non-representatives use no memory
+                for(uint32_t rep_id : it->second) {
+                    intersection_map[rep_id]++;
+                }
+            }
+        }
+    }
+    
+    /**
+     * Compute intersection sizes with all representatives (array version for compatibility)
+     * @param hash_array Query sequence's hash array
+     * @param intersection_counts Output: intersection_counts[rep_id] = intersection size
+     */
+    void calculate_intersections(
+        const std::vector<uint32_t>& hash_array,
+        std::vector<int>& intersection_counts) const
+    {
+        // Reset counters (only reset positions of representatives)
+        for(int rep_id : representative_set) {
+            intersection_counts[rep_id] = 0;
+        }
+        
+        // Iterate through each hash of current sequence
+        for(uint32_t hash : hash_array) {
+            auto it = index_map.find(hash);
+            if(it != index_map.end()) {
+                // Found representatives containing this hash, increment their counts
+                // Note: only representative counts will be >0, non-representatives stay 0
+                for(uint32_t rep_id : it->second) {
+                    intersection_counts[rep_id]++;
+                }
+            }
+        }
+    }
+    
+    size_t num_representatives() const {
+        return representative_set.size();
+    }
+    
+    const std::unordered_set<int>& get_representatives() const {
+        return representative_set;
+    }
+    
+    void clear() {
+        index_map.clear();
+        representative_set.clear();
+    }
+};
+
+/**
+ * Calculate Mash distance
+ * Based on Jaccard similarity and k-mer size
+ */
+inline double calculate_mash_distance_fast(int common, int size0, int size1, int kmer_size) {
+    int denom = size0 + size1 - common;
+    
+    if(size0 == 0 || size1 == 0 || denom == 0) {
+        return 1.0;
+    }
+    
+    double jaccard = (double)common / denom;
+    
+    if(jaccard == 1.0) {
+        return 0.0;
+    } else if(jaccard == 0.0) {
+        return 1.0;
+    } else {
+        double mashD = (double)-1.0 / kmer_size * log((2 * jaccard) / (1.0 + jaccard));
+        return mashD > 1.0 ? 1.0 : mashD;
+    }
+}
+
+/**
+ * @brief KSSD Greedy Incremental Clustering with Inverted Index
+ * 
+ * Core idea:
+ * 1. Dynamically maintain an inverted index containing only representative hashes
+ * 2. Outer loop serial processing (ensures correctness, avoids sequence dependency)
+ * 3. Use inverted index to compute intersections with all representatives at once
+ * 4. Inner loop parallel distance calculation and best match finding
+ * 
+ * Multi-threading strategy:
+ * - Outer loop serial: process each sequence sequentially, ensure deterministic results
+ * - Inverted index query serial: but complexity is only O(sketch_size)
+ * - Distance calculation parallel: significant speedup when many representatives exist
+ * 
+ * @param sketches All sequence sketch information
+ * @param sketch_func_id Sketch type ID (reserved parameter, currently only KSSD)
+ * @param threshold Distance threshold
+ * @param threads Number of threads
+ * @param kmer_size K-mer size (default 19)
+ * @return Clustering results
+ */
+vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
+    std::vector<KssdSketchInfo>& sketches,
+    int sketch_func_id,
+    double threshold,
+    int threads,
+    int kmer_size = 19)
+{
+    int numGenomes = sketches.size();
+    if(numGenomes == 0) return std::vector<std::vector<int>>();
+    
+    std::cerr << "\n========================================" << std::endl;
+    std::cerr << "KSSD Greedy Clustering with Inverted Index" << std::endl;
+    std::cerr << "========================================" << std::endl;
+    std::cerr << "Total genomes: " << numGenomes << std::endl;
+    std::cerr << "Threshold: " << threshold << std::endl;
+    std::cerr << "Threads: " << threads << std::endl;
+    std::cerr << "K-mer size: " << kmer_size << std::endl;
+    
+    // Initialize data structures
+    std::vector<int> clustLabels(numGenomes, 0);
+    std::unordered_map<int, std::vector<int>> semiClust;
+    std::vector<int> representativeArr;
+    
+    // Calculate size ratio filter (prefilter impossible matches)
+    double size_ratio_filter = calculateMaxSizeRatio(threshold, kmer_size);
+    std::cerr << "Size ratio filter: " << size_ratio_filter << std::endl;
+    std::cerr << "========================================\n" << std::endl;
+    
+    // Initialize dynamic inverted index
+    DynamicInvertedIndex dynamic_index;
+    
+    // First sequence as initial representative
+    representativeArr.push_back(0);
+    semiClust[0] = std::vector<int>();
+    dynamic_index.add_representative(0, sketches[0].hash32_arr);
+    
+    // Thread-local storage to avoid critical sections
+    struct ThreadBestMatch {
+        double distance;
+        int rep_id;
+    };
+    std::vector<ThreadBestMatch> thread_best_matches(threads);
+    
+    // Optimization: sparse storage for intersections (only representatives)
+    // Memory saving: O(num_representatives) vs O(total_genomes)
+    std::unordered_map<int, int> intersection_map;
+    intersection_map.reserve(10000);  // Preallocate to avoid frequent rehashing
+    
+    // Statistics
+    uint64_t total_comparisons = 0;
+    uint64_t filtered_by_size = 0;
+    uint64_t skipped_no_intersection = 0;  // Skipped representatives with no intersection
+    
+    // ===== Main loop: serial processing of each new sequence =====
+    for(int j = 1; j < numGenomes; j++) {
+        int sizeRef = sketches[j].hash32_arr.size();
+        
+        // Step 1: Use inverted index to compute intersections with all representatives (once)
+        // Time complexity: O(sizeRef), not traditional O(num_representatives × sizeRef)
+        // Optimization: only store intersections of representatives, completely skip non-representatives
+        dynamic_index.calculate_intersections_sparse(sketches[j].hash32_arr, intersection_map);
+        
+        // Step 2: Reset thread-local best matches
+        for(int t = 0; t < threads; t++) {
+            thread_best_matches[t] = {std::numeric_limits<double>::max(), -1};
+        }
+        
+        // Step 3: Parallel distance calculation (optimization: only traverse representatives with intersection)
+        // Key optimization: only compute for representatives in intersection_map (those sharing hashes)
+        // If intersection is 0, distance is usually large and exceeds threshold, no need to compute
+        
+        // Count skipped representatives
+        size_t num_candidates = intersection_map.size();
+        size_t num_total_reps = representativeArr.size();
+        skipped_no_intersection += (num_total_reps - num_candidates);
+        
+        // Convert map to vector for parallel traversal
+        std::vector<std::pair<int, int>> candidates;
+        candidates.reserve(num_candidates);
+        for(const auto& [repId, common] : intersection_map) {
+            candidates.push_back({repId, common});
+        }
+        
+        #pragma omp parallel for num_threads(threads) schedule(dynamic, 64)
+        for(size_t i = 0; i < candidates.size(); i++) {
+            int repId = candidates[i].first;
+            int common = candidates[i].second;
+            int sizeQry = sketches[repId].hash32_arr.size();
+            
+            // Size filtering: skip if size ratio is too large
+            double ratio = (double)sizeQry / sizeRef;
+            if(ratio > size_ratio_filter || ratio < 1.0 / size_ratio_filter) {
+                #pragma omp atomic
+                filtered_by_size++;
+                continue;
+            }
+            
+            #pragma omp atomic
+            total_comparisons++;
+            
+            // Calculate Mash distance (common already obtained from candidates)
+            double dist = calculate_mash_distance_fast(common, sizeRef, sizeQry, kmer_size);
+            
+            // If distance is within threshold, update thread-local best match
+            if(dist <= threshold) {
+                int tid = omp_get_thread_num();
+                if(dist < thread_best_matches[tid].distance) {
+                    thread_best_matches[tid] = {dist, repId};
+                }
+            }
+        }
+        
+        // Step 4: Serial merge: find global best match
+        double best_dist = std::numeric_limits<double>::max();
+        int best_rep = -1;
+        for(int t = 0; t < threads; t++) {
+            if(thread_best_matches[t].rep_id != -1 && 
+               thread_best_matches[t].distance < best_dist) {
+                best_dist = thread_best_matches[t].distance;
+                best_rep = thread_best_matches[t].rep_id;
+            }
+        }
+        
+        // Step 5: Update clustering
+        if(best_rep != -1) {
+            // Belongs to existing cluster
+            clustLabels[j] = 1;
+            semiClust[best_rep].push_back(j);
+        } else {
+            // Becomes new representative
+            representativeArr.push_back(j);
+            semiClust[j] = std::vector<int>();
+            
+            // Critical: add new representative to inverted index
+            dynamic_index.add_representative(j, sketches[j].hash32_arr);
+        }
+        
+        // Progress report
+        if(j % 5000 == 0 || j == numGenomes - 1) {
+            double clustering_rate = 100.0 * (j - representativeArr.size() + 1) / j;
+            double avg_candidates = (j > 1) ? (double)(total_comparisons + filtered_by_size) / (j - 1) : 0;
+            std::cerr << "Progress: " << j << "/" << numGenomes 
+                     << " | Reps: " << representativeArr.size()
+                     << " | Clustering: " << std::fixed << std::setprecision(2) << clustering_rate << "%"
+                     << " | Comparisons: " << total_comparisons
+                     << " | AvgCandidates: " << std::fixed << std::setprecision(0) << avg_candidates
+                     << " | Skipped: " << skipped_no_intersection
+                     << std::endl;
+        }
+    }
+    
+    // ===== Build final clustering results =====
+    std::vector<std::vector<int>> cluster;
+    cluster.reserve(semiClust.size());
+    
+    for(const auto& [center, members] : semiClust) {
+        std::vector<int> curClust;
+        curClust.reserve(1 + members.size());
+        curClust.push_back(center);
+        curClust.insert(curClust.end(), members.begin(), members.end());
+        cluster.push_back(std::move(curClust));
+    }
+    
+    // ===== Output statistics =====
+    std::cerr << "\n========================================" << std::endl;
+    std::cerr << "Clustering Completed!" << std::endl;
+    std::cerr << "========================================" << std::endl;
+    std::cerr << "Total clusters: " << cluster.size() << std::endl;
+    std::cerr << "Final clustering rate: " 
+             << std::fixed << std::setprecision(2)
+             << (100.0 * (numGenomes - cluster.size()) / numGenomes) << "%" << std::endl;
+    std::cerr << "Total distance comparisons: " << total_comparisons << std::endl;
+    std::cerr << "Filtered by size ratio: " << filtered_by_size << std::endl;
+    std::cerr << "Skipped (no intersection): " << skipped_no_intersection << std::endl;
+    
+    uint64_t total_potential = (uint64_t)cluster.size() * (numGenomes - 1) / 2;
+    double skip_rate = total_potential > 0 ? (100.0 * skipped_no_intersection / total_potential) : 0;
+    std::cerr << "Skip rate by inverted index: " 
+             << std::fixed << std::setprecision(2) << skip_rate << "%" << std::endl;
+    
+    std::cerr << "Average candidates per query: " 
+             << std::fixed << std::setprecision(1)
+             << (double)(total_comparisons + filtered_by_size) / (numGenomes - 1) << std::endl;
+    std::cerr << "========================================\n" << std::endl;
+    
+    // Cleanup
+    dynamic_index.clear();
+    
+    return cluster;
+}
+
+
+/**
+ * @brief Batched version: process multiple sequences at once (experimental)
+ * 
+ * Note: This version slightly changes algorithm semantics, results may differ from fully serial version
+ * Advantage: Sequences within a batch can be processed in parallel, improving parallelism
+ * Disadvantage: Sequences within a batch may be suitable as each other's representatives, requires conflict resolution
+ * 
+ * Use case: When the number of representatives is small initially, better parallel performance
+ * 
+ * @param batch_size Batch size, recommended 32-128
+ */
+vector<std::vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
+    std::vector<KssdSketchInfo>& sketches,
+    int sketch_func_id,
+    double threshold,
+    int threads,
+    int kmer_size = 19,
+    int batch_size = 64)
+{
+    int numGenomes = sketches.size();
+    if(numGenomes == 0) return std::vector<std::vector<int>>();
+    
+    std::cerr << "\n========================================" << std::endl;
+    std::cerr << "BATCHED KSSD Greedy Clustering" << std::endl;
+    std::cerr << "========================================" << std::endl;
+    std::cerr << "Total genomes: " << numGenomes << std::endl;
+    std::cerr << "Batch size: " << batch_size << std::endl;
+    std::cerr << "Threshold: " << threshold << std::endl;
+    std::cerr << "Threads: " << threads << std::endl;
+    std::cerr << "========================================\n" << std::endl;
+    
+    // Initialize
+    std::vector<int> clustLabels(numGenomes, 0);
+    std::unordered_map<int, std::vector<int>> semiClust;
+    DynamicInvertedIndex dynamic_index;
+    
+    double size_ratio_filter = calculateMaxSizeRatio(threshold, kmer_size);
+    
+    // First sequence as initial representative
+    semiClust[0] = std::vector<int>();
+    dynamic_index.add_representative(0, sketches[0].hash32_arr);
+    
+    // Batch processing result structure
+    struct BatchResult {
+        int genome_id;
+        double best_dist;
+        int best_rep;
+    };
+    
+    // Process by batches
+    for(int batch_start = 1; batch_start < numGenomes; batch_start += batch_size) {
+        int batch_end = std::min(batch_start + batch_size, numGenomes);
+        int current_batch_size = batch_end - batch_start;
+        
+        std::vector<BatchResult> batch_results(current_batch_size);
+        
+        // ===== Parallel processing within batch =====
+        #pragma omp parallel for num_threads(threads) schedule(dynamic)
+        for(int idx = 0; idx < current_batch_size; idx++) {
+            int j = batch_start + idx;
+            batch_results[idx].genome_id = j;
+            batch_results[idx].best_dist = std::numeric_limits<double>::max();
+            batch_results[idx].best_rep = -1;
+            
+            int sizeRef = sketches[j].hash32_arr.size();
+            // Optimization: use sparse map, only store representatives, completely skip non-representatives
+            std::unordered_map<int, int> intersection_map;
+            
+            // Compute intersections (note: each thread computes independently, with duplication)
+            dynamic_index.calculate_intersections_sparse(sketches[j].hash32_arr, intersection_map);
+            
+            // Find best representative (directly traverse map, more efficient)
+            for(const auto& [repId, common] : intersection_map) {
+                int sizeQry = sketches[repId].hash32_arr.size();
+                double ratio = (double)sizeQry / sizeRef;
+                if(ratio > size_ratio_filter || ratio < 1.0 / size_ratio_filter) {
+                    continue;
+                }
+                
+                double dist = calculate_mash_distance_fast(common, sizeRef, sizeQry, kmer_size);
+                
+                if(dist <= threshold && dist < batch_results[idx].best_dist) {
+                    batch_results[idx].best_dist = dist;
+                    batch_results[idx].best_rep = repId;
+                }
+            }
+        }
+        
+        // ===== Serial update of results =====
+        // Strategy: sort by distance, larger distance gets priority to become representative
+        // This reduces the impact of conflicts within the batch
+        std::sort(batch_results.begin(), batch_results.end(),
+                 [](const BatchResult& a, const BatchResult& b) {
+                     return a.best_dist > b.best_dist;
+                 });
+        
+        for(const auto& result : batch_results) {
+            int j = result.genome_id;
+            if(result.best_rep != -1) {
+                clustLabels[j] = 1;
+                semiClust[result.best_rep].push_back(j);
+            } else {
+                semiClust[j] = std::vector<int>();
+                dynamic_index.add_representative(j, sketches[j].hash32_arr);
+            }
+        }
+        
+        // Progress report
+        if(batch_start % 10000 < batch_size) {
+            std::cerr << "Progress: " << batch_end << "/" << numGenomes 
+                     << " | Representatives: " << dynamic_index.num_representatives() << std::endl;
+        }
+    }
+    
+    // Build final results
+    std::vector<std::vector<int>> cluster;
+    cluster.reserve(semiClust.size());
+    for(const auto& [center, members] : semiClust) {
+        std::vector<int> curClust;
+        curClust.push_back(center);
+        curClust.insert(curClust.end(), members.begin(), members.end());
+        cluster.push_back(std::move(curClust));
+    }
+    
+    std::cerr << "\nBatched clustering completed!" << std::endl;
+    std::cerr << "Total clusters: " << cluster.size() << std::endl;
+    std::cerr << "Clustering rate: " 
+             << std::fixed << std::setprecision(2)
+             << (100.0 * (numGenomes - cluster.size()) / numGenomes) << "%" << std::endl;
+    
+    dynamic_index.clear();
+    return cluster;
+}
 
 
 #endif

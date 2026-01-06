@@ -5,6 +5,7 @@
 #include "UnionFind.h"
 #include <omp.h>
 #include <fstream>
+#include <sys/stat.h>
 using namespace std;
 
 bool cmpEdge(EdgeInfo e1, EdgeInfo e2){

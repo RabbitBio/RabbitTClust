@@ -27,6 +27,7 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads);
 
 void append_clust_greedy(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads);
+void append_clust_greedy_fast(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads);
 
 void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& info, bool isSave, const string inputFile, string& folder_path, bool sketchByFile, const int minLen, const int kmerSize, const int drlevel, int threads);
 void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, double threshold, bool isSave, int threads, double dedup_dist, int reps_per_cluster);
