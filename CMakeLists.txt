@@ -7,6 +7,7 @@ option(USE_RABBITFX "parse input fasta file with RabbitFX" OFF)
 option(USE_DEBUG "print the debug information" ON)
 option(USE_Timer "print the time information" ON)
 option(USE_GREEDY "use greedy incremental cluster" ON)
+option(USE_LEIDEN "use Leiden community detection cluster" OFF)
 
 
 
@@ -39,6 +40,10 @@ if(USE_GREEDY)
 	set(CMAKE_CXX_FLAGS "-D GREEDY_CLUST ${CMAKE_CXX_FLAGS}")
 endif()
 
+if(USE_LEIDEN)
+	set(CMAKE_CXX_FLAGS "-D LEIDEN_CLUST ${CMAKE_CXX_FLAGS}")
+endif()
+
 if(USE_RABBITFX)
 	set(CMAKE_CXX_FLAGS "-D RABBIT_FX ${CMAKE_CXX_FLAGS}")
 	include_directories(src RabbitSketch/build/include RabbitFX/build/include)
@@ -65,6 +70,14 @@ else()
 	target_link_libraries(clust-greedy rabbitsketch_static z)
 endif()
 
+elseif(USE_LEIDEN)
+add_executable(clust-leiden ${DIR_SRCS})
+if(USE_RABBITFX)
+	target_link_libraries(clust-leiden rabbitsketch_static rabbitfx z)
+else()
+	target_link_libraries(clust-leiden rabbitsketch_static z)
+endif()
+
 else()
 add_executable(clust-mst ${DIR_SRCS})
 if(USE_RABBITFX)
@@ -78,6 +91,8 @@ endif()
 
 if(USE_GREEDY)
 install(TARGETS clust-greedy DESTINATION ./)
+elseif(USE_LEIDEN)
+install(TARGETS clust-leiden DESTINATION ./)
 else()
 install(TARGETS clust-mst DESTINATION ./)
 endif()

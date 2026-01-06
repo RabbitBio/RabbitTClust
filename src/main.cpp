@@ -33,6 +33,10 @@
 #include "greedy.h"
 #endif
 
+#ifdef LEIDEN_CLUST
+#include "leiden.h"
+#endif
+
 #include <fstream>
 #include <sstream>
 #include <sys/sysinfo.h>
@@ -51,6 +55,8 @@ using namespace std;
 int main(int argc, char * argv[]){
 	#ifdef GREEDY_CLUST
 		CLI::App app{"clust-greedy v.2.2.1, greedy incremental clustering module for RabbitTClust"};
+	#elif defined(LEIDEN_CLUST)
+		CLI::App app{"clust-leiden v.2.2.1, Leiden community detection clustering module for RabbitTClust"};
 	#else
 		CLI::App app{"clust-mst v.2.2.1, minimum-spanning-tree-based module for RabbitTClust"};
 	#endif
@@ -99,8 +105,8 @@ int main(int argc, char * argv[]){
 	auto option_output = app.add_option("-o, --output", outputFile, "set the output name of cluster result");
 	auto option_input = app.add_option("-i, --input", inputFile, "set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)");
 	auto option_presketched = app.add_option("--presketched", folder_path, "clustering by the pre-generated sketch files rather than genomes");
-	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing for clust-mst");
-#ifndef GREEDY_CLUST
+	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing");
+#if !defined(GREEDY_CLUST) && !defined(LEIDEN_CLUST)
 	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
 	auto flag_newick_tree = app.add_flag("--newick-tree", is_newick_tree, "output the newick tree format file for clust-mst");
 	auto flag_linkage_matrix = app.add_flag("--linkage-matrix", is_linkage_matrix, "output the single-linkage linkage matrix for clust-mst");
@@ -149,7 +155,58 @@ int main(int argc, char * argv[]){
 	}
 
 
-#ifndef GREEDY_CLUST
+#ifdef GREEDY_CLUST
+//======clust-greedy======================================================================
+	
+ if (is_fast && *option_presketched && !*option_append) {
+    clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster);
+    return 0;
+} 
+
+  
+  if(*option_append && !*option_presketched){
+		cerr << "ERROR option --append, option --presketched needed" << endl;
+		return 1;
+	}
+	if(*option_append && *option_presketched){
+		if(is_fast){
+			append_clust_greedy_fast(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
+		} else {
+			append_clust_greedy(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
+		}
+		return 0;
+	}
+//======clust-greedy======================================================================
+#elif defined(LEIDEN_CLUST)
+//======clust-leiden======================================================================
+	if (is_fast && *option_presketched && !*option_append) {
+		clust_from_sketch_leiden(folder_path, outputFile, threads);
+		return 0;
+	}
+	
+	if(*option_presketched && !*option_append){
+		cerr << "ERROR: clust-leiden requires --fast option" << endl;
+		return 1;
+	}
+	
+	if(!isSetKmer){
+		kmerSize = 21;
+		cerr << "-----use default kmerSize: " << kmerSize << endl;
+	}
+	
+	if(is_fast){
+		if(drlevel < 0 || drlevel > 8){
+			cerr << "ERROR: invalid drlevel " << drlevel << ", should be in [0, 8]" << endl;
+			return 1;
+		}
+		clust_from_genome_leiden(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, threads);
+		return 0;
+	} else {
+		cerr << "ERROR: clust-leiden requires --fast option" << endl;
+		return 1;
+	}
+//======clust-leiden======================================================================
+#else
 //======clust-mst=========================================================================
 	if(is_fast){
 		if(!buildDB_folder.empty()){
@@ -200,28 +257,6 @@ int main(int argc, char * argv[]){
 		return 0;
 	}
 //======clust-mst=========================================================================
-#else
-//======clust-greedy======================================================================
-	
- if (is_fast && *option_presketched && !*option_append) {
-    clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster);
-    return 0;
-} 
-
-  
-  if(*option_append && !*option_presketched){
-		cerr << "ERROR option --append, option --presketched needed" << endl;
-		return 1;
-	}
-	if(*option_append && *option_presketched){
-		if(is_fast){
-			append_clust_greedy_fast(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
-		} else {
-			append_clust_greedy(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
-		}
-		return 0;
-	}
-//======clust-greedy======================================================================
 #endif
 	
 	if(*option_presketched && !*option_append){

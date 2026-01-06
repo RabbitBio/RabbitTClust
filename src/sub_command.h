@@ -5,6 +5,7 @@
 #include "common.hpp"
 #include "MST_IO.h"
 #include "greedy.h"
+#include "leiden.h"
 #include <vector>
 #include <string>
 using namespace std;
@@ -40,4 +41,8 @@ void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newic
 // - a plain genome file list (-l), one path per line
 // - a RabbitTClust cluster output (e.g. *.cluster / *.cluster.dedup), from which genome paths will be extracted.
 void build_kssd_db_fast(const string input_file, const string db_folder, bool isSetKmer, bool& isContainment, int minLen, int& kmerSize, int& drlevel, int threads);
+
+// Leiden clustering functions
+void clust_from_genome_leiden(const string inputFile, string outputFile, string folder_path, bool sketchByFile, const int kmerSize, const int drlevel, const int minLen, bool noSave, int threads);
+void clust_from_sketch_leiden(string folder_path, string outputFile, int threads);
 

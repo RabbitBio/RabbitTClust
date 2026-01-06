@@ -1237,5 +1237,67 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 #endif//endif GREEDY_CLUST
 	}
 
+// ==================== Leiden Clustering Functions ====================
+#ifdef LEIDEN_CLUST
+
+void clust_from_genome_leiden(const string inputFile, string outputFile, string folder_path, 
+                              bool sketchByFile, const int kmerSize, const int drlevel, 
+                              const int minLen, bool noSave, int threads){
+	double time0 = get_sec();
+	vector<KssdSketchInfo> sketches;
+	KssdParameters info;
+	bool isSave = !noSave;
+	
+	compute_kssd_sketches(sketches, info, isSave, inputFile, folder_path, sketchByFile, minLen, kmerSize, drlevel, threads);
+	
+	double time1 = get_sec();
+#ifdef Timer
+	cerr << "========time of generate sketches is: " << time1 - time0 << endl;
+#endif
+	
+	cerr << "-----the size of sketches is: " << sketches.size() << endl;
+	
+	// Run Leiden clustering (currently placeholder with inverted index)
+	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threads, kmerSize);
+	
+	printKssdResult(cluster, sketches, sketchByFile, outputFile);
+	cerr << "-----write the cluster result into: " << outputFile << endl;
+	cerr << "-----the cluster number of " << outputFile << " is: " << cluster.size() << endl;
+	
+	double time2 = get_sec();
+#ifdef Timer
+	cerr << "========time of Leiden clustering is: " << time2 - time1 << endl;
+#endif
+}
+
+void clust_from_sketch_leiden(string folder_path, string outputFile, int threads){
+	vector<KssdSketchInfo> sketches;
+	bool sketchByFile;
+	KssdParameters info;
+	
+	double time0 = get_sec();
+	sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
+	cerr << "-----the size of sketches is: " << sketches.size() << endl;
+	double time1 = get_sec();
+#ifdef Timer
+	cerr << "========time of load genome Infos and sketch Infos is: " << time1 - time0 << endl;
+#endif
+	
+	int kmer_size = info.half_k * 2;
+	
+	// Run Leiden clustering (currently placeholder with inverted index)
+	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threads, kmer_size);
+	
+	printKssdResult(cluster, sketches, sketchByFile, outputFile);
+	cerr << "-----write the cluster result into: " << outputFile << endl;
+	cerr << "-----the cluster number of " << outputFile << " is: " << cluster.size() << endl;
+	double time2 = get_sec();
+#ifdef Timer
+	cerr << "========time of Leiden clustering is: " << time2 - time1 << endl;
+#endif
+}
+
+#endif // LEIDEN_CLUST
+
 
 
