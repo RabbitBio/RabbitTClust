@@ -5,51 +5,82 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
 #include <omp.h>
 #include <algorithm>
 #include <iostream>
 #include <cmath>
+#include <igraph.h>
 
 using namespace std;
 
-// ==================== Dynamic Inverted Index (same as greedy for now) ====================
-class DynamicInvertedIndex {
+// ==================== Global Inverted Index for Graph Construction ====================
+class GlobalInvertedIndex {
 private:
-    unordered_map<uint32_t, vector<uint32_t>> index_map;
-    unordered_set<int> representative_set;
+    unordered_map<uint32_t, vector<int>> index_map;
+    int num_sequences;
 
 public:
-    void add_representative(int rep_id, const vector<uint32_t>& hash_array) {
-        representative_set.insert(rep_id);
-        for (uint32_t hash : hash_array) {
-            index_map[hash].push_back(rep_id);
+    GlobalInvertedIndex() : num_sequences(0) {}
+    
+    void build(const vector<KssdSketchInfo>& sketches, int threads) {
+        num_sequences = sketches.size();
+        
+        cerr << "-----Building global inverted index..." << endl;
+        
+        vector<unordered_map<uint32_t, vector<int>>> thread_local_indices(threads);
+        
+        #pragma omp parallel num_threads(threads)
+        {
+            int tid = omp_get_thread_num();
+            auto& local_index = thread_local_indices[tid];
+            
+            #pragma omp for schedule(dynamic, 100)
+            for (int i = 0; i < num_sequences; i++) {
+                const auto& sketch = sketches[i];
+                for (uint32_t hash : sketch.hash32_arr) {
+                    local_index[hash].push_back(i);
+                }
+            }
         }
+        
+        cerr << "-----Merging thread-local indices..." << endl;
+        for (int tid = 0; tid < threads; tid++) {
+            for (auto& entry : thread_local_indices[tid]) {
+                uint32_t hash = entry.first;
+                auto& seq_ids = entry.second;
+                index_map[hash].insert(index_map[hash].end(), seq_ids.begin(), seq_ids.end());
+            }
+        }
+        
+        cerr << "-----Inverted index built: " << index_map.size() << " unique hashes" << endl;
     }
-
-    bool is_representative(int id) const {
-        return representative_set.find(id) != representative_set.end();
+    
+    const vector<int>* get_sequences_with_hash(uint32_t hash) const {
+        auto it = index_map.find(hash);
+        if (it != index_map.end()) {
+            return &(it->second);
+        }
+        return nullptr;
     }
-
-    void calculate_intersections_sparse(const vector<uint32_t>& hash_array, 
-                                       unordered_map<int, int>& intersection_map) const {
+    
+    void calculate_all_intersections(int seq_id, const vector<uint32_t>& hash_array,
+                                     unordered_map<int, int>& intersection_map) const {
         intersection_map.clear();
         for (uint32_t hash : hash_array) {
-            auto it = index_map.find(hash);
-            if (it != index_map.end()) {
-                for (uint32_t rep_id : it->second) {
-                    intersection_map[rep_id]++;
+            auto* seq_list = get_sequences_with_hash(hash);
+            if (seq_list) {
+                for (int other_id : *seq_list) {
+                    if (other_id != seq_id) {
+                        intersection_map[other_id]++;
+                    }
                 }
             }
         }
     }
-
-    size_t num_representatives() const {
-        return representative_set.size();
-    }
-
+    
     void clear() {
         index_map.clear();
-        representative_set.clear();
     }
 };
 
@@ -68,121 +99,203 @@ static inline double calculate_mash_distance_fast(int common, int size1, int siz
     return max(0.0, min(1.0, mash_dist));
 }
 
-// ==================== Leiden Clustering (Placeholder) ====================
-// Currently implements the same algorithm as greedy with inverted index
-// Will be replaced with true Leiden algorithm later
+// ==================== Edge Structure ====================
+struct Edge {
+    int from;
+    int to;
+    double weight;
+    
+    Edge(int f, int t, double w) : from(f), to(t), weight(w) {}
+};
+
+// ==================== Leiden Clustering using igraph ====================
 vector<vector<int>> KssdLeidenCluster(
     vector<KssdSketchInfo>& sketches,
     int sketch_func_id,
+    double threshold,
     int threads,
-    int kmer_size)
+    int kmer_size,
+    double resolution,
+    bool use_modularity)
 {
     int numGenomes = sketches.size();
     if (numGenomes == 0) {
         return vector<vector<int>>();
     }
 
-    cerr << "-----Starting Leiden clustering (currently using greedy inverted index as placeholder)" << endl;
-    cerr << "-----Number of genomes: " << numGenomes << endl;
-    cerr << "-----Threads: " << threads << endl;
-    cerr << "-----Note: True Leiden algorithm with modularity optimization will be implemented in future versions" << endl;
+    cerr << "=============================" << endl;
+    cerr << "Graph-based Clustering (Louvain)" << endl;
+    cerr << "=============================" << endl;
+    cerr << "Genomes: " << numGenomes << endl;
+    cerr << "Edge threshold: " << threshold << endl;
+    cerr << "Resolution: " << resolution << endl;
+    cerr << "Threads: " << threads << endl;
+    cerr << "=============================" << endl;
 
-    // Initialize dynamic inverted index
-    DynamicInvertedIndex dynamic_index;
+    // Step 1: Build inverted index
+    GlobalInvertedIndex global_index;
+    global_index.build(sketches, threads);
+
+    // Step 2: Build edge list using inverted index
+    cerr << "-----Building similarity graph..." << endl;
     
-    // Cluster assignment: -1 means not assigned, >=0 is cluster id
-    vector<int> cluster_assignment(numGenomes, -1);
+    vector<vector<Edge>> thread_local_edges(threads);
+    long long total_comparisons = 0;
+    long long edges_created = 0;
     
-    // First genome is always the first cluster representative
-    cluster_assignment[0] = 0;
-    dynamic_index.add_representative(0, sketches[0].hash32_arr);
-    
-    // Temporary threshold for placeholder (will be removed in true Leiden)
-    // For now, we use a heuristic: no threshold, just find closest representative
-    
-    // Process each genome sequentially
-    for (int j = 1; j < numGenomes; j++) {
+    #pragma omp parallel num_threads(threads)
+    {
+        int tid = omp_get_thread_num();
+        auto& local_edges = thread_local_edges[tid];
         unordered_map<int, int> intersection_map;
         
-        // Query inverted index
-        dynamic_index.calculate_intersections_sparse(sketches[j].hash32_arr, intersection_map);
+        long long local_comparisons = 0;
+        long long local_edge_count = 0;
         
-        if (intersection_map.empty()) {
-            // No intersection with any representative, create new cluster
-            int new_cluster_id = dynamic_index.num_representatives();
-            cluster_assignment[j] = new_cluster_id;
-            dynamic_index.add_representative(j, sketches[j].hash32_arr);
-            continue;
-        }
-        
-        // Prepare candidates
-        vector<pair<int, int>> candidates;
-        candidates.reserve(intersection_map.size());
-        for (const auto& entry : intersection_map) {
-            candidates.push_back(entry);
-        }
-        
-        // Parallel distance calculation
-        vector<int> best_rep_per_thread(threads, -1);
-        vector<double> best_dist_per_thread(threads, 1.0);
-        
-        int size_j = sketches[j].sketchsize;
-        
-        #pragma omp parallel num_threads(threads)
-        {
-            int tid = omp_get_thread_num();
-            int local_best_rep = -1;
-            double local_best_dist = 1.0;
+        #pragma omp for schedule(dynamic, 10)
+        for (int i = 0; i < numGenomes; i++) {
+            const auto& sketch_i = sketches[i];
+            int size_i = sketch_i.sketchsize;
             
-            #pragma omp for schedule(dynamic)
-            for (size_t k = 0; k < candidates.size(); k++) {
-                int repId = candidates[k].first;
-                int common = candidates[k].second;
+            global_index.calculate_all_intersections(i, sketch_i.hash32_arr, intersection_map);
+            
+            for (const auto& entry : intersection_map) {
+                int j = entry.first;
                 
-                int size_rep = sketches[repId].sketchsize;
-                double dist = calculate_mash_distance_fast(common, size_j, size_rep, kmer_size);
+                if (i >= j) continue;
                 
-                if (dist < local_best_dist) {
-                    local_best_dist = dist;
-                    local_best_rep = repId;
+                int common = entry.second;
+                int size_j = sketches[j].sketchsize;
+                
+                double size_ratio = (size_i < size_j) ? 
+                                   (double)size_i / size_j : 
+                                   (double)size_j / size_i;
+                if (size_ratio < 0.5) continue;
+                
+                double dist = calculate_mash_distance_fast(common, size_i, size_j, kmer_size);
+                local_comparisons++;
+                
+                if (dist < threshold) {
+                    double weight = 1.0 - dist;
+                    local_edges.push_back(Edge(i, j, weight));
+                    local_edge_count++;
                 }
             }
             
-            best_rep_per_thread[tid] = local_best_rep;
-            best_dist_per_thread[tid] = local_best_dist;
-        }
-        
-        // Merge results
-        int best_rep = -1;
-        double best_dist = 1.0;
-        for (int t = 0; t < threads; t++) {
-            if (best_dist_per_thread[t] < best_dist) {
-                best_dist = best_dist_per_thread[t];
-                best_rep = best_rep_per_thread[t];
+            if ((i + 1) % 1000 == 0) {
+                #pragma omp critical
+                {
+                    cerr << "Progress: " << (i + 1) << "/" << numGenomes << endl;
+                }
             }
         }
         
-        if (best_rep != -1) {
-            // Assign to existing cluster
-            cluster_assignment[j] = cluster_assignment[best_rep];
-        } else {
-            // Create new cluster
-            int new_cluster_id = dynamic_index.num_representatives();
-            cluster_assignment[j] = new_cluster_id;
-            dynamic_index.add_representative(j, sketches[j].hash32_arr);
-        }
-        
-        // Progress reporting
-        if ((j + 1) % 5000 == 0 || j + 1 == numGenomes) {
-            cerr << "Progress: " << (j + 1) << "/" << numGenomes 
-                 << " | Clusters: " << dynamic_index.num_representatives() << endl;
+        #pragma omp critical
+        {
+            total_comparisons += local_comparisons;
+            edges_created += local_edge_count;
         }
     }
     
-    // Convert cluster_assignment to cluster format
+    cerr << "-----Comparisons: " << total_comparisons << endl;
+    cerr << "-----Edges: " << edges_created << endl;
+    
+    // Merge edges
+    vector<Edge> all_edges;
+    for (const auto& local_edges : thread_local_edges) {
+        all_edges.insert(all_edges.end(), local_edges.begin(), local_edges.end());
+    }
+    
+    if (all_edges.empty()) {
+        cerr << "-----Warning: No edges! Each sequence in its own cluster." << endl;
+        vector<vector<int>> result(numGenomes);
+        for (int i = 0; i < numGenomes; i++) {
+            result[i].push_back(i);
+        }
+        return result;
+    }
+    
+    // Step 3: Build igraph
+    cerr << "-----Building igraph (parallel)..." << endl;
+    
+    igraph_t graph;
+    igraph_vector_int_t edges_vec;
+    igraph_vector_t weights_vec;
+    
+    igraph_vector_int_init(&edges_vec, all_edges.size() * 2);
+    igraph_vector_init(&weights_vec, all_edges.size());
+    
+    // Parallel edge vector construction
+    size_t num_edges = all_edges.size();
+    #pragma omp parallel for num_threads(threads)
+    for (size_t i = 0; i < num_edges; i++) {
+        VECTOR(edges_vec)[2 * i] = all_edges[i].from;
+        VECTOR(edges_vec)[2 * i + 1] = all_edges[i].to;
+        VECTOR(weights_vec)[i] = all_edges[i].weight;
+    }
+    
+    igraph_create(&graph, &edges_vec, numGenomes, IGRAPH_UNDIRECTED);
+    
+    // Step 4: Run community detection algorithm
+    cerr << "-----Running community detection algorithm..." << endl;
+    
+    igraph_vector_int_t membership;
+    igraph_vector_t modularity_vec;
+    
+    igraph_vector_int_init(&membership, numGenomes);
+    igraph_vector_init(&modularity_vec, 0);
+    
+    // Use Multilevel (Louvain) algorithm - more stable than Leiden for weighted graphs
+    // This algorithm is well-tested and widely used
+    int result_code = igraph_community_multilevel(
+        &graph,
+        &weights_vec,     // edge weights
+        resolution,       // resolution parameter  
+        &membership,
+        NULL,             // memberships (intermediate steps, not needed)
+        &modularity_vec   // final modularity (vector)
+    );
+    
+    // Get final modularity value
+    double modularity = 0.0;
+    if (igraph_vector_size(&modularity_vec) > 0) {
+        modularity = VECTOR(modularity_vec)[igraph_vector_size(&modularity_vec) - 1];
+    }
+    
+    cerr << "-----Community detection complete!" << endl;
+    cerr << "-----Final modularity: " << modularity << endl;
+    
+    // Count clusters
+    int nb_clusters = 0;
+    for (int i = 0; i < numGenomes; i++) {
+        if (VECTOR(membership)[i] + 1 > nb_clusters) {
+            nb_clusters = VECTOR(membership)[i] + 1;
+        }
+    }
+    
+    if (result_code != IGRAPH_SUCCESS) {
+        cerr << "-----ERROR: Community detection failed with code " << result_code << endl;
+        igraph_vector_destroy(&modularity_vec);
+        igraph_vector_int_destroy(&membership);
+        igraph_vector_destroy(&weights_vec);
+        igraph_vector_int_destroy(&edges_vec);
+        igraph_destroy(&graph);
+        
+        // Return each sequence in its own cluster as fallback
+        vector<vector<int>> result(numGenomes);
+        for (int i = 0; i < numGenomes; i++) {
+            result[i].push_back(i);
+        }
+        return result;
+    }
+    
+    cerr << "-----Number of clusters: " << nb_clusters << endl;
+    
+    // Step 5: Extract clusters
     unordered_map<int, vector<int>> cluster_map;
     for (int i = 0; i < numGenomes; i++) {
-        cluster_map[cluster_assignment[i]].push_back(i);
+        int community = VECTOR(membership)[i];
+        cluster_map[community].push_back(i);
     }
     
     vector<vector<int>> result;
@@ -191,11 +304,27 @@ vector<vector<int>> KssdLeidenCluster(
         result.push_back(entry.second);
     }
     
-    cerr << "-----Leiden clustering complete" << endl;
-    cerr << "-----Total clusters: " << result.size() << endl;
+    sort(result.begin(), result.end(), 
+         [](const vector<int>& a, const vector<int>& b) {
+             return a.size() > b.size();
+         });
+    
+    cerr << "=============================" << endl;
+    cerr << "Clustering Complete" << endl;
+    cerr << "Total clusters: " << result.size() << endl;
+    cerr << "Largest cluster: " << (result.empty() ? 0 : result[0].size()) << endl;
+    cerr << "Average size: " << (result.empty() ? 0.0 : (double)numGenomes / result.size()) << endl;
+    cerr << "Final modularity: " << modularity << endl;
+    cerr << "=============================" << endl;
+    
+    // Cleanup
+    igraph_vector_destroy(&modularity_vec);
+    igraph_vector_int_destroy(&membership);
+    igraph_vector_destroy(&weights_vec);
+    igraph_vector_int_destroy(&edges_vec);
+    igraph_destroy(&graph);
     
     return result;
 }
 
 #endif // LEIDEN_CLUST
-

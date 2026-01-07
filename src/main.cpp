@@ -56,7 +56,7 @@ int main(int argc, char * argv[]){
 	#ifdef GREEDY_CLUST
 		CLI::App app{"clust-greedy v.2.2.1, greedy incremental clustering module for RabbitTClust"};
 	#elif defined(LEIDEN_CLUST)
-		CLI::App app{"clust-leiden v.2.2.1, Leiden community detection clustering module for RabbitTClust"};
+		CLI::App app{"clust-leiden v.2.2.1, Graph-based community detection (Louvain) clustering module for RabbitTClust"};
 	#else
 		CLI::App app{"clust-mst v.2.2.1, minimum-spanning-tree-based module for RabbitTClust"};
 	#endif
@@ -106,7 +106,13 @@ int main(int argc, char * argv[]){
 	auto option_input = app.add_option("-i, --input", inputFile, "set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)");
 	auto option_presketched = app.add_option("--presketched", folder_path, "clustering by the pre-generated sketch files rather than genomes");
 	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing");
-#if !defined(GREEDY_CLUST) && !defined(LEIDEN_CLUST)
+#ifdef LEIDEN_CLUST
+	double leiden_resolution = 1.0;
+	bool leiden_use_modularity = true;
+	auto option_leiden_resolution = app.add_option("--leiden-resolution", leiden_resolution, "Leiden resolution parameter (higher = more clusters, default 1.0)");
+	auto flag_leiden_cpm = app.add_flag("--leiden-cpm", "use CPM (Constant Potts Model) instead of Modularity for Leiden")->default_val(false);
+	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
+#elif !defined(GREEDY_CLUST)
 	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
 	auto flag_newick_tree = app.add_flag("--newick-tree", is_newick_tree, "output the newick tree format file for clust-mst");
 	auto flag_linkage_matrix = app.add_flag("--linkage-matrix", is_linkage_matrix, "output the single-linkage linkage matrix for clust-mst");
@@ -179,8 +185,24 @@ int main(int argc, char * argv[]){
 //======clust-greedy======================================================================
 #elif defined(LEIDEN_CLUST)
 //======clust-leiden======================================================================
+	// Handle Leiden-specific options
+	if (*flag_leiden_cpm) {
+		leiden_use_modularity = false;
+	}
+	
+	if (!*option_threshold) {
+		threshold = 0.05;  // Default threshold for Leiden
+		cerr << "-----use default threshold: " << threshold << endl;
+	}
+	
+	if (*option_leiden_resolution) {
+		cerr << "-----Leiden resolution parameter: " << leiden_resolution << endl;
+	}
+	
+	cerr << "-----Leiden partition type: " << (leiden_use_modularity ? "Modularity" : "CPM") << endl;
+	
 	if (is_fast && *option_presketched && !*option_append) {
-		clust_from_sketch_leiden(folder_path, outputFile, threads);
+		clust_from_sketch_leiden(folder_path, outputFile, threshold, leiden_resolution, leiden_use_modularity, threads);
 		return 0;
 	}
 	
@@ -199,7 +221,7 @@ int main(int argc, char * argv[]){
 			cerr << "ERROR: invalid drlevel " << drlevel << ", should be in [0, 8]" << endl;
 			return 1;
 		}
-		clust_from_genome_leiden(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, threads);
+		clust_from_genome_leiden(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, threshold, leiden_resolution, leiden_use_modularity, threads);
 		return 0;
 	} else {
 		cerr << "ERROR: clust-leiden requires --fast option" << endl;

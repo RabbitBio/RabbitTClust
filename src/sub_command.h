@@ -43,6 +43,6 @@ void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newic
 void build_kssd_db_fast(const string input_file, const string db_folder, bool isSetKmer, bool& isContainment, int minLen, int& kmerSize, int& drlevel, int threads);
 
 // Leiden clustering functions
-void clust_from_genome_leiden(const string inputFile, string outputFile, string folder_path, bool sketchByFile, const int kmerSize, const int drlevel, const int minLen, bool noSave, int threads);
-void clust_from_sketch_leiden(string folder_path, string outputFile, int threads);
+void clust_from_genome_leiden(const string inputFile, string outputFile, string folder_path, bool sketchByFile, const int kmerSize, const int drlevel, const int minLen, bool noSave, double threshold, double resolution, bool use_modularity, int threads);
+void clust_from_sketch_leiden(string folder_path, string outputFile, double threshold, double resolution, bool use_modularity, int threads);
 

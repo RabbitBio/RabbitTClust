@@ -42,6 +42,14 @@ endif()
 
 if(USE_LEIDEN)
 	set(CMAKE_CXX_FLAGS "-D LEIDEN_CLUST ${CMAKE_CXX_FLAGS}")
+	
+	# Find igraph library (only dependency needed)
+	find_package(PkgConfig REQUIRED)
+	pkg_check_modules(IGRAPH REQUIRED igraph)
+	
+	# Add igraph include directories
+	include_directories(${IGRAPH_INCLUDE_DIRS})
+	link_directories(${IGRAPH_LIBRARY_DIRS})
 endif()
 
 if(USE_RABBITFX)
@@ -52,6 +60,12 @@ else()
 	set(CMAKE_CXX_FLAGS "-D THREADPOOL_MINHASH ${CMAKE_CXX_FLAGS}")
 	include_directories(src RabbitSketch/build/include)
 	link_directories(RabbitSketch/build/lib)
+endif()
+
+# Add igraph include directories for Leiden
+if(USE_LEIDEN)
+	include_directories(${IGRAPH_INCLUDE_DIRS})
+	link_directories(${IGRAPH_LIBRARY_DIRS})
 endif()
 	
 ##include_directories(src RabbitSketch/build/include RabbitFX/build/include)
@@ -73,9 +87,9 @@ endif()
 elseif(USE_LEIDEN)
 add_executable(clust-leiden ${DIR_SRCS})
 if(USE_RABBITFX)
-	target_link_libraries(clust-leiden rabbitsketch_static rabbitfx z)
+	target_link_libraries(clust-leiden rabbitsketch_static rabbitfx z ${IGRAPH_LIBRARIES} openblas gfortran)
 else()
-	target_link_libraries(clust-leiden rabbitsketch_static z)
+	target_link_libraries(clust-leiden rabbitsketch_static z ${IGRAPH_LIBRARIES} openblas gfortran)
 endif()
 
 else()
