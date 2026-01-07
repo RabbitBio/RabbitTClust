@@ -42,7 +42,7 @@ void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newic
 // - a RabbitTClust cluster output (e.g. *.cluster / *.cluster.dedup), from which genome paths will be extracted.
 void build_kssd_db_fast(const string input_file, const string db_folder, bool isSetKmer, bool& isContainment, int minLen, int& kmerSize, int& drlevel, int threads);
 
-// Leiden clustering functions
-void clust_from_genome_leiden(const string inputFile, string outputFile, string folder_path, bool sketchByFile, const int kmerSize, const int drlevel, const int minLen, bool noSave, double threshold, double resolution, bool use_modularity, int threads);
-void clust_from_sketch_leiden(string folder_path, string outputFile, double threshold, double resolution, bool use_modularity, int threads);
+// Graph-based clustering functions (Leiden/Louvain)
+void clust_from_genome_leiden(const string inputFile, string outputFile, string folder_path, bool sketchByFile, const int kmerSize, const int drlevel, const int minLen, bool noSave, double threshold, double resolution, bool use_leiden, int threads);
+void clust_from_sketch_leiden(string folder_path, string outputFile, double threshold, double resolution, bool use_leiden, int threads);
 

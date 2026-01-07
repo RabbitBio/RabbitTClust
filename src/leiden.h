@@ -7,8 +7,8 @@
 
 using std::vector;
 
-// Leiden-style clustering for KSSD sketches using inverted index + Label Propagation Algorithm
-// No external dependencies - pure C++ implementation
+// Graph-based clustering for KSSD sketches using inverted index
+// Supports both Louvain (default, stable) and Leiden (optional, refined) algorithms
 // Parameters:
 //   - sketches: input sketches
 //   - sketch_func_id: sketch function ID (currently not used)
@@ -16,7 +16,7 @@ using std::vector;
 //   - threads: number of threads for parallel computation
 //   - kmer_size: k-mer size for Mash distance calculation
 //   - resolution: controls cluster granularity (higher = more clusters)
-//   - max_iterations: maximum iterations for label propagation (default 100)
+//   - use_leiden: if true, use Leiden algorithm; if false (default), use Louvain
 vector<vector<int>> KssdLeidenCluster(
     vector<KssdSketchInfo>& sketches,
     int sketch_func_id,
@@ -24,7 +24,7 @@ vector<vector<int>> KssdLeidenCluster(
     int threads,
     int kmer_size,
     double resolution = 1.0,
-    bool use_modularity = true);
+    bool use_leiden = false);
 
 #endif
 #endif

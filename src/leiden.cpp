@@ -116,7 +116,7 @@ vector<vector<int>> KssdLeidenCluster(
     int threads,
     int kmer_size,
     double resolution,
-    bool use_modularity)
+    bool use_leiden)
 {
     int numGenomes = sketches.size();
     if (numGenomes == 0) {
@@ -124,7 +124,11 @@ vector<vector<int>> KssdLeidenCluster(
     }
 
     cerr << "=============================" << endl;
-    cerr << "Graph-based Clustering (Louvain)" << endl;
+    if (use_leiden) {
+        cerr << "Graph-based Clustering (Leiden)" << endl;
+    } else {
+        cerr << "Graph-based Clustering (Louvain)" << endl;
+    }
     cerr << "=============================" << endl;
     cerr << "Genomes: " << numGenomes << endl;
     cerr << "Edge threshold: " << threshold << endl;
@@ -237,7 +241,12 @@ vector<vector<int>> KssdLeidenCluster(
     igraph_create(&graph, &edges_vec, numGenomes, IGRAPH_UNDIRECTED);
     
     // Step 4: Run community detection algorithm
-    cerr << "-----Running community detection algorithm..." << endl;
+    if (use_leiden) {
+        cerr << "-----Running Leiden algorithm..." << endl;
+        cerr << "-----Note: Leiden is experimental. Use default Louvain for stable results." << endl;
+    } else {
+        cerr << "-----Running Louvain algorithm..." << endl;
+    }
     
     igraph_vector_int_t membership;
     igraph_vector_t modularity_vec;
@@ -245,16 +254,72 @@ vector<vector<int>> KssdLeidenCluster(
     igraph_vector_int_init(&membership, numGenomes);
     igraph_vector_init(&modularity_vec, 0);
     
-    // Use Multilevel (Louvain) algorithm - more stable than Leiden for weighted graphs
-    // This algorithm is well-tested and widely used
-    int result_code = igraph_community_multilevel(
-        &graph,
-        &weights_vec,     // edge weights
-        resolution,       // resolution parameter  
-        &membership,
-        NULL,             // memberships (intermediate steps, not needed)
-        &modularity_vec   // final modularity (vector)
-    );
+    int result_code;
+    
+    if (use_leiden) {
+        // Use Leiden algorithm - refined version with better community structure
+        // WARNING: Leiden is sensitive to edge weight scale and may produce suboptimal results
+        igraph_integer_t nb_clusters_temp;
+        igraph_real_t quality_temp;
+        
+        // Normalize edge weights to improve Leiden performance
+        // Our weights are in [0.9, 1.0] range, normalize to [0, 1] for better scaling
+        double min_weight = 1.0, max_weight = 0.0;
+        for (size_t i = 0; i < igraph_vector_size(&weights_vec); i++) {
+            double w = VECTOR(weights_vec)[i];
+            if (w < min_weight) min_weight = w;
+            if (w > max_weight) max_weight = w;
+        }
+        
+        // Normalize weights if range is too narrow
+        igraph_vector_t normalized_weights;
+        if (max_weight - min_weight < 0.5) {
+            igraph_vector_init_copy(&normalized_weights, &weights_vec);
+            double range = max_weight - min_weight;
+            if (range > 1e-6) {
+                for (size_t i = 0; i < igraph_vector_size(&normalized_weights); i++) {
+                    VECTOR(normalized_weights)[i] = (VECTOR(normalized_weights)[i] - min_weight) / range;
+                }
+            }
+            cerr << "-----Edge weights normalized: [" << min_weight << ", " << max_weight 
+                 << "] -> [0, 1]" << endl;
+        } else {
+            igraph_vector_init_copy(&normalized_weights, &weights_vec);
+        }
+        
+        // Adjust parameters for Leiden algorithm
+        double beta = 0.01;  // Standard refinement parameter
+        double adjusted_resolution = resolution;  // Use resolution directly after normalization
+        
+        result_code = igraph_community_leiden(
+            &graph,
+            &normalized_weights,  // normalized edge weights
+            NULL,             // node weights (NULL = all 1.0)
+            adjusted_resolution,  // resolution parameter
+            beta,             // beta (refinement parameter)
+            false,            // start from singleton partition
+            100,              // more iterations for convergence
+            &membership,
+            &nb_clusters_temp,
+            &quality_temp
+        );
+        
+        igraph_vector_destroy(&normalized_weights);
+        
+        // Store quality in modularity_vec for consistency
+        igraph_vector_resize(&modularity_vec, 1);
+        VECTOR(modularity_vec)[0] = quality_temp;
+    } else {
+        // Use Multilevel (Louvain) algorithm - more stable and well-tested
+        result_code = igraph_community_multilevel(
+            &graph,
+            &weights_vec,     // edge weights
+            resolution,       // resolution parameter  
+            &membership,
+            NULL,             // memberships (intermediate steps, not needed)
+            &modularity_vec   // final modularity (vector)
+        );
+    }
     
     // Get final modularity value
     double modularity = 0.0;

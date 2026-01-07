@@ -1243,7 +1243,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 void clust_from_genome_leiden(const string inputFile, string outputFile, string folder_path, 
                               bool sketchByFile, const int kmerSize, const int drlevel, 
                               const int minLen, bool noSave, double threshold, 
-                              double resolution, bool use_modularity, int threads){
+                              double resolution, bool use_leiden, int threads){
 	double time0 = get_sec();
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
@@ -1258,8 +1258,8 @@ void clust_from_genome_leiden(const string inputFile, string outputFile, string 
 	
 	cerr << "-----the size of sketches is: " << sketches.size() << endl;
 	
-	// Run Leiden clustering with inverted index graph construction
-	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmerSize, resolution, use_modularity);
+	// Run graph-based clustering with inverted index graph construction
+	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmerSize, resolution, use_leiden);
 	
 	printKssdResult(cluster, sketches, sketchByFile, outputFile);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
@@ -1273,7 +1273,7 @@ void clust_from_genome_leiden(const string inputFile, string outputFile, string 
 
 void clust_from_sketch_leiden(string folder_path, string outputFile, 
                               double threshold, double resolution, 
-                              bool use_modularity, int threads){
+                              bool use_leiden, int threads){
 	vector<KssdSketchInfo> sketches;
 	bool sketchByFile;
 	KssdParameters info;
@@ -1288,8 +1288,8 @@ void clust_from_sketch_leiden(string folder_path, string outputFile,
 	
 	int kmer_size = info.half_k * 2;
 	
-	// Run Leiden clustering with inverted index graph construction
-	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmer_size, resolution, use_modularity);
+	// Run graph-based clustering with inverted index graph construction
+	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmer_size, resolution, use_leiden);
 	
 	printKssdResult(cluster, sketches, sketchByFile, outputFile);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
