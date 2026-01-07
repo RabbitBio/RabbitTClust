@@ -2,6 +2,17 @@
 #ifndef H_LEIDEN
 #define H_LEIDEN
 
+/**
+ * @file leiden.h
+ * @brief Graph-based clustering for genome sequences using Louvain/Leiden algorithms
+ * @author Tong Zhang
+ * @date 2026-01-06
+ * 
+ * This module provides graph-based clustering functionality using inverted index
+ * for efficient similarity graph construction and igraph library for community detection.
+ * Supports both Louvain (default, stable) and Leiden (experimental) algorithms.
+ */
+
 #include "SketchInfo.h"
 #include <vector>
 

@@ -12,7 +12,7 @@ https://anaconda.org/bioconda/rabbittclust/badges/downloads.svg)](https://anacon
 # `RabbitTClust v.2.4.0`
 RabbitTClust is a fast and memory-efficient genome clustering tool based on sketch-based distance estimations.
 It enables processing of large-scale datasets by combining dimensionality reduction techniques with streaming and parallelization on modern multi-core platforms.
-RabbitTClust supports classical single-linkage hierarchical (clust-mst) and greedy incremental clustering (clust-greedy) algorithms for different scenarios. 
+RabbitTClust supports classical single-linkage hierarchical (clust-mst), greedy incremental clustering (clust-greedy), and graph-based clustering (clust-leiden) algorithms for different scenarios. 
 
 ## Installation
 `RabbitTClust v.2.4.0` can only support 64-bit Linux Systems.
@@ -26,10 +26,11 @@ Ensure that your machine supports at least AVX2 instructions.
 
 
 ### Install from source code
-#### Dependancy
+#### Dependencies
 * cmake v.3.0 or later
 * c++14
 * [zlib](https://zlib.net/)
+* [igraph](https://igraph.org/) (optional, required for clust-leiden)
 
 #### Compile and install
 ```bash
@@ -37,6 +38,33 @@ git clone --recursive https://github.com/RabbitBio/RabbitTClust.git
 cd RabbitTClust
 ./install.sh
 ```
+
+This will compile `clust-mst` and `clust-greedy` by default. If igraph is detected, `clust-leiden` will also be compiled.
+
+#### Optional: Install igraph for clust-leiden
+The `clust-leiden` module requires the [igraph](https://igraph.org/) library. If igraph is not found during installation, you will see a warning message, but `clust-mst` and `clust-greedy` will still be available.
+
+**Option 1: Install via package manager** (if available)
+```bash
+# Ubuntu/Debian
+sudo apt-get install libigraph-dev
+
+# macOS
+brew install igraph
+```
+
+**Option 2: Compile from source** (recommended for CentOS/RHEL)
+```bash
+cd ~
+wget https://github.com/igraph/igraph/releases/download/0.10.10/igraph-0.10.10.tar.gz
+tar xzf igraph-0.10.10.tar.gz
+cd igraph-0.10.10
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=$HOME/local
+make -j8 && make install
+```
+
+After installing igraph, return to the RabbitTClust directory and run `./install.sh` again to compile `clust-leiden`.
 ## Usage
 ```bash
 # clust-mst, minimum-spanning-tree-based module for RabbitTClust
@@ -79,6 +107,25 @@ Options:
   --presketched TEXT          clustering by the pre-generated sketch files rather than genomes
   --append TEXT Excludes: --input
                               append genome file or file list with the pre-generated sketch or MST files
+
+# clust-leiden, graph-based clustering module for RabbitTClust (requires igraph)
+Usage: ./clust-leiden [OPTIONS]
+Options:
+  -h,--help                   Print this help message and exit
+  -t,--threads INT            set the thread number, default all CPUs of the platform
+  -m,--min-length UINT        set the filter minimum length (minLen), genome length less than minLen will be ignore, default 10,000
+  -k,--kmer-size INT          set the kmer size
+  -l,--list                   input is genome list, one genome per line
+  -e,--no-save                not save the intermediate files, such as sketches
+  -d,--threshold FLOAT        set the distance threshold for graph edge construction
+  -o,--output TEXT REQUIRED   set the output name of cluster result
+  -i,--input TEXT Excludes: --presketched
+                              set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)
+  --presketched TEXT          clustering by the pre-generated sketch files rather than genomes
+  --fast                      use the kssd algorithm for sketching and distance computing (required)
+  --resolution FLOAT          resolution parameter for clustering (higher = more clusters, default 1.0)
+  --leiden                    use Leiden algorithm instead of Louvain (default: Louvain, recommended)
+  --drlevel INT               set the dimension reduction level for Kssd sketches, default 3 with a dimension reduction of 1/4096
 ```
 
 ## Example:
@@ -128,7 +175,22 @@ Options:
 # v.2.4.0 or later
 # clust-greedy also supports the efficient Kssd sketch strategy with the --fast flag.
 ./clust-greedy --fast -l -i bacteria.list -o bacteria.fast.greedy.clust
+
+# clust-leiden: graph-based clustering with Louvain algorithm (default, recommended)
+# does not require a strict distance threshold, automatically finds community structure
+./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust -d 0.05
+
+# clust-leiden with Leiden algorithm (experimental)
+./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust -d 0.05 --leiden
+
+# clust-leiden with pre-sketched data
+./clust-leiden --fast --presketched 2023_05_06_09-37-23/ -o bacteria.leiden.clust -d 0.05
+
+# clust-leiden with custom resolution (higher = more clusters)
+./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust -d 0.05 --resolution 2.0
 ```
+
+
 ## Output
 The output file is in a CD-HIT output format and is slightly different when running with or without `-l` input option.  
 When using the `-l` option, the input is expected to be a FASTA file list, with each file representing a genome. Without the `-l` option, the input should be a single FASTA file, with each sequence representing a genome.

@@ -1,5 +1,24 @@
 #ifdef LEIDEN_CLUST
 
+/**
+ * @file leiden.cpp
+ * @brief Implementation of graph-based clustering using Louvain/Leiden algorithms
+ * @author Tong Zhang
+ * @date 2026-01-06
+ * 
+ * This module implements efficient graph-based clustering for large-scale genome datasets:
+ * - Global inverted index for fast similarity graph construction
+ * - Parallel edge building using OpenMP
+ * - Support for both Louvain (default) and Leiden (experimental) community detection
+ * - Integration with igraph library for graph algorithms
+ * 
+ * Key optimizations:
+ * - Inverted index reduces distance calculations from O(N²) to O(candidates)
+ * - Sparse graph representation for memory efficiency
+ * - Multi-threaded graph construction
+ * - Threshold-based edge filtering
+ */
+
 #include "leiden.h"
 #include "SketchInfo.h"
 #include <vector>
