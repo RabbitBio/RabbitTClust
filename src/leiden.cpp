@@ -28,6 +28,7 @@
 #include <omp.h>
 #include <algorithm>
 #include <iostream>
+#include <fstream>
 #include <cmath>
 #include <igraph.h>
 
@@ -127,6 +128,9 @@ struct Edge {
     Edge(int f, int t, double w) : from(f), to(t), weight(w) {}
 };
 
+// ==================== Helper: Save Graph to File ====================
+void save_graph_to_file(const vector<Edge>& edges, int num_nodes, const string& filename);
+
 // ==================== Leiden Clustering using igraph ====================
 vector<vector<int>> KssdLeidenCluster(
     vector<KssdSketchInfo>& sketches,
@@ -135,7 +139,8 @@ vector<vector<int>> KssdLeidenCluster(
     int threads,
     int kmer_size,
     double resolution,
-    bool use_leiden)
+    bool use_leiden,
+    const string& graph_save_path)
 {
     int numGenomes = sketches.size();
     if (numGenomes == 0) {
@@ -258,6 +263,11 @@ vector<vector<int>> KssdLeidenCluster(
     }
     
     igraph_create(&graph, &edges_vec, numGenomes, IGRAPH_UNDIRECTED);
+    
+    // Save graph to file if path is provided
+    if (!graph_save_path.empty()) {
+        save_graph_to_file(all_edges, numGenomes, graph_save_path);
+    }
     
     // Step 4: Run community detection algorithm
     if (use_leiden) {
@@ -398,6 +408,240 @@ vector<vector<int>> KssdLeidenCluster(
     cerr << "Total clusters: " << result.size() << endl;
     cerr << "Largest cluster: " << (result.empty() ? 0 : result[0].size()) << endl;
     cerr << "Average size: " << (result.empty() ? 0.0 : (double)numGenomes / result.size()) << endl;
+    cerr << "Final modularity: " << modularity << endl;
+    cerr << "=============================" << endl;
+    
+    // Cleanup
+    igraph_vector_destroy(&modularity_vec);
+    igraph_vector_int_destroy(&membership);
+    igraph_vector_destroy(&weights_vec);
+    igraph_vector_int_destroy(&edges_vec);
+    igraph_destroy(&graph);
+    
+    return result;
+}
+
+// ==================== Helper: Save Graph to File ====================
+void save_graph_to_file(const vector<Edge>& edges, int num_nodes, const string& filename) {
+    ofstream outfile(filename);
+    if (!outfile.is_open()) {
+        cerr << "ERROR: Cannot open graph file for writing: " << filename << endl;
+        return;
+    }
+    
+    // Header: num_nodes num_edges
+    outfile << num_nodes << " " << edges.size() << "\n";
+    
+    // Edges: from to weight
+    for (const auto& e : edges) {
+        outfile << e.from << " " << e.to << " " << e.weight << "\n";
+    }
+    
+    outfile.close();
+    cerr << "-----Graph saved to: " << filename << endl;
+}
+
+// ==================== Cluster from Pre-built Graph ====================
+vector<vector<int>> KssdLeidenClusterFromGraph(
+    const string& graph_file,
+    int num_genomes,
+    double resolution,
+    bool use_leiden)
+{
+    cerr << "=============================" << endl;
+    if (use_leiden) {
+        cerr << "Graph-based Clustering (Leiden) - From Pre-built Graph" << endl;
+    } else {
+        cerr << "Graph-based Clustering (Louvain) - From Pre-built Graph" << endl;
+    }
+    cerr << "=============================" << endl;
+    cerr << "Graph file: " << graph_file << endl;
+    cerr << "Genomes: " << num_genomes << endl;
+    cerr << "Resolution: " << resolution << endl;
+    cerr << "=============================" << endl;
+    
+    // Step 1: Load graph from file
+    cerr << "-----Loading graph from file..." << endl;
+    
+    ifstream infile(graph_file);
+    if (!infile.is_open()) {
+        cerr << "ERROR: Cannot open graph file: " << graph_file << endl;
+        vector<vector<int>> result(num_genomes);
+        for (int i = 0; i < num_genomes; i++) {
+            result[i].push_back(i);
+        }
+        return result;
+    }
+    
+    int file_num_nodes, file_num_edges;
+    infile >> file_num_nodes >> file_num_edges;
+    
+    if (file_num_nodes != num_genomes) {
+        cerr << "WARNING: Graph file has " << file_num_nodes 
+             << " nodes but expected " << num_genomes << endl;
+    }
+    
+    vector<Edge> edges;
+    edges.reserve(file_num_edges);
+    
+    int from, to;
+    double weight;
+    while (infile >> from >> to >> weight) {
+        edges.push_back(Edge(from, to, weight));
+    }
+    infile.close();
+    
+    cerr << "-----Loaded " << edges.size() << " edges" << endl;
+    
+    if (edges.empty()) {
+        cerr << "-----Warning: No edges! Each sequence in its own cluster." << endl;
+        vector<vector<int>> result(num_genomes);
+        for (int i = 0; i < num_genomes; i++) {
+            result[i].push_back(i);
+        }
+        return result;
+    }
+    
+    // Step 2: Build igraph
+    cerr << "-----Building igraph from loaded edges..." << endl;
+    
+    igraph_t graph;
+    igraph_vector_int_t edges_vec;
+    igraph_vector_t weights_vec;
+    
+    igraph_vector_int_init(&edges_vec, edges.size() * 2);
+    igraph_vector_init(&weights_vec, edges.size());
+    
+    for (size_t i = 0; i < edges.size(); i++) {
+        VECTOR(edges_vec)[2 * i] = edges[i].from;
+        VECTOR(edges_vec)[2 * i + 1] = edges[i].to;
+        VECTOR(weights_vec)[i] = edges[i].weight;
+    }
+    
+    igraph_create(&graph, &edges_vec, num_genomes, IGRAPH_UNDIRECTED);
+    
+    // Step 3: Run community detection algorithm
+    if (use_leiden) {
+        cerr << "-----Running Leiden algorithm..." << endl;
+        cerr << "-----Note: Leiden is experimental. Use default Louvain for stable results." << endl;
+    } else {
+        cerr << "-----Running Louvain algorithm..." << endl;
+    }
+    
+    igraph_vector_int_t membership;
+    igraph_vector_t modularity_vec;
+    
+    igraph_vector_int_init(&membership, num_genomes);
+    igraph_vector_init(&modularity_vec, 0);
+    
+    int result_code;
+    
+    if (use_leiden) {
+        // Normalize edge weights for Leiden
+        double min_weight = 1.0, max_weight = 0.0;
+        for (size_t i = 0; i < igraph_vector_size(&weights_vec); i++) {
+            double w = VECTOR(weights_vec)[i];
+            if (w < min_weight) min_weight = w;
+            if (w > max_weight) max_weight = w;
+        }
+        
+        igraph_vector_t normalized_weights;
+        if (max_weight - min_weight < 0.5) {
+            igraph_vector_init_copy(&normalized_weights, &weights_vec);
+            double range = max_weight - min_weight;
+            if (range > 1e-6) {
+                for (size_t i = 0; i < igraph_vector_size(&normalized_weights); i++) {
+                    VECTOR(normalized_weights)[i] = (VECTOR(normalized_weights)[i] - min_weight) / range;
+                }
+            }
+            cerr << "-----Edge weights normalized: [" << min_weight << ", " << max_weight 
+                 << "] -> [0, 1]" << endl;
+        } else {
+            igraph_vector_init_copy(&normalized_weights, &weights_vec);
+        }
+        
+        double beta = 0.01;
+        igraph_integer_t nb_clusters_temp;
+        igraph_real_t quality_temp;
+        
+        result_code = igraph_community_leiden(
+            &graph,
+            &normalized_weights,
+            NULL,
+            resolution,
+            beta,
+            false,
+            100,
+            &membership,
+            &nb_clusters_temp,
+            &quality_temp
+        );
+        
+        igraph_vector_destroy(&normalized_weights);
+        
+        igraph_vector_resize(&modularity_vec, 1);
+        VECTOR(modularity_vec)[0] = quality_temp;
+    } else {
+        result_code = igraph_community_multilevel(
+            &graph,
+            &weights_vec,
+            resolution,
+            &membership,
+            NULL,
+            &modularity_vec
+        );
+    }
+    
+    double modularity = 0.0;
+    if (igraph_vector_size(&modularity_vec) > 0) {
+        modularity = VECTOR(modularity_vec)[igraph_vector_size(&modularity_vec) - 1];
+    }
+    
+    cerr << "-----Community detection complete!" << endl;
+    cerr << "-----Final modularity: " << modularity << endl;
+    
+    // Count clusters
+    int nb_clusters = 0;
+    for (int i = 0; i < num_genomes; i++) {
+        if (VECTOR(membership)[i] + 1 > nb_clusters) {
+            nb_clusters = VECTOR(membership)[i] + 1;
+        }
+    }
+    
+    if (result_code != IGRAPH_SUCCESS) {
+        cerr << "WARNING: Community detection failed, each genome in its own cluster" << endl;
+        vector<vector<int>> result(num_genomes);
+        for (int i = 0; i < num_genomes; i++) {
+            result[i].push_back(i);
+        }
+        return result;
+    }
+    
+    cerr << "-----Number of clusters: " << nb_clusters << endl;
+    
+    // Extract clusters
+    unordered_map<int, vector<int>> cluster_map;
+    for (int i = 0; i < num_genomes; i++) {
+        int community = VECTOR(membership)[i];
+        cluster_map[community].push_back(i);
+    }
+    
+    vector<vector<int>> result;
+    result.reserve(cluster_map.size());
+    for (const auto& entry : cluster_map) {
+        result.push_back(entry.second);
+    }
+    
+    sort(result.begin(), result.end(), 
+         [](const vector<int>& a, const vector<int>& b) {
+             return a.size() > b.size();
+         });
+    
+    cerr << "=============================" << endl;
+    cerr << "Clustering Complete" << endl;
+    cerr << "Total clusters: " << result.size() << endl;
+    cerr << "Largest cluster: " << (result.empty() ? 0 : result[0].size()) << endl;
+    cerr << "Average size: " << (result.empty() ? 0.0 : (double)num_genomes / result.size()) << endl;
     cerr << "Final modularity: " << modularity << endl;
     cerr << "=============================" << endl;
     

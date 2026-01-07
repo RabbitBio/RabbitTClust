@@ -35,6 +35,20 @@ vector<vector<int>> KssdLeidenCluster(
     int threads,
     int kmer_size,
     double resolution = 1.0,
+    bool use_leiden = false,
+    const std::string& graph_save_path = "");
+
+// Cluster from pre-built graph (fast resolution adjustment without rebuilding graph)
+// This function loads a pre-saved graph and runs community detection with specified resolution
+// Parameters:
+//   - graph_file: path to saved graph file
+//   - num_genomes: number of genomes (nodes in graph)
+//   - resolution: controls cluster granularity (higher = more clusters)
+//   - use_leiden: if true, use Leiden algorithm; if false (default), use Louvain
+vector<vector<int>> KssdLeidenClusterFromGraph(
+    const std::string& graph_file,
+    int num_genomes,
+    double resolution = 1.0,
     bool use_leiden = false);
 
 #endif

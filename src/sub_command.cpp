@@ -1258,8 +1258,11 @@ void clust_from_genome_leiden(const string inputFile, string outputFile, string 
 	
 	cerr << "-----the size of sketches is: " << sketches.size() << endl;
 	
+	// Prepare graph save path
+	string graph_file = folder_path + "/leiden.graph";
+	
 	// Run graph-based clustering with inverted index graph construction
-	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmerSize, resolution, use_leiden);
+	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmerSize, resolution, use_leiden, graph_file);
 	
 	printKssdResult(cluster, sketches, sketchByFile, outputFile);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
@@ -1288,8 +1291,11 @@ void clust_from_sketch_leiden(string folder_path, string outputFile,
 	
 	int kmer_size = info.half_k * 2;
 	
+	// Prepare graph save path
+	string graph_file = folder_path + "/leiden.graph";
+	
 	// Run graph-based clustering with inverted index graph construction
-	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmer_size, resolution, use_leiden);
+	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmer_size, resolution, use_leiden, graph_file);
 	
 	printKssdResult(cluster, sketches, sketchByFile, outputFile);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
@@ -1297,6 +1303,33 @@ void clust_from_sketch_leiden(string folder_path, string outputFile,
 	double time2 = get_sec();
 #ifdef Timer
 	cerr << "========time of Leiden clustering is: " << time2 - time1 << endl;
+#endif
+}
+
+void clust_from_pregraph_leiden(string folder_path, string outputFile, 
+                                double resolution, bool use_leiden, int threads){
+	vector<KssdSketchInfo> sketches;
+	bool sketchByFile;
+	KssdParameters info;
+	
+	double time0 = get_sec();
+	sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
+	cerr << "-----the size of sketches is: " << sketches.size() << endl;
+	double time1 = get_sec();
+#ifdef Timer
+	cerr << "========time of load genome Infos and sketch Infos is: " << time1 - time0 << endl;
+#endif
+	
+	// Load and cluster from pre-built graph
+	string graph_file = folder_path + "/leiden.graph";
+	vector<vector<int>> cluster = KssdLeidenClusterFromGraph(graph_file, sketches.size(), resolution, use_leiden);
+	
+	printKssdResult(cluster, sketches, sketchByFile, outputFile);
+	cerr << "-----write the cluster result into: " << outputFile << endl;
+	cerr << "-----the cluster number of " << outputFile << " is: " << cluster.size() << endl;
+	double time2 = get_sec();
+#ifdef Timer
+	cerr << "========time of Leiden clustering from pre-built graph is: " << time2 - time1 << endl;
 #endif
 }
 

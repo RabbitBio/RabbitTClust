@@ -122,6 +122,7 @@ Options:
   -i,--input TEXT Excludes: --presketched
                               set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)
   --presketched TEXT          clustering by the pre-generated sketch files rather than genomes
+  --pregraph TEXT             clustering from pre-built graph (fast resolution adjustment without rebuilding graph)
   --fast                      use the kssd algorithm for sketching and distance computing (required)
   --resolution FLOAT          resolution parameter for clustering (higher = more clusters, default 1.0)
   --leiden                    use Leiden algorithm instead of Louvain (default: Louvain, recommended)
@@ -178,16 +179,22 @@ Options:
 
 # clust-leiden: graph-based clustering with Louvain algorithm (default, recommended)
 # does not require a strict distance threshold, automatically finds community structure
-./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust -d 0.05
+# default threshold: 0.2 (more permissive than greedy/mst for better graph connectivity)
+./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust
+
+# clust-leiden with custom threshold for graph construction
+./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust -d 0.15
 
 # clust-leiden with Leiden algorithm (experimental)
-./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust -d 0.05 --leiden
+./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust --leiden
 
 # clust-leiden with pre-sketched data
-./clust-leiden --fast --presketched 2023_05_06_09-37-23/ -o bacteria.leiden.clust -d 0.05
+./clust-leiden --fast --presketched 2023_05_06_09-37-23/ -o bacteria.leiden.clust
 
 # clust-leiden with custom resolution (higher = more clusters)
-./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust -d 0.05 --resolution 2.0
+./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust --resolution 2.0
+
+./clust-leiden --pregraph 2023_05_06_09-37-23 -o bacteria_r20.leiden.clust --resolution 2.0
 ```
 
 

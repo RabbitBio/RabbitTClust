@@ -72,7 +72,7 @@ int main(int argc, char * argv[]){
 	bool isContainment = false;
 	bool isJaccard = false;
 	bool useFile = false;
-	double threshold = 0.05;
+	double threshold = 0.2;
 	int kmerSize = 21;
 	int sketchSize = 1000;
 	int containCompress = 1000;
@@ -109,8 +109,10 @@ int main(int argc, char * argv[]){
 #ifdef LEIDEN_CLUST
 	double leiden_resolution = 1.0;
 	bool use_leiden_algorithm = false;  // Default: use Louvain
+	string pregraph_path;
 	auto option_leiden_resolution = app.add_option("--resolution", leiden_resolution, "Resolution parameter (higher = more clusters, default 1.0)");
 	auto flag_use_leiden = app.add_flag("--leiden", use_leiden_algorithm, "Use Leiden algorithm instead of Louvain (default: Louvain)");
+	auto option_pregraph = app.add_option("--pregraph", pregraph_path, "Cluster from pre-built graph (fast resolution adjustment)");
 	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
 #elif !defined(GREEDY_CLUST)
 	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
@@ -187,7 +189,7 @@ int main(int argc, char * argv[]){
 //======clust-leiden======================================================================
 	// Handle algorithm selection
 	if (!*option_threshold) {
-		threshold = 0.05;  // Default threshold
+		threshold = 0.2;  // Default threshold for graph construction
 		cerr << "-----use default threshold: " << threshold << endl;
 	}
 	
@@ -199,6 +201,12 @@ int main(int argc, char * argv[]){
 		cerr << "-----Algorithm: Leiden" << endl;
 	} else {
 		cerr << "-----Algorithm: Louvain (default)" << endl;
+	}
+	
+	if (*option_pregraph) {
+		cerr << "-----Clustering from pre-built graph (fast resolution adjustment)" << endl;
+		clust_from_pregraph_leiden(pregraph_path, outputFile, leiden_resolution, use_leiden_algorithm, threads);
+		return 0;
 	}
 	
 	if (is_fast && *option_presketched && !*option_append) {
