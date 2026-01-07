@@ -9,7 +9,7 @@
  * This module implements efficient graph-based clustering for large-scale genome datasets:
  * - Global inverted index for fast similarity graph construction
  * - Parallel edge building using OpenMP
- * - Support for both Louvain (default) and Leiden (experimental) community detection
+ * - Support for both Leiden (default) and Louvain (alternative) community detection
  * - Integration with igraph library for graph algorithms
  * 
  * Key optimizations:
@@ -271,10 +271,10 @@ vector<vector<int>> KssdLeidenCluster(
     
     // Step 4: Run community detection algorithm
     if (use_leiden) {
-        cerr << "-----Running Leiden algorithm..." << endl;
-        cerr << "-----Note: Leiden is experimental. Use default Louvain for stable results." << endl;
+        cerr << "-----Running Leiden algorithm (default)..." << endl;
     } else {
         cerr << "-----Running Louvain algorithm..." << endl;
+        cerr << "-----Note: Using --louvain flag. Louvain may be faster but less refined than Leiden (default)." << endl;
     }
     
     igraph_vector_int_t membership;
@@ -522,10 +522,10 @@ vector<vector<int>> KssdLeidenClusterFromGraph(
     
     // Step 3: Run community detection algorithm
     if (use_leiden) {
-        cerr << "-----Running Leiden algorithm..." << endl;
-        cerr << "-----Note: Leiden is experimental. Use default Louvain for stable results." << endl;
+        cerr << "-----Running Leiden algorithm (default)..." << endl;
     } else {
         cerr << "-----Running Louvain algorithm..." << endl;
+        cerr << "-----Note: Using --louvain flag. Louvain may be faster but less refined than Leiden (default)." << endl;
     }
     
     igraph_vector_int_t membership;

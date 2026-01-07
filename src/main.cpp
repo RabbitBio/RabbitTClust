@@ -108,10 +108,10 @@ int main(int argc, char * argv[]){
 	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing");
 #ifdef LEIDEN_CLUST
 	double leiden_resolution = 1.0;
-	bool use_leiden_algorithm = false;  // Default: use Louvain
+	bool use_louvain = false;  // Default: use Leiden (this is clust-leiden!)
 	string pregraph_path;
 	auto option_leiden_resolution = app.add_option("--resolution", leiden_resolution, "Resolution parameter (higher = more clusters, default 1.0)");
-	auto flag_use_leiden = app.add_flag("--leiden", use_leiden_algorithm, "Use Leiden algorithm instead of Louvain (default: Louvain)");
+	auto flag_use_louvain = app.add_flag("--louvain", use_louvain, "Use Louvain algorithm instead of Leiden (default: Leiden)");
 	auto option_pregraph = app.add_option("--pregraph", pregraph_path, "Cluster from pre-built graph (fast resolution adjustment)");
 	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
 #elif !defined(GREEDY_CLUST)
@@ -197,20 +197,20 @@ int main(int argc, char * argv[]){
 		cerr << "-----Resolution parameter: " << leiden_resolution << endl;
 	}
 	
-	if (use_leiden_algorithm) {
-		cerr << "-----Algorithm: Leiden" << endl;
+	if (use_louvain) {
+		cerr << "-----Algorithm: Louvain" << endl;
 	} else {
-		cerr << "-----Algorithm: Louvain (default)" << endl;
+		cerr << "-----Algorithm: Leiden (default)" << endl;
 	}
 	
 	if (*option_pregraph) {
 		cerr << "-----Clustering from pre-built graph (fast resolution adjustment)" << endl;
-		clust_from_pregraph_leiden(pregraph_path, outputFile, leiden_resolution, use_leiden_algorithm, threads);
+		clust_from_pregraph_leiden(pregraph_path, outputFile, leiden_resolution, !use_louvain, threads);
 		return 0;
 	}
 	
 	if (is_fast && *option_presketched && !*option_append) {
-		clust_from_sketch_leiden(folder_path, outputFile, threshold, leiden_resolution, use_leiden_algorithm, threads);
+		clust_from_sketch_leiden(folder_path, outputFile, threshold, leiden_resolution, !use_louvain, threads);
 		return 0;
 	}
 	
@@ -229,7 +229,7 @@ int main(int argc, char * argv[]){
 			cerr << "ERROR: invalid drlevel " << drlevel << ", should be in [0, 8]" << endl;
 			return 1;
 		}
-		clust_from_genome_leiden(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, threshold, leiden_resolution, use_leiden_algorithm, threads);
+		clust_from_genome_leiden(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, threshold, leiden_resolution, !use_louvain, threads);
 		return 0;
 	} else {
 		cerr << "ERROR: clust-leiden requires --fast option" << endl;

@@ -125,7 +125,7 @@ Options:
   --pregraph TEXT             clustering from pre-built graph (fast resolution adjustment without rebuilding graph)
   --fast                      use the kssd algorithm for sketching and distance computing (required)
   --resolution FLOAT          resolution parameter for clustering (higher = more clusters, default 1.0)
-  --leiden                    use Leiden algorithm instead of Louvain (default: Louvain, recommended)
+  --louvain                   use Louvain algorithm instead of Leiden (default: Leiden)
   --drlevel INT               set the dimension reduction level for Kssd sketches, default 3 with a dimension reduction of 1/4096
 ```
 
@@ -177,12 +177,12 @@ Options:
 # clust-greedy also supports the efficient Kssd sketch strategy with the --fast flag.
 ./clust-greedy --fast -l -i bacteria.list -o bacteria.fast.greedy.clust
 
-# clust-leiden: graph-based clustering with Louvain algorithm (default, recommended)
+# clust-leiden: graph-based clustering with Leiden algorithm (default)
 # does not require a strict distance threshold, automatically finds community structure
 ./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust
 
-# clust-leiden with Leiden algorithm (experimental)
-./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust --leiden
+# clust-leiden with Louvain algorithm (faster, simpler alternative)
+./clust-leiden --fast -l -i bacteria.list -o bacteria.louvain.clust --louvain
 
 # clust-leiden with pre-sketched data and pre-graph
 ./clust-leiden --fast --presketched 2023_05_06_09-37-23/ -o bacteria.leiden.clust
