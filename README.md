@@ -179,21 +179,13 @@ Options:
 
 # clust-leiden: graph-based clustering with Louvain algorithm (default, recommended)
 # does not require a strict distance threshold, automatically finds community structure
-# default threshold: 0.2 (more permissive than greedy/mst for better graph connectivity)
 ./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust
-
-# clust-leiden with custom threshold for graph construction
-./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust -d 0.15
 
 # clust-leiden with Leiden algorithm (experimental)
 ./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust --leiden
 
-# clust-leiden with pre-sketched data
+# clust-leiden with pre-sketched data and pre-graph
 ./clust-leiden --fast --presketched 2023_05_06_09-37-23/ -o bacteria.leiden.clust
-
-# clust-leiden with custom resolution (higher = more clusters)
-./clust-leiden --fast -l -i bacteria.list -o bacteria.leiden.clust --resolution 2.0
-
 ./clust-leiden --pregraph 2023_05_06_09-37-23 -o bacteria_r20.leiden.clust --resolution 2.0
 ```
 
