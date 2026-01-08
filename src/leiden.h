@@ -36,6 +36,7 @@ vector<vector<int>> KssdLeidenCluster(
     int kmer_size,
     double resolution = 1.0,
     bool use_leiden = false,
+    int knn_k = 0,
     const std::string& graph_save_path = "");
 
 // Cluster from pre-built graph (fast resolution adjustment without rebuilding graph)
@@ -50,6 +51,49 @@ vector<vector<int>> KssdLeidenClusterFromGraph(
     int num_genomes,
     double resolution = 1.0,
     bool use_leiden = false);
+
+// Two-stage parallel Louvain clustering for large-scale datasets (graph-partitioning approach)
+// This function uses graph partitioning and hierarchical clustering to accelerate Louvain
+// Parameters:
+//   - sketches: input sketches
+//   - sketch_func_id: sketch function ID (currently not used)
+//   - threshold: similarity threshold for edge creation (0-1, lower = more similar)
+//   - threads: number of threads for parallel computation (also number of partitions)
+//   - kmer_size: k-mer size for Mash distance calculation
+//   - resolution: controls cluster granularity (higher = more clusters)
+//   - graph_save_path: optional path to save the graph
+vector<vector<int>> KssdParallelLouvainCluster(
+    vector<KssdSketchInfo>& sketches,
+    int sketch_func_id,
+    double threshold,
+    int threads,
+    int kmer_size,
+    double resolution = 1.0,
+    const std::string& graph_save_path = "");
+
+// Edge-partitioning parallel Louvain (simpler and more efficient approach)
+// This uses the natural edge partitioning from parallel graph construction (similar to MST approach)
+// Optionally uses local Louvain results as warm-start for final clustering
+// Parameters:
+//   - sketches: input sketches
+//   - sketch_func_id: sketch function ID (currently not used)
+//   - threshold: similarity threshold for edge creation (0-1, lower = more similar)
+//   - threads: number of threads for parallel computation
+//   - kmer_size: k-mer size for Mash distance calculation
+//   - resolution: controls cluster granularity (higher = more clusters)
+//   - use_warm_start: if true, use local Louvain results to initialize final clustering (faster convergence)
+//   - knn_k: if > 0, keep only k nearest neighbors per node (reduces edge count, speeds up Phase 2)
+//   - graph_save_path: optional path to save the graph
+vector<vector<int>> KssdEdgeParallelLouvainCluster(
+    vector<KssdSketchInfo>& sketches,
+    int sketch_func_id,
+    double threshold,
+    int threads,
+    int kmer_size,
+    double resolution = 1.0,
+    bool use_warm_start = false,
+    int knn_k = 0,
+    const std::string& graph_save_path = "");
 
 #endif
 #endif

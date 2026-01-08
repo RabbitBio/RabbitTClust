@@ -1243,7 +1243,8 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 void clust_from_genome_leiden(const string inputFile, string outputFile, string folder_path, 
                               bool sketchByFile, const int kmerSize, const int drlevel, 
                               const int minLen, bool noSave, double threshold, 
-                              double resolution, bool use_leiden, int threads){
+                              double resolution, bool use_leiden, bool use_parallel_louvain, 
+                              bool use_edge_parallel, bool use_warm_start, int knn_k, int threads){
 	double time0 = get_sec();
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
@@ -1258,11 +1259,21 @@ void clust_from_genome_leiden(const string inputFile, string outputFile, string 
 	
 	cerr << "-----the size of sketches is: " << sketches.size() << endl;
 	
-	// Prepare graph save path
-	string graph_file = folder_path + "/leiden.graph";
+	// Prepare graph save path (empty = don't save, saving 347M edges is very slow!)
+	string graph_file = "";  // Changed from folder_path + "/leiden.graph" to disable slow file saving
 	
 	// Run graph-based clustering with inverted index graph construction
-	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmerSize, resolution, use_leiden, graph_file);
+	vector<vector<int>> cluster;
+	if (use_edge_parallel) {
+		// Use edge-partitioning parallel Louvain (RECOMMENDED - simpler & more efficient)
+		cluster = KssdEdgeParallelLouvainCluster(sketches, 0, threshold, threads, kmerSize, resolution, use_warm_start, knn_k, graph_file);
+	} else if (use_parallel_louvain) {
+		// Use graph-partitioning parallel Louvain (alternative approach)
+		cluster = KssdParallelLouvainCluster(sketches, 0, threshold, threads, kmerSize, resolution, graph_file);
+	} else {
+		// Use standard Leiden or Louvain
+		cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmerSize, resolution, use_leiden, knn_k, graph_file);
+	}
 	
 	printKssdResult(cluster, sketches, sketchByFile, outputFile);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
@@ -1276,7 +1287,8 @@ void clust_from_genome_leiden(const string inputFile, string outputFile, string 
 
 void clust_from_sketch_leiden(string folder_path, string outputFile, 
                               double threshold, double resolution, 
-                              bool use_leiden, int threads){
+                              bool use_leiden, bool use_parallel_louvain, 
+                              bool use_edge_parallel, bool use_warm_start, int knn_k, int threads){
 	vector<KssdSketchInfo> sketches;
 	bool sketchByFile;
 	KssdParameters info;
@@ -1291,11 +1303,21 @@ void clust_from_sketch_leiden(string folder_path, string outputFile,
 	
 	int kmer_size = info.half_k * 2;
 	
-	// Prepare graph save path
-	string graph_file = folder_path + "/leiden.graph";
+	// Prepare graph save path (empty = don't save, saving millions of edges is very slow!)
+	string graph_file = "";  // Changed from folder_path + "/leiden.graph" to disable slow file saving
 	
 	// Run graph-based clustering with inverted index graph construction
-	vector<vector<int>> cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmer_size, resolution, use_leiden, graph_file);
+	vector<vector<int>> cluster;
+	if (use_edge_parallel) {
+		// Use edge-partitioning parallel Louvain (RECOMMENDED - simpler & more efficient)
+		cluster = KssdEdgeParallelLouvainCluster(sketches, 0, threshold, threads, kmer_size, resolution, use_warm_start, knn_k, graph_file);
+	} else if (use_parallel_louvain) {
+		// Use graph-partitioning parallel Louvain (alternative approach)
+		cluster = KssdParallelLouvainCluster(sketches, 0, threshold, threads, kmer_size, resolution, graph_file);
+	} else {
+		// Use standard Leiden or Louvain
+		cluster = KssdLeidenCluster(sketches, 0, threshold, threads, kmer_size, resolution, use_leiden, knn_k, graph_file);
+	}
 	
 	printKssdResult(cluster, sketches, sketchByFile, outputFile);
 	cerr << "-----write the cluster result into: " << outputFile << endl;

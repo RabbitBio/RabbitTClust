@@ -73,7 +73,7 @@ int main(int argc, char * argv[]){
 	bool isJaccard = false;
 	bool useFile = false;
 	double threshold = 0.2;
-	int kmerSize = 21;
+	int kmerSize = 19;
 	int sketchSize = 1000;
 	int containCompress = 1000;
 	int drlevel = 3;
@@ -109,10 +109,17 @@ int main(int argc, char * argv[]){
 #ifdef LEIDEN_CLUST
 	double leiden_resolution = 1.0;
 	bool use_louvain = false;  // Default: use Leiden (this is clust-leiden!)
+	int knn_k = 0;  // k-NN parameter: if > 0, keep only k nearest neighbors per node; if 0, use smart defaults
 	string pregraph_path;
+	
+	// Internal flags (auto-controlled, not exposed as CLI options)
+	bool use_edge_parallel = false;
+	bool use_warm_start = false;
+	bool use_parallel_louvain = false;  // DEPRECATED: old graph-partitioning approach, no longer used
 	auto option_leiden_resolution = app.add_option("--resolution", leiden_resolution, "Resolution parameter (higher = more clusters, default 1.0)");
-	auto flag_use_louvain = app.add_flag("--louvain", use_louvain, "Use Louvain algorithm instead of Leiden (default: Leiden)");
-	auto option_pregraph = app.add_option("--pregraph", pregraph_path, "Cluster from pre-built graph (fast resolution adjustment)");
+	auto flag_use_louvain = app.add_flag("--louvain", use_louvain, "Use Louvain algorithm (RECOMMENDED: fast & optimized, auto-enables all optimizations: edge-parallel + warm-start + knn=1000)");
+	auto option_knn = app.add_option("--knn", knn_k, "k-NN filtering: keep only k nearest neighbors per node (default: 1000 for --louvain, 500 for --leiden; use 0 to disable)");
+	auto option_pregraph = app.add_option("--pregraph", pregraph_path, "Cluster from pre-built graph (for fast resolution adjustment)");
 	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
 #elif !defined(GREEDY_CLUST)
 	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
@@ -197,10 +204,46 @@ int main(int argc, char * argv[]){
 		cerr << "-----Resolution parameter: " << leiden_resolution << endl;
 	}
 	
+	// Simplified Louvain: --louvain auto-enables all optimizations
+	if (use_louvain && !use_edge_parallel) {
+		// Auto-enable optimizations for --louvain
+		use_edge_parallel = true;
+		use_warm_start = true;
+		
+		// Auto-select knn if not specified
+		if (knn_k == 0) {
+			knn_k = 1000;  // Default k-NN for large datasets
+			cerr << "-----Auto-enabled: edge-parallel + warm-start + knn=" << knn_k << endl;
+		}
+	}
+	
+	// Smart knn defaults based on expected dataset size
+	if (knn_k == 0) {
+		// If knn not specified and not using louvain, use conservative defaults
+		knn_k = 500;  // Moderate default for Leiden
+		cerr << "-----Auto-selecting k-NN: k=" << knn_k << " (use --knn 0 to disable)" << endl;
+	}
+	
+	if (knn_k > 0 && knn_k < 10) {
+		cerr << "WARNING: --knn value too small (" << knn_k << "), recommend at least 50. Using 50." << endl;
+		knn_k = 50;
+	}
+	
+	// Report algorithm selection
 	if (use_louvain) {
-		cerr << "-----Algorithm: Louvain" << endl;
+		cerr << "-----Algorithm: Louvain (Optimized)" << endl;
+		cerr << "  - Edge-parallel construction" << endl;
+		if (use_warm_start) {
+			cerr << "  - Warm-start initialization" << endl;
+		}
+		if (knn_k > 0) {
+			cerr << "  - k-NN filtering (k=" << knn_k << ")" << endl;
+		}
 	} else {
-		cerr << "-----Algorithm: Leiden (default)" << endl;
+		cerr << "-----Algorithm: Leiden" << endl;
+		if (knn_k > 0) {
+			cerr << "  - k-NN filtering (k=" << knn_k << ")" << endl;
+		}
 	}
 	
 	if (*option_pregraph) {
@@ -210,7 +253,7 @@ int main(int argc, char * argv[]){
 	}
 	
 	if (is_fast && *option_presketched && !*option_append) {
-		clust_from_sketch_leiden(folder_path, outputFile, threshold, leiden_resolution, !use_louvain, threads);
+		clust_from_sketch_leiden(folder_path, outputFile, threshold, leiden_resolution, !use_louvain, use_parallel_louvain, use_edge_parallel, use_warm_start, knn_k, threads);
 		return 0;
 	}
 	
@@ -220,7 +263,7 @@ int main(int argc, char * argv[]){
 	}
 	
 	if(!isSetKmer){
-		kmerSize = 21;
+		kmerSize = 19;
 		cerr << "-----use default kmerSize: " << kmerSize << endl;
 	}
 	
@@ -229,7 +272,7 @@ int main(int argc, char * argv[]){
 			cerr << "ERROR: invalid drlevel " << drlevel << ", should be in [0, 8]" << endl;
 			return 1;
 		}
-		clust_from_genome_leiden(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, threshold, leiden_resolution, !use_louvain, threads);
+		clust_from_genome_leiden(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, threshold, leiden_resolution, !use_louvain, use_parallel_louvain, use_edge_parallel, use_warm_start, knn_k, threads);
 		return 0;
 	} else {
 		cerr << "ERROR: clust-leiden requires --fast option" << endl;
