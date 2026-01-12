@@ -91,6 +91,7 @@ int main(int argc, char * argv[]){
 	string buildDB_folder;
 
 	bool noSave = false;
+	bool use_inverted_index = false;
 
 	auto option_threads = app.add_option("-t, --threads", threads,  "set the thread number, default all CPUs of the platform");
 	auto option_min_len = app.add_option("-m, --min-length", minLen, "set the filter minimum length (minLen), genome length less than minLen will be ignore, default 10,000");
@@ -106,6 +107,7 @@ int main(int argc, char * argv[]){
 	auto option_input = app.add_option("-i, --input", inputFile, "set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)");
 	auto option_presketched = app.add_option("--presketched", folder_path, "clustering by the pre-generated sketch files rather than genomes");
 	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing");
+	auto flag_inverted_index = app.add_flag("--inverted-index", use_inverted_index, "use inverted index optimization for greedy clustering (MinHash only)");
 #ifdef LEIDEN_CLUST
 	double leiden_resolution = 1.0;
 	bool use_louvain = false;  // Default: use Leiden (this is clust-leiden!)
@@ -174,7 +176,7 @@ int main(int argc, char * argv[]){
 //======clust-greedy======================================================================
 	
  if (is_fast && *option_presketched && !*option_append) {
-    clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster);
+    clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster, use_inverted_index);
     return 0;
 } 
 
@@ -299,7 +301,7 @@ int main(int argc, char * argv[]){
 			return 0;
 		}
 		if(*option_presketched && !*option_append){
-			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster);
+			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster, use_inverted_index);
 			return 0;
 		}
 		if(*option_append && !*option_premsted && !*option_presketched){
@@ -333,7 +335,7 @@ int main(int argc, char * argv[]){
 #endif
 	
 	if(*option_presketched && !*option_append){
-		clust_from_sketches(folder_path, outputFile, is_newick_tree, no_dense, threshold, threads);
+		clust_from_sketches(folder_path, outputFile, is_newick_tree, no_dense, threshold, threads, use_inverted_index);
 		return 0;
 	}
 
@@ -347,7 +349,7 @@ int main(int argc, char * argv[]){
 
   }
 	
-	clust_from_genomes(inputFile, outputFile, is_newick_tree, is_linkage_matrix, sketchByFile, no_dense, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads);
+	clust_from_genomes(inputFile, outputFile, is_newick_tree, is_linkage_matrix, sketchByFile, no_dense, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads, use_inverted_index);
 
 	return 0;
 }//end main

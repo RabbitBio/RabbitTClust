@@ -32,6 +32,15 @@ vector<vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
     int kmer_size,
     int batch_size);
 
+// 基于倒排索引的MinHash贪心增量聚类
+// 外层串行 + 内层并行策略，使用动态倒排索引加速交集计算
+vector<vector<int>> MinHashGreedyClusterWithInvertedIndex(
+    vector<SketchInfo>& sketches,
+    int sketch_func_id,
+    double threshold,
+    int threads,
+    int kmer_size);
+
 #endif
 #endif
 

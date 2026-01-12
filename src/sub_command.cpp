@@ -740,7 +740,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		cerr << "-----buildDB: finished building KSSD DB at: " << folder_path << endl;
 	}
 
-	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads){
+	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads, bool use_inverted_index){
 		bool isSave = !noSave;
 		vector<SketchInfo> sketches;
 		int sketch_func_id;
@@ -749,7 +749,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 
 		compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, isSave, threads);
 
-		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_linkage_matrix, no_dense, folder_path, sketch_func_id, threshold, isSave, threads);
+		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_linkage_matrix, no_dense, folder_path, sketch_func_id, threshold, isSave, threads, use_inverted_index);
 	}
 
 	bool tune_kssd_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, int& kmerSize, double& threshold, int &drlevel){
@@ -904,7 +904,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		return true;
 	}
 
-	void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool isContainment, double threshold, int threads, double dedup_dist, int reps_per_cluster){
+	void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool isContainment, double threshold, int threads, double dedup_dist, int reps_per_cluster, bool use_inverted_index){
 		vector<KssdSketchInfo> sketches;
 		vector<vector<int>> cluster;
 		bool sketchByFile;
@@ -1032,7 +1032,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 #endif
 }
 
-	void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, double threshold, int threads){
+	void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, double threshold, int threads, bool use_inverted_index){
 		vector<SketchInfo> sketches;
 		vector<vector<int>> cluster;
 		int sketch_func_id;
@@ -1046,7 +1046,14 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 #ifdef Timer
 		cerr << "========time of load genome Infos and sketch Infos is: " << time1 - time0 << endl;
 #endif
-		cluster = greedyCluster(sketches, sketch_func_id, threshold, threads);
+		// Use inverted index optimization for MinHash if requested
+		if (sketch_func_id == 0 && use_inverted_index) {
+			// Get actual kmer_size from first sketch
+			int kmer_size = sketches[0].minHash->getKmerSize();
+			cluster = MinHashGreedyClusterWithInvertedIndex(sketches, sketch_func_id, threshold, threads, kmer_size);
+		} else {
+			cluster = greedyCluster(sketches, sketch_func_id, threshold, threads);
+		}
 		printResult(cluster, sketches, sketchByFile, outputFile);
 		cerr << "-----write the cluster result into: " << outputFile << endl;
 		cerr << "-----the cluster number of " << outputFile << " is: " << cluster.size() << endl;
@@ -1147,12 +1154,19 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		}
 	}
 
-	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads){
+	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index){
 		vector<vector<int>> cluster;
 		double t2 = get_sec();
 #ifdef GREEDY_CLUST
 		//======clust-greedy====================================================================
-		cluster = greedyCluster(sketches, sketch_func_id, threshold, threads);
+		// Use inverted index optimization for MinHash if requested
+		if (sketch_func_id == 0 && use_inverted_index) {
+			// Get kmer_size from first sketch
+			int kmer_size = sketches[0].minHash->getKmerSize();
+			cluster = MinHashGreedyClusterWithInvertedIndex(sketches, sketch_func_id, threshold, threads, kmer_size);
+		} else {
+			cluster = greedyCluster(sketches, sketch_func_id, threshold, threads);
+		}
 		printResult(cluster, sketches, sketchByFile, outputFile);
 		cerr << "-----write the cluster result into: " << outputFile << endl;
 		cerr << "-----the cluster number of " << outputFile << " is: " << cluster.size() << endl;
