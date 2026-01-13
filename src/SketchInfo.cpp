@@ -20,6 +20,7 @@
 #endif
 
 #include "common.hpp"
+#include "phmap.h"  // Google's Swiss Tables for faster hash maps
 
 #include <omp.h>
 
@@ -270,7 +271,7 @@ void consumer_fasta_task(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq,
 
 }
 
-void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int minLen, int kmerSize, int drlevel, robin_hood::unordered_map<uint32_t, int> *shuffled_map, vector<KssdSketchInfo> *sketches){
+void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunkQueue &dq, int minLen, int kmerSize, int drlevel, const phmap::flat_hash_map<uint32_t, int>* shuffled_map, vector<KssdSketchInfo> *sketches){
 	static const int BaseMap[128] = 
 	{
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
@@ -320,8 +321,8 @@ void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunk
 			tmpKssdSketchInfo.seqInfo = curSeq;
 
 			// parse the sequences 
-			unordered_set<uint32_t> hashValueSet;
-			unordered_set<uint64_t> hashValueSet64;
+			phmap::flat_hash_set<uint32_t> hashValueSet;
+			phmap::flat_hash_set<uint64_t> hashValueSet64;
 
 			uint64_t tuple = 0LLU, rvs_tuple = 0LLU, uni_tuple, dr_tuple, pfilter;
 			int base = 1;
@@ -344,50 +345,43 @@ void consumer_fasta_task_with_kssd(rabbit::fa::FastaDataPool* fastaPool, FaChunk
 				if(base > kmerSize)
 				{
 					uni_tuple = tuple < rvs_tuple ? tuple : rvs_tuple;
-					int dim_id = (uni_tuple & domask) >> (half_outctx_len * 2);
+					uint32_t dim_id = (uni_tuple & domask) >> (half_outctx_len * 2);
 
-					//pfilter = shuffled_dim[dim_id];
-					//if((pfilter >= dim_end) || (pfilter < dim_start)){
-					//	continue;
-					//}
-
-					if(shuffled_map->count(dim_id) == 0){
+					// phmap lookup (fast hash map) - single find operation
+					auto it = shuffled_map->find(dim_id);
+					if(it == shuffled_map->end()) {
 						continue;
 					}
-					pfilter = (*shuffled_map)[dim_id];
-
-					pfilter -= dim_start;
+					pfilter = it->second - dim_start;
 					//dr_tuple = (((uni_tuple & undomask0) + ((uni_tuple & undomask1) << (kmer_size * 2 - half_outctx_len * 4))) >> (drlevel * 4)) + pfilter; 
 					////only when the dim_end is 4096(the pfilter is 12bit in binary and the lowerst 12bit is all 0 
 					dr_tuple = (((uni_tuple & undomask0) | ((uni_tuple & undomask1) << (kmerSize * 2 - half_outctx_len * 4))) >> (drlevel * 4)) | pfilter; 
 
 					if(use64)
-						hashValueSet64.insert(dr_tuple);
+						hashValueSet64.emplace(dr_tuple);
 					else
-						hashValueSet.insert(dr_tuple);
+						hashValueSet.emplace(dr_tuple);
 				}//end if, i > kmer_size
 			}//end for, of a sequence 
 
 			vector<uint32_t> hashArr32;
 			vector<uint64_t> hashArr64;
 			if(use64){
-				for(auto x : hashValueSet64){
-					hashArr64.push_back(x);
-				}
+				hashArr64.reserve(hashValueSet64.size());  // Pre-allocate capacity
+				hashArr64.assign(hashValueSet64.begin(), hashValueSet64.end());  // Direct construction
 			}
 			else{
-				for(auto x : hashValueSet){
-					hashArr32.push_back(x);
-				}
+				hashArr32.reserve(hashValueSet.size());
+				hashArr32.assign(hashValueSet.begin(), hashValueSet.end());
 			}
 
 			tmpKssdSketchInfo.id = r.gid;
 			tmpKssdSketchInfo.totalSeqLength = length;
 			tmpKssdSketchInfo.use64 = use64;
-			tmpKssdSketchInfo.hash32_arr = hashArr32;
-			tmpKssdSketchInfo.hash64_arr = hashArr64;
-			tmpKssdSketchInfo.sketchsize = hashArr32.size();
-      sketches->push_back(tmpKssdSketchInfo);
+			tmpKssdSketchInfo.hash32_arr = std::move(hashArr32);  // Move instead of copy!
+			tmpKssdSketchInfo.hash64_arr = std::move(hashArr64);  // Move instead of copy!
+			tmpKssdSketchInfo.sketchsize = use64 ? tmpKssdSketchInfo.hash64_arr.size() : tmpKssdSketchInfo.hash32_arr.size();  // Fix: use correct size
+			sketches->push_back(std::move(tmpKssdSketchInfo));  // Move instead of copy!
 
 		}
 		rabbit::fa::FastaDataChunk *tmp = faChunk->chunk;
@@ -537,10 +531,13 @@ bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int
 	int dim_start = 0;
 	int dim_end = 1 << 4 * (half_subk - drlevel);
 	int* shuffled_dim = generate_shuffle_dim(half_subk);
-	robin_hood::unordered_map<uint32_t, int> shuffled_map;
+	
+	// Use phmap for fast hash map
+	phmap::flat_hash_map<uint32_t, int> shuffled_map;
+	shuffled_map.reserve(dim_end - dim_start);  // Pre-allocate
 	for(int t = 0; t < dim_size; t++){
 		if(shuffled_dim[t] < dim_end && shuffled_dim[t] >= dim_start){
-			shuffled_map.insert({t, shuffled_dim[t]});
+			shuffled_map.emplace(t, shuffled_dim[t]);
 		}
 	}
 	
@@ -1013,10 +1010,12 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 	uint64_t undomask1 = undomask &	(tupmask >> ((half_k + half_subk) * 2));
 	uint64_t undomask0 = undomask ^ undomask1;
 
-	robin_hood::unordered_map<uint32_t, int> shuffled_map;
+	// Use phmap for fast hash map
+	phmap::flat_hash_map<uint32_t, int> shuffled_map;
+	shuffled_map.reserve(dim_end - dim_start);  // Pre-allocate
 	for(int t = 0; t < dim_size; t++){
 		if(shuffled_dim[t] < dim_end && shuffled_dim[t] >= dim_start){
-			shuffled_map.insert({t, shuffled_dim[t]});
+			shuffled_map.emplace(t, shuffled_dim[t]);
 		}
 	}
 
@@ -1036,8 +1035,8 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 		uint64_t totalLength = 0;
 
 		Vec_SeqInfo curFileSeqs;
-		unordered_set<uint32_t> hashValueSet;
-		unordered_set<uint64_t> hashValueSet64;
+		phmap::flat_hash_set<uint32_t> hashValueSet;
+		phmap::flat_hash_set<uint64_t> hashValueSet64;
 		
 		while(1){
 			int length = kseq_read(ks1);
@@ -1074,27 +1073,22 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 				if(base > kmerSize)
 				{
 					uni_tuple = tuple < rvs_tuple ? tuple : rvs_tuple;
-					int dim_id = (uni_tuple & domask) >> (half_outctx_len * 2);
+					uint32_t dim_id = (uni_tuple & domask) >> (half_outctx_len * 2);
 
-					//pfilter = shuffled_dim[dim_id];
-					//if((pfilter >= dim_end) || (pfilter < dim_start)){
-					//	continue;
-					//}
-					
-					if(shuffled_map.count(dim_id) == 0){
+					// phmap lookup (fast hash map) - single find operation
+					auto it = shuffled_map.find(dim_id);
+					if(it == shuffled_map.end()) {
 						continue;
 					}
-					pfilter = shuffled_map[dim_id];
-
-					pfilter -= dim_start;
+					pfilter = it->second - dim_start;
 					//dr_tuple = (((uni_tuple & undomask0) + ((uni_tuple & undomask1) << (kmer_size * 2 - half_outctx_len * 4))) >> (drlevel * 4)) + pfilter; 
 					////only when the dim_end is 4096(the pfilter is 12bit in binary and the lowerst 12bit is all 0 
 					dr_tuple = (((uni_tuple & undomask0) | ((uni_tuple & undomask1) << (kmerSize * 2 - half_outctx_len * 4))) >> (drlevel * 4)) | pfilter; 
 					
 					if(use64)
-						hashValueSet64.insert(dr_tuple);
+						hashValueSet64.emplace(dr_tuple);
 					else
-						hashValueSet.insert(dr_tuple);
+						hashValueSet.emplace(dr_tuple);
 				}//end if, i > kmer_size
 			}//end for, of a sequence 
 			//exit(0);
@@ -1108,17 +1102,15 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 		vector<uint32_t> hashArr32;
 		vector<uint64_t> hashArr64;
 		
-    if(use64){
-			for(auto x : hashValueSet64){
-				hashArr64.push_back(x);
-			}
-      std::sort(hashArr64.begin(), hashArr64.end());
+		if(use64){
+			hashArr64.reserve(hashValueSet64.size());  // Pre-allocate capacity
+			hashArr64.assign(hashValueSet64.begin(), hashValueSet64.end());  // Direct construction
+			std::sort(hashArr64.begin(), hashArr64.end());
 		}
 		else{
-			for(auto x : hashValueSet){
-				hashArr32.push_back(x);
-			}
-      std::sort(hashArr32.begin(), hashArr32.end());
+			hashArr32.reserve(hashValueSet.size());
+			hashArr32.assign(hashValueSet.begin(), hashValueSet.end());
+			std::sort(hashArr32.begin(), hashArr32.end());
 		}
 
 		#pragma omp critical
@@ -1130,11 +1122,11 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 			tmpKssdSketchInfo.totalSeqLength = totalLength;
 			tmpKssdSketchInfo.fileSeqs = curFileSeqs;
 			tmpKssdSketchInfo.use64 = use64;
-			tmpKssdSketchInfo.hash32_arr = hashArr32;
-			tmpKssdSketchInfo.hash64_arr = hashArr64;
-			tmpKssdSketchInfo.sketchsize = hashArr32.size();
-      if(totalLength >= minLen)//filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
-				sketches.push_back(tmpKssdSketchInfo);
+			tmpKssdSketchInfo.hash32_arr = std::move(hashArr32);  // Move instead of copy!
+			tmpKssdSketchInfo.hash64_arr = std::move(hashArr64);  // Move instead of copy!
+			tmpKssdSketchInfo.sketchsize = use64 ? tmpKssdSketchInfo.hash64_arr.size() : tmpKssdSketchInfo.hash32_arr.size();  // Fix: use correct size
+			if(totalLength >= minLen)//filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
+				sketches.push_back(std::move(tmpKssdSketchInfo));  // Move instead of copy!
 			if(i % 10000 == 0)	cerr << "---finished sketching: " << i << " genomes" << endl;
 		}
 
@@ -1158,13 +1150,14 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 
 	if(use64){
 		double t0 = get_sec();
-		robin_hood::unordered_map<uint64_t, vector<uint32_t>> hash_map_arr;
+		phmap::flat_hash_map<uint64_t, vector<uint32_t>> hash_map_arr;
 		for(size_t i = 0; i < sketches.size(); i++){
 			//#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 			for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
 				uint64_t cur_hash = sketches[i].hash64_arr[j];
-				hash_map_arr.insert({cur_hash, vector<uint32_t>()});
-				hash_map_arr[cur_hash].push_back(i);
+				// Optimized: use try_emplace to avoid double lookup
+				auto [it, inserted] = hash_map_arr.try_emplace(cur_hash);
+				it->second.push_back(i);
 			}
 		}
 		double t1 = get_sec();
