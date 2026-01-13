@@ -91,7 +91,7 @@ int main(int argc, char * argv[]){
 	string buildDB_folder;
 
 	bool noSave = false;
-	bool use_inverted_index = false;
+	bool use_inverted_index = true;  // Default: use inverted index optimization
 
 	auto option_threads = app.add_option("-t, --threads", threads,  "set the thread number, default all CPUs of the platform");
 	auto option_min_len = app.add_option("-m, --min-length", minLen, "set the filter minimum length (minLen), genome length less than minLen will be ignore, default 10,000");
