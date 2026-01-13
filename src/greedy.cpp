@@ -12,7 +12,7 @@
 #include <iomanip>   // For std::setprecision
 #include <cmath>     // For log, exp
 #include <cstring>   // For memset
-#include "robin_hood.h"  // For faster hash maps (2-3x speedup over std::unordered_map)
+#include "phmap.h"  // Google's Swiss Tables (fastest hash map, 3x speedup over std::unordered_map)
 using namespace std;
 
 
@@ -530,19 +530,24 @@ vector<vector<int>> greedyCluster(vector<SketchInfo>& sketches, int sketch_func_
 class DynamicInvertedIndex {
 public:
     // Inverted index: hash -> list of representative IDs containing this hash
-    // Use robin_hood for 2-3x faster lookups compared to std::unordered_map
+    // Use phmap (Google's Swiss Tables) for 3x faster lookups compared to std::unordered_map
     // Made public for direct access in array-based counting optimization
-    robin_hood::unordered_flat_map<uint32_t, std::vector<uint32_t>> index_map;
+    phmap::flat_hash_map<uint32_t, std::vector<uint32_t>> index_map;
     
 private:
     // Set of representative sequences for fast lookup
-    robin_hood::unordered_set<int> representative_set;
+    phmap::flat_hash_set<int> representative_set;
+    // Track minimum query size seen for correct monotonic pruning (handles data fluctuations)
+    int min_query_size_seen = INT_MAX;
     
 public:
     DynamicInvertedIndex() {
         // Pre-allocate to avoid rehashing during construction
-        index_map.reserve(100000);  // Expected unique hashes
-        representative_set.reserve(10000);  // Expected representatives
+        // For large datasets (e.g., 2.7M genomes), unique hashes can be millions
+        // Estimate: ~50K reps × ~1000 hashes/sketch × ~20% uniqueness = ~10M unique hashes
+        // Conservative reserve to avoid expensive rehashing
+        index_map.reserve(10000000);  // 10M unique hashes (adjust based on your dataset)
+        representative_set.reserve(50000);  // Expected representatives (~2% of genomes)
     }
     
     // Add a new representative to the inverted index
@@ -550,8 +555,10 @@ public:
         representative_set.insert(rep_id);
         
         // Insert all hashes of this representative into the index
+        // Optimization: use try_emplace to avoid double lookup (operator[] does find + insert)
         for(uint32_t hash : hash_array) {
-            index_map[hash].push_back(rep_id);
+            auto [it, inserted] = index_map.try_emplace(hash);
+            it->second.push_back(rep_id);
         }
     }
     
@@ -561,6 +568,85 @@ public:
     }
     
     /**
+     * Prune representatives whose size makes them theoretically impossible to match future sequences
+     * Optimized for decreasing size order: sequences are sorted large->small (but may fluctuate)
+     * @param current_size Current query sequence size
+     * @param jaccard_min Minimum jaccard threshold
+     * @param sketches Reference to sketch array to get sizes
+     * @return Number of representatives pruned
+     */
+    template<typename SketchType>
+    size_t prune_too_large_monotonic(int current_size, double jaccard_min, const std::vector<SketchType>& sketches) {
+        // Update minimum query size seen (handles fluctuations in sorted data)
+        int old_min = min_query_size_seen;
+        min_query_size_seen = std::min(min_query_size_seen, current_size);
+        
+        // For decreasing order: future sequences will be <= min_query_size_seen
+        // Max acceptable ratio: sizeQry / sizeRef <= 1 / jaccard_min
+        // So: sizeRef <= min_query_size_seen / jaccard_min
+        // Add safety margin (1.25x = 0.8 factor)
+        int max_acceptable_size = (int)(min_query_size_seen / (jaccard_min * 0.8));
+        
+        // DEBUG: Scan all representatives to see their size distribution
+        int max_rep_size = 0;
+        int min_rep_size = INT_MAX;
+        int count_above_threshold = 0;
+        
+        std::vector<int> to_remove;
+        
+        // Find representatives that are too large (will never match current or future sequences)
+        for(int rep_id : representative_set) {
+            int rep_size = sketches[rep_id].hash32_arr.size();
+            max_rep_size = std::max(max_rep_size, rep_size);
+            min_rep_size = std::min(min_rep_size, rep_size);
+            
+            if(rep_size > max_acceptable_size) {
+                to_remove.push_back(rep_id);
+                count_above_threshold++;
+            }
+        }
+        
+        // DEBUG: Always print to diagnose (with rep size distribution)
+        std::cerr << "  [DEBUG] Rep sizes: min=" << min_rep_size << ", max=" << max_rep_size 
+                 << " | Threshold=" << max_acceptable_size 
+                 << " | Above threshold: " << count_above_threshold << "/" << representative_set.size() << std::endl;
+        
+        if(to_remove.empty()) {
+            return 0;
+        }
+        
+        // Remove from representative set
+        for(int rep_id : to_remove) {
+            representative_set.erase(rep_id);
+        }
+        
+        // Remove from inverted index (expensive but necessary)
+        // Optimization: batch removal to reduce rehashing
+        for(int rep_id : to_remove) {
+            const auto& hash_array = sketches[rep_id].hash32_arr;
+            for(uint32_t hash : hash_array) {
+                auto it = index_map.find(hash);
+                if(it != index_map.end()) {
+                    auto& posting_list = it->second;
+                    posting_list.erase(
+                        std::remove(posting_list.begin(), posting_list.end(), rep_id),
+                        posting_list.end()
+                    );
+                    // If posting list is empty, remove the hash entirely
+                    if(posting_list.empty()) {
+                        index_map.erase(it);
+                    }
+                }
+            }
+        }
+        
+        return to_remove.size();
+    }
+    
+    /**
+     * DEPRECATED: Only kept for batched version compatibility
+     * Main inverted index functions use array-based counting instead
+     * 
      * Compute intersection sizes with all representatives (sparse version)
      * @param hash_array Query sequence's hash array
      * @param intersection_map Output: map[rep_id] = intersection size (only representatives)
@@ -577,36 +663,8 @@ public:
             auto it = index_map.find(hash);
             if(it != index_map.end()) {
                 // Found representatives containing this hash, increment their counts
-                // Only representatives are added to map, non-representatives use no memory
                 for(uint32_t rep_id : it->second) {
                     intersection_map[rep_id]++;
-                }
-            }
-        }
-    }
-    
-    /**
-     * Compute intersection sizes with all representatives (array version for compatibility)
-     * @param hash_array Query sequence's hash array
-     * @param intersection_counts Output: intersection_counts[rep_id] = intersection size
-     */
-    void calculate_intersections(
-        const std::vector<uint32_t>& hash_array,
-        std::vector<int>& intersection_counts) const
-    {
-        // Reset counters (only reset positions of representatives)
-        for(int rep_id : representative_set) {
-            intersection_counts[rep_id] = 0;
-        }
-        
-        // Iterate through each hash of current sequence
-        for(uint32_t hash : hash_array) {
-            auto it = index_map.find(hash);
-            if(it != index_map.end()) {
-                // Found representatives containing this hash, increment their counts
-                // Note: only representative counts will be >0, non-representatives stay 0
-                for(uint32_t rep_id : it->second) {
-                    intersection_counts[rep_id]++;
                 }
             }
         }
@@ -616,8 +674,12 @@ public:
         return representative_set.size();
     }
     
-    const robin_hood::unordered_set<int>& get_representatives() const {
+    const phmap::flat_hash_set<int>& get_representatives() const {
         return representative_set;
+    }
+    
+    int get_min_query_size_seen() const {
+        return min_query_size_seen;
     }
     
     void clear() {
@@ -688,14 +750,24 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
     std::cerr << "Threads: " << threads << std::endl;
     std::cerr << "K-mer size: " << kmer_size << std::endl;
     
+    // ===== Sort sketches by size (descending) for monotonic pruning =====
+    std::cerr << "\nSorting sketches by size (descending order)..." << std::endl;
+    std::sort(sketches.begin(), sketches.end(), 
+              [](const KssdSketchInfo& a, const KssdSketchInfo& b) {
+                  return a.hash32_arr.size() > b.hash32_arr.size();  // Descending
+              });
+    std::cerr << "Sorting completed: [" << sketches[0].hash32_arr.size() 
+             << " ... " << sketches[numGenomes-1].hash32_arr.size() << "]" << std::endl;
+    
     // Initialize data structures
     std::vector<int> clustLabels(numGenomes, 0);
-    std::unordered_map<int, std::vector<int>> semiClust;
-    std::vector<int> representativeArr;
     
-    // Calculate size ratio filter (prefilter impossible matches)
-    double size_ratio_filter = calculateMaxSizeRatio(threshold, kmer_size);
-    std::cerr << "Size ratio filter: " << size_ratio_filter << std::endl;
+    // Optimized cluster storage: use array + vector<vector<int>> instead of unordered_map
+    // rep2cid[genome_id] = cluster_id (-1 if not a representative)
+    std::vector<int> rep2cid(numGenomes, -1);
+    std::vector<int> representativeArr;  // List of representative genome IDs
+    std::vector<std::vector<int>> cluster_members;  // cluster_members[cid] = member list (without center)
+    
     std::cerr << "========================================\n" << std::endl;
     
     // Initialize dynamic inverted index
@@ -703,7 +775,8 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
     
     // First sequence as initial representative
     representativeArr.push_back(0);
-    semiClust[0] = std::vector<int>();
+    rep2cid[0] = 0;  // First representative gets cluster ID 0
+    cluster_members.emplace_back();  // Empty member list for first cluster
     dynamic_index.add_representative(0, sketches[0].hash32_arr);
     
     // Thread-local storage to avoid critical sections
@@ -728,7 +801,6 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
     
     // Statistics
     uint64_t total_comparisons = 0;
-    uint64_t filtered_by_size = 0;
     uint64_t filtered_by_common = 0;  // Filtered by insufficient common hashes
     uint64_t skipped_no_intersection = 0;  // Skipped representatives with no intersection
     
@@ -738,10 +810,55 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
     double x = std::exp(-threshold * kmer_size);
     double jaccard_min = x / (2.0 - x);
     
+    // Adaptive pruning interval based on dataset size
+    // Small datasets (~200K): prune every 100K (more frequent)
+    // Large datasets (~2M+): prune every 1M (less overhead)
+    int prune_interval = (numGenomes < 500000) ? 100000 : 1000000;
+    int prune_start = prune_interval;  // Start pruning after first interval
+    
+    // ===== DEBUG: Print sketch sizes to understand data distribution =====
+    std::cerr << "\n=== Data Distribution Analysis ===" << std::endl;
+    std::cerr << "First sequence sketch size: " << sketches[0].hash32_arr.size() << std::endl;
+    if(numGenomes >= 100) {
+        std::cerr << "Sequence 100 sketch size: " << sketches[99].hash32_arr.size() << std::endl;
+    }
+    if(numGenomes >= 1000) {
+        std::cerr << "Sequence 1000 sketch size: " << sketches[999].hash32_arr.size() << std::endl;
+    }
+    if(numGenomes >= 10000) {
+        std::cerr << "Sequence 10000 sketch size: " << sketches[9999].hash32_arr.size() << std::endl;
+    }
+    if(numGenomes >= 100000) {
+        std::cerr << "Sequence 100000 sketch size: " << sketches[99999].hash32_arr.size() << std::endl;
+    }
+    if(numGenomes >= 1000000) {
+        std::cerr << "Sequence 1000000 sketch size: " << sketches[999999].hash32_arr.size() << std::endl;
+    }
+    std::cerr << "Last sequence sketch size: " << sketches[numGenomes-1].hash32_arr.size() << std::endl;
+    std::cerr << "===================================\n" << std::endl;
+    
     // ===== Main loop: serial processing of each new sequence =====
     for(int j = 1; j < numGenomes; j++) {
         const std::vector<uint32_t>& query_sketch = sketches[j].hash32_arr;
         int sizeRef = query_sketch.size();
+        
+        // Periodic pruning: remove representatives that are too large (exploiting decreasing size order)
+        // Since sequences are sorted large->small, representatives that are too large for current
+        // sequence will NEVER match any future sequence (which are even smaller)
+        // Frequency adapts to dataset size for optimal performance
+        if(j >= prune_start && j % prune_interval == 0) {
+            int before_prune = dynamic_index.num_representatives();
+            size_t pruned = dynamic_index.prune_too_large_monotonic(sizeRef, jaccard_min, sketches);
+            
+            // Always report pruning (even if pruned == 0, helps debugging)
+            int min_seen = dynamic_index.get_min_query_size_seen();
+            int max_acceptable = (int)(min_seen / (jaccard_min * 0.8));
+            std::cerr << "\n=== Monotonic Pruning at iter " << j << " ===" << std::endl;
+            std::cerr << "  Before: " << before_prune << " reps | After: " << dynamic_index.num_representatives() << " reps" << std::endl;
+            std::cerr << "  Removed: " << pruned << " too-large reps" << std::endl;
+            std::cerr << "  Threshold size: " << max_acceptable << " (min_seen=" << min_seen << ", current=" << sizeRef << ")" << std::endl;
+            std::cerr << "  Jaccard_min: " << std::fixed << std::setprecision(6) << jaccard_min << std::endl;
+        }
         
         // Step 1: Use inverted index with array-based counting (faster than unordered_map)
         // Time complexity: O(sizeRef), cache-friendly sequential access
@@ -777,53 +894,66 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
         
         // Count skipped representatives
         size_t num_candidates = touched.size();
-        size_t num_total_reps = representativeArr.size();
+        size_t num_total_reps = dynamic_index.num_representatives();
         skipped_no_intersection += (num_total_reps - num_candidates);
         
         // No need to convert to candidates vector - touched is already a vector!
         // Just read common from cnt[rep_id] directly
         
-        #pragma omp parallel for num_threads(threads) schedule(dynamic, 64)
-        for(size_t i = 0; i < touched.size(); i++) {
-            int repId = touched[i];
-            int common = cnt[repId];  // Read from array, not from pair
-            int sizeQry = sketches[repId].hash32_arr.size();
+        // Thread-local counters to avoid atomic contention in hot loop
+        #pragma omp parallel num_threads(threads)
+        {
+            // Get thread ID once per parallel region (not per iteration!)
+            int tid = omp_get_thread_num();
             
-            // Optimization 1: Size filtering (skip if size ratio is too large)
-            double ratio = (double)sizeQry / sizeRef;
-            if(ratio > size_ratio_filter || ratio < 1.0 / size_ratio_filter) {
-                #pragma omp atomic
-                filtered_by_size++;
-                continue;
+            uint64_t local_comparisons = 0;
+            uint64_t local_filtered_common = 0;
+            
+            // Thread-local best match
+            double local_best_jaccard = -1.0;
+            int local_best_rep = -1;
+            
+            #pragma omp for schedule(dynamic, 64)
+            for(size_t i = 0; i < touched.size(); i++) {
+                int repId = touched[i];
+                int common = cnt[repId];  // Read from array, not from pair
+                int sizeQry = sketches[repId].hash32_arr.size();
+                
+                // Optimization: Common threshold filtering
+                // Calculate minimum required common for this pair
+                // For standard Mash: jaccard = common / (sizeRef + sizeQry - common)
+                // Required: common >= jaccard_min * (sizeRef + sizeQry) / (1 + jaccard_min)
+                int common_min = (int)std::ceil(jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min));
+                
+                if(common < common_min) {
+                    local_filtered_common++;
+                    continue;
+                }
+                
+                local_comparisons++;
+                
+                // Calculate Jaccard directly (no log/exp needed!)
+                // Jaccard = common / (sizeRef + sizeQry - common)
+                int denom = sizeRef + sizeQry - common;
+                double jaccard = (denom == 0) ? 1.0 : (double)common / denom;
+                
+                // Compare Jaccard directly (larger Jaccard = smaller distance)
+                // Update thread-local best (no array access!)
+                if(jaccard > local_best_jaccard) {
+                    local_best_jaccard = jaccard;
+                    local_best_rep = repId;
+                }
             }
             
-            // Optimization 2: Common threshold filtering
-            // Calculate minimum required common for this pair
-            // For standard Mash: jaccard = common / (sizeRef + sizeQry - common)
-            // Required: common >= jaccard_min * (sizeRef + sizeQry) / (1 + jaccard_min)
-            int common_min = (int)std::ceil(jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min));
+            // Store thread-local best to shared array (only once per thread!)
+            thread_best_matches[tid].jaccard = local_best_jaccard;
+            thread_best_matches[tid].rep_id = local_best_rep;
             
-            if(common < common_min) {
-                #pragma omp atomic
-                filtered_by_common++;
-                continue;
-            }
-            
+            // Aggregate thread-local counters (only 2 atomic ops per thread, not per candidate!)
             #pragma omp atomic
-            total_comparisons++;
-            
-            // Calculate Jaccard directly (no log/exp needed!)
-            // Jaccard = common / (sizeRef + sizeQry - common)
-            int denom = sizeRef + sizeQry - common;
-            double jaccard = (denom == 0) ? 1.0 : (double)common / denom;
-            
-            // Compare Jaccard directly (larger Jaccard = smaller distance)
-            // Only if Jaccard >= jaccard_min (already filtered by common_min above)
-                int tid = omp_get_thread_num();
-            if(jaccard > thread_best_matches[tid].jaccard) {
-                thread_best_matches[tid].jaccard = jaccard;
-                thread_best_matches[tid].rep_id = repId;
-            }
+            total_comparisons += local_comparisons;
+            #pragma omp atomic
+            filtered_by_common += local_filtered_common;
         }
         
         // Step 4: Serial merge: find global best match (largest Jaccard)
@@ -841,20 +971,23 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
         if(best_rep != -1) {
             // Belongs to existing cluster
             clustLabels[j] = 1;
-            semiClust[best_rep].push_back(j);
+            int cid = rep2cid[best_rep];  // O(1) lookup
+            cluster_members[cid].push_back(j);  // O(1) append
         } else {
             // Becomes new representative
+            int new_cid = representativeArr.size();  // Next cluster ID
             representativeArr.push_back(j);
-            semiClust[j] = std::vector<int>();
+            rep2cid[j] = new_cid;  // O(1) assignment
+            cluster_members.emplace_back();  // O(1) create empty member list
             
             // Critical: add new representative to inverted index
             dynamic_index.add_representative(j, sketches[j].hash32_arr);
         }
         
-        // Progress report
-        if(j % 5000 == 0 || j == numGenomes - 1) {
+        // Progress report (reduced frequency to minimize stderr overhead)
+        if(j % 10000 == 0 || j == numGenomes - 1) {
             double clustering_rate = 100.0 * (j - representativeArr.size() + 1) / j;
-            uint64_t total_filtered = filtered_by_size + filtered_by_common;
+            uint64_t total_filtered = filtered_by_common;
             double avg_candidates = (j > 1) ? (double)(total_comparisons + total_filtered) / (j - 1) : 0;
             std::cerr << "Progress: " << j << "/" << numGenomes 
                      << " | Reps: " << representativeArr.size()
@@ -869,10 +1002,13 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
     
     // ===== Build final clustering results =====
     std::vector<std::vector<int>> cluster;
-    cluster.reserve(semiClust.size());
+    cluster.reserve(representativeArr.size());
     
-    for(const auto& [center, members] : semiClust) {
+    for(size_t cid = 0; cid < representativeArr.size(); cid++) {
         std::vector<int> curClust;
+        int center = representativeArr[cid];
+        const auto& members = cluster_members[cid];
+
         curClust.reserve(1 + members.size());
         curClust.push_back(center);
         curClust.insert(curClust.end(), members.begin(), members.end());
@@ -888,12 +1024,11 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
              << std::fixed << std::setprecision(2)
              << (100.0 * (numGenomes - cluster.size()) / numGenomes) << "%" << std::endl;
     std::cerr << "Total distance comparisons: " << total_comparisons << std::endl;
-    std::cerr << "Filtered by size ratio: " << filtered_by_size << std::endl;
     std::cerr << "Filtered by common threshold: " << filtered_by_common << std::endl;
     std::cerr << "Skipped (no intersection): " << skipped_no_intersection << std::endl;
     
-    uint64_t total_candidates = skipped_no_intersection + filtered_by_size + filtered_by_common + total_comparisons;
-    uint64_t total_skipped = skipped_no_intersection + filtered_by_size + filtered_by_common;
+    uint64_t total_candidates = skipped_no_intersection + filtered_by_common + total_comparisons;
+    uint64_t total_skipped = skipped_no_intersection + filtered_by_common;
     double skip_rate = total_candidates > 0 ? (100.0 * total_skipped / total_candidates) : 0;
     std::cerr << "Overall skip rate (inverted index + filters): " 
              << std::fixed << std::setprecision(2) << skip_rate << "%" << std::endl;
@@ -954,31 +1089,34 @@ vector<std::vector<int>> MinHashGreedyClusterWithInvertedIndex(
 
     // Initialize data structures
     std::vector<int> clustLabels(numGenomes, 0);
-    std::unordered_map<int, std::vector<int>> semiClust;
+    
+    // Optimized cluster storage: use array + vector<vector<int>> instead of unordered_map
+    std::vector<int> rep2cid(numGenomes, -1);
     std::vector<int> representativeArr;
+    std::vector<std::vector<int>> cluster_members;
 
-    // Calculate size ratio filter (prefilter impossible matches)
-    double size_ratio_filter = calculateMaxSizeRatio(threshold, kmer_size);
-    std::cerr << "Size ratio filter: " << size_ratio_filter << std::endl;
     std::cerr << "========================================\n" << std::endl;
 
     // Dynamic inverted index for MinHash (using uint64_t hashes)
     class MinHashInvertedIndex {
     public:
         // Inverted index: hash -> list of representative IDs containing this hash
-        // Use robin_hood for 2-3x faster lookups compared to std::unordered_map
+        // Use phmap (Google's Swiss Tables) for 3x faster lookups compared to std::unordered_map
         // Made public for direct access in array-based counting optimization
-        robin_hood::unordered_flat_map<uint64_t, std::vector<uint32_t>> index_map;
+        phmap::flat_hash_map<uint64_t, std::vector<uint32_t>> index_map;
 
     private:
         // Set of representative sequences for fast lookup
-        robin_hood::unordered_set<int> representative_set;
+        phmap::flat_hash_set<int> representative_set;
 
     public:
         MinHashInvertedIndex() {
             // Pre-allocate to avoid rehashing during construction
-            index_map.reserve(100000);  // Expected unique hashes
-            representative_set.reserve(10000);  // Expected representatives
+            // For large datasets (e.g., 2.7M genomes), unique hashes can be millions
+            // Estimate: ~50K reps × ~1000 hashes/sketch × ~20% uniqueness = ~10M unique hashes
+            // Conservative reserve to avoid expensive rehashing
+            index_map.reserve(10000000);  // 10M unique hashes (adjust based on your dataset)
+            representative_set.reserve(50000);  // Expected representatives (~2% of genomes)
         }
 
         // Add a new representative to the inverted index
@@ -986,8 +1124,10 @@ vector<std::vector<int>> MinHashGreedyClusterWithInvertedIndex(
             representative_set.insert(rep_id);
 
             // Insert all hashes of this representative into the index
+            // Optimization: use try_emplace to avoid double lookup (operator[] does find + insert)
             for(uint64_t hash : hash_array) {
-                index_map[hash].push_back(rep_id);
+                auto [it, inserted] = index_map.try_emplace(hash);
+                it->second.push_back(rep_id);
             }
         }
 
@@ -995,36 +1135,14 @@ vector<std::vector<int>> MinHashGreedyClusterWithInvertedIndex(
         bool is_representative(int id) const {
             return representative_set.count(id) > 0;
         }
-
-        /**
-         * Compute intersection sizes with all representatives (sparse version)
-         * @param hash_array Query sequence's hash array
-         * @param intersection_map Output: map[rep_id] = intersection size (only representatives)
-         */
-        void calculate_intersections_sparse(
-            const std::vector<uint64_t>& hash_array,
-            std::unordered_map<int, int>& intersection_map) const
-        {
-            // Clear previous results
-            intersection_map.clear();
-
-            // Iterate through each hash of current sequence
-            for(uint64_t hash : hash_array) {
-                auto it = index_map.find(hash);
-                if(it != index_map.end()) {
-                    // Found representatives containing this hash, increment their counts
-                    for(uint32_t rep_id : it->second) {
-                        intersection_map[rep_id]++;
-                    }
-                }
-            }
-        }
+        
+        // Note: MinHash standard mode uses fixed sketch size, so size-based pruning is not applicable
 
         size_t num_representatives() const {
             return representative_set.size();
         }
 
-        const robin_hood::unordered_set<int>& get_representatives() const {
+        const phmap::flat_hash_set<int>& get_representatives() const {
             return representative_set;
         }
 
@@ -1039,7 +1157,8 @@ vector<std::vector<int>> MinHashGreedyClusterWithInvertedIndex(
 
     // First sequence as initial representative
     representativeArr.push_back(0);
-    semiClust[0] = std::vector<int>();
+    rep2cid[0] = 0;
+    cluster_members.emplace_back();
     std::vector<uint64_t> first_hashes = sketches[0].minHash->storeMinHashes();
     dynamic_index.add_representative(0, first_hashes);
 
@@ -1094,7 +1213,6 @@ vector<std::vector<int>> MinHashGreedyClusterWithInvertedIndex(
 
     // Statistics
     uint64_t total_comparisons = 0;
-    uint64_t filtered_by_size = 0;
     uint64_t filtered_by_common = 0;  // Filtered by insufficient common hashes
     uint64_t skipped_no_intersection = 0;  // Skipped representatives with no intersection
 
@@ -1105,6 +1223,7 @@ vector<std::vector<int>> MinHashGreedyClusterWithInvertedIndex(
         int sizeRef = query_hashes.size();
         bool isContainment = sketches[j].isContainment;
 
+        // Note: MinHash standard mode uses fixed sketch size, no pruning needed
         // Step 1: Use inverted index with array-based counting (faster than unordered_map)
         // Time complexity: O(sizeRef), cache-friendly sequential access
         cur_mark++;  // New epoch for this query
@@ -1139,111 +1258,124 @@ vector<std::vector<int>> MinHashGreedyClusterWithInvertedIndex(
 
         // Count skipped representatives
         size_t num_candidates = touched.size();
-        size_t num_total_reps = representativeArr.size();
+        size_t num_total_reps = dynamic_index.num_representatives();
         skipped_no_intersection += (num_total_reps - num_candidates);
         
         // No need to convert to candidates vector - touched is already a vector!
         // Just read common from cnt[rep_id] directly
 
-        #pragma omp parallel for num_threads(threads) schedule(dynamic, 64)
-        for(size_t i = 0; i < touched.size(); i++) {
-            int repId = touched[i];
-            int common = cnt[repId];  // Read from array, not from pair
-            int sizeQry = sketches[repId].minHash->getSketchSize();
-            bool repIsContainment = sketches[repId].isContainment;
-
-            // Optimization 1: Size filtering (only for containment mode)
-            if(repIsContainment || isContainment) {
-                double ratio = (double)sizeQry / sizeRef;
-                if(ratio > size_ratio_filter || ratio < 1.0 / size_ratio_filter) {
-                    #pragma omp atomic
-                    filtered_by_size++;
-                    continue;
-                }
-            }
-
-            // Optimization 2: Common threshold filtering
-            int common_min;
-            if(all_fixed_size && all_standard_mode && !repIsContainment && !isContainment) {
-                // Use pre-computed common_min for standard MinHash with fixed size
-                common_min = fixed_common_min;
-            } else {
-                // Dynamic calculation for containment or variable size
-                int actual_kmer_size = sketches[repId].minHash->getKmerSize();
-                double x = std::exp(-threshold * actual_kmer_size);
-                double jaccard_min = x / (2.0 - x);
-                
-                if(repIsContainment) {
-                    common_min = (int)std::ceil(jaccard_min * std::min(sizeRef, sizeQry));
-                } else {
-                    common_min = (int)std::ceil(jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min));
-                }
-            }
-            
-            if(common < common_min) {
-                #pragma omp atomic
-                filtered_by_common++;
-                continue;
-            }
-
-            #pragma omp atomic
-            total_comparisons++;
-
-            // Best-match selection strategy:
-            // For standard MinHash with fixed size: compare common directly (faster!)
-            // For containment: still need to compute distance
+        // Thread-local counters to avoid atomic contention in hot loop
+        #pragma omp parallel num_threads(threads)
+        {
+            // Get thread ID once per parallel region (not per iteration!)
             int tid = omp_get_thread_num();
             
-            if(all_fixed_size && all_standard_mode && !repIsContainment && !isContainment) {
-                // Fast path: For fixed-size standard MinHash, larger common => larger Jaccard => smaller distance
-                // So just compare common directly, no need to compute distance!
-                if(common > thread_best_matches[tid].common) {
-                    thread_best_matches[tid].common = common;
-                    thread_best_matches[tid].rep_id = repId;
-                }
-            } else {
-                // Slow path: For containment or variable size, need to compute actual distance
-                int actual_kmer_size = sketches[repId].minHash->getKmerSize();
-                double dist;
-                
-                if(repIsContainment) {
-                    int minSize = std::min(sizeRef, sizeQry);
-                    if(minSize == 0) {
-                        dist = 1.0;
+            uint64_t local_comparisons = 0;
+            uint64_t local_filtered_common = 0;
+            
+            // Thread-local best match (avoids array access in hot loop!)
+            int local_best_common = -1;
+            double local_best_dist = std::numeric_limits<double>::max();
+            int local_best_rep = -1;
+            
+            #pragma omp for schedule(dynamic, 64)
+            for(size_t i = 0; i < touched.size(); i++) {
+                int repId = touched[i];
+                int common = cnt[repId];  // Read from array, not from pair
+                int sizeQry = sketches[repId].minHash->getSketchSize();
+                bool repIsContainment = sketches[repId].isContainment;
+
+                // Optimization: Common threshold filtering
+                int common_min;
+                if(all_fixed_size && all_standard_mode && !repIsContainment && !isContainment) {
+                    // Use pre-computed common_min for standard MinHash with fixed size
+                    common_min = fixed_common_min;
+                } else {
+                    // Dynamic calculation for containment or variable size
+                    int actual_kmer_size = sketches[repId].minHash->getKmerSize();
+                    double x = std::exp(-threshold * actual_kmer_size);
+                    double jaccard_min = x / (2.0 - x);
+                    
+                    if(repIsContainment) {
+                        common_min = (int)std::ceil(jaccard_min * std::min(sizeRef, sizeQry));
                     } else {
-                        double jaccard = (double)common / minSize;
-                        if(jaccard >= 1.0) {
-                            dist = 0.0;
-                        } else if(jaccard <= 0.0) {
-                            dist = 1.0;
-                        } else {
-                            dist = -log(2.0 * jaccard / (1.0 + jaccard)) / actual_kmer_size;
-                            if(dist > 1.0) dist = 1.0;
-                        }
+                        common_min = (int)std::ceil(jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min));
+                    }
+                }
+                
+                if(common < common_min) {
+                    local_filtered_common++;
+                    continue;
+                }
+
+                local_comparisons++;
+
+                // Best-match selection strategy:
+                // For standard MinHash with fixed size: compare common directly (faster!)
+                // For containment: still need to compute distance
+                
+                if(all_fixed_size && all_standard_mode && !repIsContainment && !isContainment) {
+                    // Fast path: For fixed-size standard MinHash, larger common => larger Jaccard => smaller distance
+                    // So just compare common directly, no need to compute distance!
+                    if(common > local_best_common) {
+                        local_best_common = common;
+                        local_best_rep = repId;
                     }
                 } else {
-                    int denom = sizeRef + sizeQry - common;
-                    if(denom == 0) {
-                        dist = 0.0;
-                    } else {
-                        double jaccard = (double)common / denom;
-                        if(jaccard >= 1.0) {
-                            dist = 0.0;
-                        } else if(jaccard <= 0.0) {
+                    // Slow path: For containment or variable size, need to compute actual distance
+                    int actual_kmer_size = sketches[repId].minHash->getKmerSize();
+                    double dist;
+                    
+                    if(repIsContainment) {
+                        int minSize = std::min(sizeRef, sizeQry);
+                        if(minSize == 0) {
                             dist = 1.0;
                         } else {
-                            dist = -log(2.0 * jaccard / (1.0 + jaccard)) / actual_kmer_size;
-                            if(dist > 1.0) dist = 1.0;
+                            double jaccard = (double)common / minSize;
+                            if(jaccard >= 1.0) {
+                                dist = 0.0;
+                            } else if(jaccard <= 0.0) {
+                                dist = 1.0;
+                            } else {
+                                dist = -log(2.0 * jaccard / (1.0 + jaccard)) / actual_kmer_size;
+                                if(dist > 1.0) dist = 1.0;
+                            }
+                        }
+                    } else {
+                        int denom = sizeRef + sizeQry - common;
+                        if(denom == 0) {
+                            dist = 0.0;
+                        } else {
+                            double jaccard = (double)common / denom;
+                            if(jaccard >= 1.0) {
+                                dist = 0.0;
+                            } else if(jaccard <= 0.0) {
+                                dist = 1.0;
+                            } else {
+                                dist = -log(2.0 * jaccard / (1.0 + jaccard)) / actual_kmer_size;
+                                if(dist > 1.0) dist = 1.0;
+                            }
                         }
                     }
+                    
+                    if(dist <= threshold && dist < local_best_dist) {
+                        local_best_dist = dist;
+                        local_best_common = common;
+                        local_best_rep = repId;
+                    }
                 }
-                
-                if(dist <= threshold && dist < thread_best_matches[tid].distance) {
-                    thread_best_matches[tid].distance = dist;
-                    thread_best_matches[tid].common = common;
-                    thread_best_matches[tid].rep_id = repId;
-                }
-            }
+            }  // End of for loop
+            
+            // Store thread-local best to shared array (only once per thread!)
+            thread_best_matches[tid].common = local_best_common;
+            thread_best_matches[tid].distance = local_best_dist;
+            thread_best_matches[tid].rep_id = local_best_rep;
+            
+            // Aggregate thread-local counters (only 2 atomic ops per thread, not per candidate!)
+            #pragma omp atomic
+            total_comparisons += local_comparisons;
+            #pragma omp atomic
+            filtered_by_common += local_filtered_common;
         }
         
         // Step 4: Serial merge: find global best match
@@ -1273,21 +1405,24 @@ vector<std::vector<int>> MinHashGreedyClusterWithInvertedIndex(
         if(best_rep != -1) {
             // Belongs to existing cluster
             clustLabels[j] = 1;
-            semiClust[best_rep].push_back(j);
+            int cid = rep2cid[best_rep];
+            cluster_members[cid].push_back(j);
         } else {
             // Becomes new representative
+            int new_cid = representativeArr.size();
             representativeArr.push_back(j);
-            semiClust[j] = std::vector<int>();
+            rep2cid[j] = new_cid;
+            cluster_members.emplace_back();
             
             // Critical: add new representative to inverted index
             std::vector<uint64_t> new_rep_hashes = sketches[j].minHash->storeMinHashes();
             dynamic_index.add_representative(j, new_rep_hashes);
         }
         
-        // Progress report
-        if(j % 5000 == 0 || j == numGenomes - 1) {
+        // Progress report (reduced frequency to minimize stderr overhead)
+        if(j % 10000 == 0 || j == numGenomes - 1) {
             double clustering_rate = 100.0 * (j - representativeArr.size() + 1) / j;
-            uint64_t total_filtered = filtered_by_size + filtered_by_common;
+            uint64_t total_filtered = filtered_by_common;
             double avg_candidates = (j > 1) ? (double)(total_comparisons + total_filtered) / (j - 1) : 0;
             std::cerr << "Progress: " << j << "/" << numGenomes 
                      << " | Reps: " << representativeArr.size()
@@ -1302,9 +1437,12 @@ vector<std::vector<int>> MinHashGreedyClusterWithInvertedIndex(
     
     // ===== Build final clustering results =====
     std::vector<std::vector<int>> cluster;
-    cluster.reserve(semiClust.size());
+    cluster.reserve(representativeArr.size());
     
-    for(const auto& [center, members] : semiClust) {
+    for(size_t cid = 0; cid < representativeArr.size(); cid++) {
+        int center = representativeArr[cid];
+        const auto& members = cluster_members[cid];
+        
         std::vector<int> curClust;
         curClust.reserve(1 + members.size());
         curClust.push_back(center);
@@ -1321,12 +1459,11 @@ vector<std::vector<int>> MinHashGreedyClusterWithInvertedIndex(
              << std::fixed << std::setprecision(2)
              << (100.0 * (numGenomes - cluster.size()) / numGenomes) << "%" << std::endl;
     std::cerr << "Total distance comparisons: " << total_comparisons << std::endl;
-    std::cerr << "Filtered by size ratio: " << filtered_by_size << std::endl;
     std::cerr << "Filtered by common threshold: " << filtered_by_common << std::endl;
     std::cerr << "Skipped (no intersection): " << skipped_no_intersection << std::endl;
     
-    uint64_t total_candidates = skipped_no_intersection + filtered_by_size + filtered_by_common + total_comparisons;
-    uint64_t total_skipped = skipped_no_intersection + filtered_by_size + filtered_by_common;
+    uint64_t total_candidates = skipped_no_intersection + filtered_by_common + total_comparisons;
+    uint64_t total_skipped = skipped_no_intersection + filtered_by_common;
     double skip_rate = total_candidates > 0 ? (100.0 * total_skipped / total_candidates) : 0;
     std::cerr << "Overall skip rate (inverted index + filters): "
              << std::fixed << std::setprecision(2) << skip_rate << "%" << std::endl;
@@ -1381,8 +1518,6 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
     std::unordered_map<int, std::vector<int>> semiClust;
     DynamicInvertedIndex dynamic_index;
     
-    double size_ratio_filter = calculateMaxSizeRatio(threshold, kmer_size);
-    
     // First sequence as initial representative
     semiClust[0] = std::vector<int>();
     dynamic_index.add_representative(0, sketches[0].hash32_arr);
@@ -1419,10 +1554,6 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
             // Find best representative (directly traverse map, more efficient)
             for(const auto& [repId, common] : intersection_map) {
                 int sizeQry = sketches[repId].hash32_arr.size();
-                double ratio = (double)sizeQry / sizeRef;
-                if(ratio > size_ratio_filter || ratio < 1.0 / size_ratio_filter) {
-                    continue;
-                }
                 
                 double dist = calculate_mash_distance_fast(common, sizeRef, sizeQry, kmer_size);
                 
