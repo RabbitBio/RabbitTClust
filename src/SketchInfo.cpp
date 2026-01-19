@@ -1057,6 +1057,13 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 		}
 	}
 
+	// Pre-compute constants to avoid repeated calculations in hot loop
+	const int kmerSize_x2 = kmerSize * 2;
+	const int drlevel_x4 = drlevel * 4;
+	const int half_outctx_len_x2 = half_outctx_len * 2;
+	const int half_outctx_len_x4 = half_outctx_len * 4;
+	const int kmerSize_x2_minus_half_outctx_len_x4 = kmerSize_x2 - half_outctx_len_x4;
+
 	// parse the sequences 
 	#pragma omp parallel for num_threads(threads) schedule(dynamic)
 	for (int i = 0; i < fileList.size(); i++){
@@ -1076,8 +1083,11 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 		phmap::flat_hash_set<uint32_t> hashValueSet;
 		phmap::flat_hash_set<uint64_t> hashValueSet64;
 		
+		// Thread-local reusable vectors to avoid repeated allocation
+		vector<uint32_t> hashArr32;
+		vector<uint64_t> hashArr64;
+		
 		// Adaptive Pre-allocation for file-level sketching
-		// Pre-allocate based on file size estimate
 		bool first_sequence = true;
 		
 		while(1){
@@ -1093,79 +1103,92 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 				int estimated_kmers = (length >= kmerSize) ? (length - kmerSize + 1) : 0;
 				double dim_filter_ratio = (double)(dim_end - dim_start) / dim_size;
 				double uniqueness_factor = 0.85;
-				int estimated_capacity = (int)(estimated_kmers * dim_filter_ratio * uniqueness_factor * 1.2);  // 1.2× for multi-seq
+				int estimated_capacity = (int)(estimated_kmers * dim_filter_ratio * uniqueness_factor * 1.2);
 				
 				if(use64) {
 					hashValueSet64.reserve(estimated_capacity);
+					hashArr64.reserve(estimated_capacity);
 				} else {
 					hashValueSet.reserve(estimated_capacity);
+					hashArr32.reserve(estimated_capacity);
 				}
 			}
-			string name("noName");
-			string comment("noName");
-			if(ks1->name.s != NULL)
-				name = ks1->name.s;
-			if(ks1->comment.s != NULL)
-				comment = ks1->comment.s;
-			SequenceInfo tmpSeq{name, comment, 0, length};
-			uint64_t tuple = 0LLU, rvs_tuple = 0LLU, uni_tuple, dr_tuple, pfilter;
+			
+			// Optimize string operations: delay creation until needed
+			const char* name_ptr = (ks1->name.s != NULL) ? ks1->name.s : "noName";
+			const char* comment_ptr = (ks1->comment.s != NULL) ? ks1->comment.s : "noName";
+			
+			uint64_t tuple = 0LLU, rvs_tuple = 0LLU;
 			int base = 1;
-			//cerr << "the length is: " << length << endl;
+			const char* seq_ptr = ks1->seq.s;  // Cache pointer for better locality
+			
 			//slide window to generate k-mers and get hashes
-			for(int i = 0; i < length; i++)
+			// Optimized: reduce branches, improve cache locality
+			for(int j = 0; j < length; j++)
 			{
-				//char ch = sequence[i];
-				char ch = ks1->seq.s[i];
-				int basenum = BaseMap[(int)ch];
-				if(basenum != -1)
+				char ch = seq_ptr[j];
+				int basenum = BaseMap[(unsigned char)ch];  // Use unsigned to avoid sign extension
+				
+				// Optimize: combine conditions to reduce branches
+				if(__builtin_expect(basenum != -1, 1))  // Branch prediction hint
 				{
 					tuple = ((tuple << 2) | basenum) & tupmask;
-					rvs_tuple = (rvs_tuple >> 2) + (((uint64_t)basenum ^3LLU) << rev_add_move); 
+					rvs_tuple = (rvs_tuple >> 2) + (((uint64_t)basenum ^ 3LLU) << rev_add_move); 
 					base++;
+					
+					// Check k-mer completion (moved inside valid base branch)
+					if(__builtin_expect(base > kmerSize, 0))  // Unlikely branch
+					{
+						uint64_t uni_tuple = tuple < rvs_tuple ? tuple : rvs_tuple;
+						uint32_t dim_id = (uni_tuple & domask) >> half_outctx_len_x2;
+
+						// Optimized hash map lookup
+						auto it = shuffled_map.find(dim_id);
+						if(__builtin_expect(it == shuffled_map.end(), 0)) {  // Unlikely to miss
+							continue;
+						}
+						int pfilter = it->second - dim_start;
+						uint64_t dr_tuple = (((uni_tuple & undomask0) | 
+						                      ((uni_tuple & undomask1) << kmerSize_x2_minus_half_outctx_len_x4)) 
+						                      >> drlevel_x4) | (uint64_t)pfilter; 
+						
+						if(use64)
+							hashValueSet64.emplace(dr_tuple);
+						else
+							hashValueSet.emplace(dr_tuple);
+					}
 				}
 				else{
 					base = 1;
-
+					tuple = 0LLU;
+					rvs_tuple = 0LLU;
 				}
-				if(base > kmerSize)
-				{
-					uni_tuple = tuple < rvs_tuple ? tuple : rvs_tuple;
-					uint32_t dim_id = (uni_tuple & domask) >> (half_outctx_len * 2);
-
-					// phmap lookup (fast hash map) - single find operation
-					auto it = shuffled_map.find(dim_id);
-					if(it == shuffled_map.end()) {
-						continue;
-					}
-					pfilter = it->second - dim_start;
-					//dr_tuple = (((uni_tuple & undomask0) + ((uni_tuple & undomask1) << (kmer_size * 2 - half_outctx_len * 4))) >> (drlevel * 4)) + pfilter; 
-					////only when the dim_end is 4096(the pfilter is 12bit in binary and the lowerst 12bit is all 0 
-					dr_tuple = (((uni_tuple & undomask0) | ((uni_tuple & undomask1) << (kmerSize * 2 - half_outctx_len * 4))) >> (drlevel * 4)) | pfilter; 
-					
-					if(use64)
-						hashValueSet64.emplace(dr_tuple);
-					else
-						hashValueSet.emplace(dr_tuple);
-				}//end if, i > kmer_size
-			}//end for, of a sequence 
-			//exit(0);
+			}
 			
-			//only save the info of the first sequence for reducing the memory footprint
-			//and the overhead of sorting the sketches vector array.
-			if(curFileSeqs.size() == 0)
+			// Only save the info of the first sequence
+			if(curFileSeqs.size() == 0) {
+				string name(name_ptr);
+				string comment(comment_ptr);
+				SequenceInfo tmpSeq{name, comment, 0, length};
 				curFileSeqs.push_back(tmpSeq);
+			}
 		}//end while, end sketch current file.
 
-		vector<uint32_t> hashArr32;
-		vector<uint64_t> hashArr64;
+		// Reuse vector capacity: clear and reserve to avoid reallocation
+		hashArr32.clear();
+		hashArr64.clear();
 		
 		if(use64){
-			hashArr64.reserve(hashValueSet64.size());  // Pre-allocate capacity
-			hashArr64.assign(hashValueSet64.begin(), hashValueSet64.end());  // Direct construction
+			if(hashArr64.capacity() < hashValueSet64.size()) {
+				hashArr64.reserve(hashValueSet64.size());
+			}
+			hashArr64.assign(hashValueSet64.begin(), hashValueSet64.end());
 			std::sort(hashArr64.begin(), hashArr64.end());
 		}
 		else{
-			hashArr32.reserve(hashValueSet.size());
+			if(hashArr32.capacity() < hashValueSet.size()) {
+				hashArr32.reserve(hashValueSet.size());
+			}
 			hashArr32.assign(hashValueSet.begin(), hashValueSet.end());
 			std::sort(hashArr32.begin(), hashArr32.end());
 		}
