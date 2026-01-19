@@ -204,6 +204,7 @@ vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha){
   return noiseArr;
 }
 
+
 vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold){
   // init from the dictFile and indexFile
   int half_k = info.half_k;
@@ -348,14 +349,6 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
   for(int i = 0; i < threads; i++){
     intersectionArr[i] = new int[sketches.size()];
   }
-  
-  // Pre-allocate vector capacity to avoid reallocation overhead
-  // Estimate: each node may connect to ~log(N) nodes, but we use a conservative estimate
-  size_t estimated_edges_per_thread = std::max((size_t)((N - start_index) * 10 / threads), (size_t)1000);
-  for(int i = 0; i < threads; i++){
-    mstArr[i].reserve(estimated_edges_per_thread);
-  }
-  
   int subSize = 8;
   int id = 0;
   //int tailNum = sketches.size() % subSize;
@@ -367,8 +360,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
   cerr << "---the percentNum is: " << percentNum << endl;
   cerr << "---the start_index is: " << start_index << endl;
   uint64_t percentId = 0;
-  // Use guided scheduling for better load balance and reduced performance variance
-#pragma omp parallel for num_threads(threads) schedule (guided, 16)
+#pragma omp parallel for num_threads(threads) schedule (dynamic)
   for(id = start_index; id < sketches.size() - tailNum; id+=subSize){
     int thread_id = omp_get_thread_num();
     for(int i = id; i < id+subSize; i++){
@@ -377,12 +369,10 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
         for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
           uint64_t hash64 = sketches[i].hash64_arr[j];
           //if(!(dict[hash64/64] & (0x8000000000000000LLU >> (hash64 % 64))))	continue;
-          // Optimize: use find() instead of count() + [] to avoid double lookup
-          auto it = hash_map_arr.find(hash64);
-          if(it == hash_map_arr.end()) continue;
-          //for(auto x : it->second)
-          for(size_t k = 0; k < it->second.size(); k++){
-            size_t cur_index = it->second[k];
+          if(hash_map_arr.count(hash64) == 0) continue;
+          //for(auto x : hash_map_arr[hash64])
+          for(size_t k = 0; k < hash_map_arr[hash64].size(); k++){
+            size_t cur_index = hash_map_arr[hash64][k];
             intersectionArr[thread_id][cur_index]++;
             //cerr << hash64 << '\t' << cur_index << endl;
           }
@@ -513,12 +503,10 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
         for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
           uint64_t hash64 = sketches[i].hash64_arr[j];
           //if(!(dict[hash64/64] & (0x8000000000000000LLU >> (hash64 % 64))))	continue;
-          // Optimize: use find() instead of count() + [] to avoid double lookup
-          auto it = hash_map_arr.find(hash64);
-          if(it == hash_map_arr.end()) continue;
-          //for(auto x : it->second)
-          for(size_t k = 0; k < it->second.size(); k++){
-            size_t cur_index = it->second[k];
+          if(hash_map_arr.count(hash64) == 0) continue;
+          //for(auto x : hash_map_arr[hash64])
+          for(size_t k = 0; k < hash_map_arr[hash64].size(); k++){
+            size_t cur_index = hash_map_arr[hash64][k];
             intersectionArr[0][cur_index]++;
             //cerr << hash64 << '\t' << cur_index << endl;
           }
@@ -621,7 +609,6 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 
   return mst;
 }
-
 
 vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sketch_func_id, int threads, bool no_dense, int** &denseArr, int denseSpan, uint64_t* &aniArr){
   //int denseSpan = 10;
