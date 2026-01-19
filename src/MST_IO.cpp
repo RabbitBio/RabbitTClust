@@ -1,6 +1,7 @@
 #include "MST_IO.h"
 #include "Sketch_IO.h"
 #include <ctime>
+#include <unordered_map>
 using namespace std;
 
 
@@ -84,7 +85,19 @@ void printKssdResult(vector<vector<int>>& cluster, vector<KssdSketchInfo>& sketc
 			for(int j = 0; j < cluster[i].size(); j++)
 			{
 				int curId = cluster[i][j];
-				fprintf(fp, "\t%5d\t%6d\t%12dnt\t%20s\t%20s\t%s\n", j, curId, sketches[curId].totalSeqLength, sketches[curId].fileName.c_str(),  sketches[curId].fileSeqs[0].name.c_str(), sketches[curId].fileSeqs[0].comment.c_str());
+				if(curId < 0 || curId >= (int)sketches.size()){
+					cerr << "ERROR: printKssdResult(), invalid index " << curId << " (sketches.size=" << sketches.size() << "), skipping." << endl;
+					continue;
+				}
+				const char* seqName = "N/A";
+				const char* seqComment = "N/A";
+				if(!sketches[curId].fileSeqs.empty()){
+					seqName = sketches[curId].fileSeqs[0].name.c_str();
+					seqComment = sketches[curId].fileSeqs[0].comment.c_str();
+				}
+				fprintf(fp, "\t%5d\t%6d\t%12dnt\t%20s\t%20s\t%s\n",
+					j, curId, sketches[curId].totalSeqLength,
+					sketches[curId].fileName.c_str(), seqName, seqComment);
 			}
 			fprintf(fp, "\n");
 		}
@@ -96,8 +109,15 @@ void printKssdResult(vector<vector<int>>& cluster, vector<KssdSketchInfo>& sketc
 			fprintf(fp, "the cluster %d is: \n", i);
 			for(int j = 0; j < cluster[i].size(); j++)
 			{
-				int curId = cluster[i][j];		
-				fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n", j, curId, sketches[curId].seqInfo.length, sketches[curId].seqInfo.name.c_str(), sketches[curId].seqInfo.comment.c_str());
+				int curId = cluster[i][j];
+				if(curId < 0 || curId >= (int)sketches.size()){
+					cerr << "ERROR: printKssdResult(), invalid index " << curId << " (sketches.size=" << sketches.size() << "), skipping." << endl;
+					continue;
+				}
+				fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n",
+					j, curId, sketches[curId].seqInfo.length,
+					sketches[curId].seqInfo.name.c_str(),
+					sketches[curId].seqInfo.comment.c_str());
 			}
 			fprintf(fp, "\n");
 		}

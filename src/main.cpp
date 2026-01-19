@@ -72,7 +72,7 @@ int main(int argc, char * argv[]){
 	bool isContainment = false;
 	bool isJaccard = false;
 	bool useFile = false;
-	double threshold = 0.2;
+	double threshold = 0.05;
 	int kmerSize = 19;
 	int sketchSize = 1000;
 	int containCompress = 1000;
@@ -102,6 +102,8 @@ int main(int argc, char * argv[]){
 
 	auto flag_input_list = app.add_flag("-l, --list", sketchByFile, "input is genome list, one genome per line");
 	auto flag_no_save = app.add_flag("-e, --no-save", noSave, "not save the intermediate files, such as sketches or MST");
+	bool save_rep_index = false;
+	auto flag_save_rep = app.add_flag("--save-rep", save_rep_index, "save representative inverted index for incremental clustering (greedy only)");
 	auto option_threshold = app.add_option("-d, --threshold", threshold, "set the distance threshold for clustering");
 	auto option_output = app.add_option("-o, --output", outputFile, "set the output name of cluster result");
 	auto option_input = app.add_option("-i, --input", inputFile, "set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)");
@@ -168,15 +170,20 @@ int main(int argc, char * argv[]){
 		fprintf(stderr, "-----set sketchSize:  %d\n", sketchSize);
 	}
 	if(*option_threshold){
-		fprintf(stderr, "-----set threshold:  %d\n", threshold);
+		fprintf(stderr, "-----set threshold:  %g\n", threshold);
 	}
 
 
 #ifdef GREEDY_CLUST
 //======clust-greedy======================================================================
+	// Set default threshold for greedy clustering if not provided
+	if (!*option_threshold) {
+		threshold = 0.05;  // Default threshold for greedy clustering
+		cerr << "-----use default threshold: " << threshold << endl;
+	}
 	
  if (is_fast && *option_presketched && !*option_append) {
-    clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster, use_inverted_index);
+    clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster, use_inverted_index, save_rep_index);
     return 0;
 } 
 
@@ -198,7 +205,7 @@ int main(int argc, char * argv[]){
 //======clust-leiden======================================================================
 	// Handle algorithm selection
 	if (!*option_threshold) {
-		threshold = 0.2;  // Default threshold for graph construction
+		threshold = 0.05;  // Default threshold for graph construction
 		cerr << "-----use default threshold: " << threshold << endl;
 	}
 	
@@ -283,6 +290,12 @@ int main(int argc, char * argv[]){
 //======clust-leiden======================================================================
 #else
 //======clust-mst=========================================================================
+	// Set default threshold for MST clustering if not provided
+	if (!*option_threshold) {
+		threshold = 0.05;  // Default threshold for MST clustering
+		cerr << "-----use default threshold: " << threshold << endl;
+	}
+	
 	if(is_fast){
 		if(!buildDB_folder.empty()){
 			if(!sketchByFile){
@@ -301,7 +314,7 @@ int main(int argc, char * argv[]){
 			return 0;
 		}
 		if(*option_presketched && !*option_append){
-			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster, use_inverted_index);
+			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster, use_inverted_index, save_rep_index);
 			return 0;
 		}
 		if(*option_append && !*option_premsted && !*option_presketched){
@@ -315,7 +328,7 @@ int main(int argc, char * argv[]){
 		if(!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)){
 			return 1;
 		}
-		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster);
+		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster, save_rep_index);
 		return 0;
 	}
 
@@ -344,7 +357,7 @@ int main(int argc, char * argv[]){
 	}
   if(is_fast){
   
-    clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster);
+    clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster, save_rep_index);
     return 1;
 
   }

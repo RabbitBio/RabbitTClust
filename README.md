@@ -107,6 +107,7 @@ Options:
   --presketched TEXT          clustering by the pre-generated sketch files rather than genomes
   --append TEXT Excludes: --input
                               append genome file or file list with the pre-generated sketch or MST files
+  --save-rep                  save representative inverted index for incremental clustering (note: may slightly affect performance)
 
 # clust-leiden, graph-based clustering module for RabbitTClust (requires igraph)
 Usage: ./clust-leiden [OPTIONS]
@@ -176,6 +177,9 @@ Options:
 # v.2.4.0 or later
 # clust-greedy also supports the efficient Kssd sketch strategy with the --fast flag.
 ./clust-greedy --fast -l -i bacteria.list -o bacteria.fast.greedy.clust
+
+# clust-greedy supports incremental clustering with --presketched and --append
+./clust-greedy --fast --presketched 2023_05_06_09-37-23/ -l --append genome_B.list -o append.greedy.clust
 
 # clust-leiden: graph-based clustering with Leiden algorithm (default)
 # does not require a strict distance threshold, automatically finds community structure

@@ -12,6 +12,7 @@
 #include <iomanip>   // For std::setprecision
 #include <cmath>     // For log, exp
 #include <cstring>   // For memset
+#include <fstream>   // For ifstream, ofstream (binary I/O)
 #include "phmap.h"  // Google's Swiss Tables (fastest hash map, 3x speedup over std::unordered_map)
 using namespace std;
 
@@ -1048,6 +1049,63 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
 }
 
 
+KssdClusterState KssdInitialClusterWithState(
+    vector<KssdSketchInfo>& sketches,
+    const KssdParameters& params,
+    double threshold,
+    int threads,
+    int kmer_size)
+{
+    std::cerr << "\n========================================" << std::endl;
+    std::cerr << "Initial Clustering with State Saving" << std::endl;
+    std::cerr << "========================================\n" << std::endl;
+    
+
+    vector<vector<int>> clusters = KssdGreedyClusterWithInvertedIndex(
+        sketches, 0, threshold, threads, kmer_size);
+    
+
+    KssdClusterState state;
+    state.all_sketches = sketches;
+    state.clusters = clusters;
+    state.params = params;
+    state.threshold = threshold;
+    state.kmer_size = kmer_size;
+    
+
+    state.representative_ids.reserve(clusters.size());
+    state.representatives.reserve(clusters.size());
+    
+    for (const auto& cluster : clusters) {
+        if (!cluster.empty()) {
+            int rep_id = cluster[0];  // 簇的第一个成员是代表
+            state.representative_ids.push_back(rep_id);
+            state.representatives.push_back(sketches[rep_id]);
+        }
+    }
+    
+
+    std::cerr << "\nBuilding inverted index from " << state.representatives.size() 
+             << " representatives..." << std::endl;
+    
+    state.inverted_index.clear();
+    state.inverted_index.reserve(10000000); 
+    
+    for (size_t rep_idx = 0; rep_idx < state.representatives.size(); rep_idx++) {
+        const auto& rep = state.representatives[rep_idx];
+        for (uint32_t hash : rep.hash32_arr) {
+            state.inverted_index[hash].push_back(rep_idx);
+        }
+    }
+    
+    std::cerr << "Inverted index built: " << state.inverted_index.size() << " unique hashes" << std::endl;
+    std::cerr << "State ready for incremental updates!" << std::endl;
+    std::cerr << "========================================\n" << std::endl;
+    
+    return state;
+}
+
+
 /**
  * @brief MinHash Greedy Incremental Clustering with Inverted Index
  *
@@ -1608,6 +1666,317 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
     
     dynamic_index.clear();
     return cluster;
+}
+
+
+bool KssdClusterState::save(const string& filepath) const {
+    std::ofstream ofs(filepath, std::ios::binary);
+    if (!ofs) {
+        std::cerr << "ERROR: Cannot open file for writing: " << filepath << std::endl;
+        return false;
+    }
+    
+
+    ofs.write((char*)&threshold, sizeof(double));
+    ofs.write((char*)&kmer_size, sizeof(int));
+    ofs.write((char*)&params.half_k, sizeof(int));
+    ofs.write((char*)&params.half_subk, sizeof(int));
+    ofs.write((char*)&params.drlevel, sizeof(int));
+    ofs.write((char*)&params.genomeNumber, sizeof(int));
+    
+
+    size_t rep_count = representative_ids.size();
+    ofs.write((char*)&rep_count, sizeof(size_t));
+    ofs.write((char*)representative_ids.data(), sizeof(int) * rep_count);
+    
+
+    size_t sketch_count = all_sketches.size();
+    ofs.write((char*)&sketch_count, sizeof(size_t));
+    for (const auto& sketch : all_sketches) {
+
+        ofs.write((char*)&sketch.id, sizeof(int));
+        ofs.write((char*)&sketch.totalSeqLength, sizeof(uint64_t));
+        ofs.write((char*)&sketch.use64, sizeof(bool));
+        ofs.write((char*)&sketch.sketchsize, sizeof(uint32_t));
+        
+
+        size_t hash32_size = sketch.hash32_arr.size();
+        size_t hash64_size = sketch.hash64_arr.size();
+        ofs.write((char*)&hash32_size, sizeof(size_t));
+        ofs.write((char*)&hash64_size, sizeof(size_t));
+        if (hash32_size > 0) {
+            ofs.write((char*)sketch.hash32_arr.data(), sizeof(uint32_t) * hash32_size);
+        }
+        if (hash64_size > 0) {
+            ofs.write((char*)sketch.hash64_arr.data(), sizeof(uint64_t) * hash64_size);
+        }
+        
+
+        size_t name_len = sketch.fileName.length();
+        ofs.write((char*)&name_len, sizeof(size_t));
+        ofs.write(sketch.fileName.c_str(), name_len);
+    }
+
+    size_t cluster_count = clusters.size();
+    ofs.write((char*)&cluster_count, sizeof(size_t));
+    for (const auto& cluster : clusters) {
+        size_t member_count = cluster.size();
+        ofs.write((char*)&member_count, sizeof(size_t));
+        ofs.write((char*)cluster.data(), sizeof(int) * member_count);
+    }
+    
+
+    size_t index_size = inverted_index.size();
+    ofs.write((char*)&index_size, sizeof(size_t));
+    std::cerr << "Saving inverted index: " << index_size << " unique hashes..." << std::endl;
+    
+    for (const auto& [hash, rep_list] : inverted_index) {
+        ofs.write((char*)&hash, sizeof(uint32_t));
+        size_t list_size = rep_list.size();
+        ofs.write((char*)&list_size, sizeof(size_t));
+        ofs.write((char*)rep_list.data(), sizeof(int) * list_size);
+    }
+    
+    ofs.close();
+    std::cerr << "Saved clustering state to: " << filepath << std::endl;
+    std::cerr << "  - " << sketch_count << " genomes" << std::endl;
+    std::cerr << "  - " << rep_count << " clusters (representatives)" << std::endl;
+    std::cerr << "  - " << index_size << " unique hashes in inverted index" << std::endl;
+    return true;
+}
+
+
+bool KssdClusterState::load(const string& filepath) {
+    std::ifstream ifs(filepath, std::ios::binary);
+    if (!ifs) {
+        std::cerr << "ERROR: Cannot open file for reading: " << filepath << std::endl;
+        return false;
+    }
+    
+
+    ifs.read((char*)&threshold, sizeof(double));
+    ifs.read((char*)&kmer_size, sizeof(int));
+    ifs.read((char*)&params.half_k, sizeof(int));
+    ifs.read((char*)&params.half_subk, sizeof(int));
+    ifs.read((char*)&params.drlevel, sizeof(int));
+    ifs.read((char*)&params.genomeNumber, sizeof(int));
+    
+
+    size_t rep_count;
+    ifs.read((char*)&rep_count, sizeof(size_t));
+    representative_ids.resize(rep_count);
+    ifs.read((char*)representative_ids.data(), sizeof(int) * rep_count);
+    
+
+    size_t sketch_count;
+    ifs.read((char*)&sketch_count, sizeof(size_t));
+    all_sketches.resize(sketch_count);
+    for (auto& sketch : all_sketches) {
+
+        ifs.read((char*)&sketch.id, sizeof(int));
+        ifs.read((char*)&sketch.totalSeqLength, sizeof(uint64_t));
+        ifs.read((char*)&sketch.use64, sizeof(bool));
+        ifs.read((char*)&sketch.sketchsize, sizeof(uint32_t));
+        
+
+        size_t hash32_size, hash64_size;
+        ifs.read((char*)&hash32_size, sizeof(size_t));
+        ifs.read((char*)&hash64_size, sizeof(size_t));
+        if (hash32_size > 0) {
+            sketch.hash32_arr.resize(hash32_size);
+            ifs.read((char*)sketch.hash32_arr.data(), sizeof(uint32_t) * hash32_size);
+        }
+        if (hash64_size > 0) {
+            sketch.hash64_arr.resize(hash64_size);
+            ifs.read((char*)sketch.hash64_arr.data(), sizeof(uint64_t) * hash64_size);
+        }
+        
+
+        size_t name_len;
+        ifs.read((char*)&name_len, sizeof(size_t));
+        sketch.fileName.resize(name_len);
+        ifs.read(&sketch.fileName[0], name_len);
+    }
+    
+
+    representatives.clear();
+    for (int rep_id : representative_ids) {
+        representatives.push_back(all_sketches[rep_id]);
+    }
+    
+    size_t cluster_count;
+    ifs.read((char*)&cluster_count, sizeof(size_t));
+    clusters.resize(cluster_count);
+    for (auto& cluster : clusters) {
+        size_t member_count;
+        ifs.read((char*)&member_count, sizeof(size_t));
+        cluster.resize(member_count);
+        ifs.read((char*)cluster.data(), sizeof(int) * member_count);
+    }
+    
+
+    size_t index_size;
+    ifs.read((char*)&index_size, sizeof(size_t));
+    std::cerr << "Loading inverted index: " << index_size << " unique hashes..." << std::endl;
+    
+    inverted_index.clear();
+    inverted_index.reserve(index_size);
+    
+    for (size_t i = 0; i < index_size; i++) {
+        uint32_t hash;
+        ifs.read((char*)&hash, sizeof(uint32_t));
+        
+        size_t list_size;
+        ifs.read((char*)&list_size, sizeof(size_t));
+        
+        vector<int> rep_list(list_size);
+        ifs.read((char*)rep_list.data(), sizeof(int) * list_size);
+        
+        inverted_index[hash] = std::move(rep_list);
+    }
+    
+    ifs.close();
+    std::cerr << "Loaded clustering state from: " << filepath << std::endl;
+    std::cerr << "  - " << sketch_count << " genomes" << std::endl;
+    std::cerr << "  - " << rep_count << " clusters (representatives)" << std::endl;
+    std::cerr << "  - " << index_size << " unique hashes in inverted index" << std::endl;
+    return true;
+}
+
+
+vector<vector<int>> KssdIncrementalCluster(
+    KssdClusterState& state,
+    vector<KssdSketchInfo>& new_sketches,
+    int threads)
+{
+    std::cerr << "\n========================================" << std::endl;
+    std::cerr << "Incremental Clustering with Inverted Index" << std::endl;
+    std::cerr << "========================================" << std::endl;
+    std::cerr << "Existing clusters: " << state.representatives.size() << std::endl;
+    std::cerr << "New genomes: " << new_sketches.size() << std::endl;
+    std::cerr << "Inverted index size: " << state.inverted_index.size() << " unique hashes" << std::endl;
+    
+    int old_genome_count = state.all_sketches.size();
+    double radio = calculateMaxSizeRatio(state.threshold, state.kmer_size);
+    
+    // Pre-calculate minimum jaccard threshold
+    double x = std::exp(-state.threshold * state.kmer_size);
+    double jaccard_min = x / (2.0 - x);
+    
+
+    int new_genome_start_idx = old_genome_count;
+    for (auto& new_sketch : new_sketches) {
+        state.all_sketches.push_back(new_sketch);
+    }
+    
+
+    int new_clusters = 0;
+    int assigned_to_existing = 0;
+    uint64_t total_candidates = 0;
+    uint64_t total_distance_calcs = 0;
+    
+    for (size_t new_idx = 0; new_idx < new_sketches.size(); new_idx++) {
+        int genome_idx = new_genome_start_idx + new_idx;  // 在 all_sketches 中的索引
+        auto& new_sketch = state.all_sketches[genome_idx];
+        int sizeQry = new_sketch.hash32_arr.size();
+        
+        phmap::flat_hash_map<int, int> candidate_counts;  // rep_idx → intersection count
+        candidate_counts.reserve(1000); 
+        
+        for (uint32_t hash : new_sketch.hash32_arr) {
+            auto it = state.inverted_index.find(hash);
+            if (it != state.inverted_index.end()) {
+                for (int rep_idx : it->second) {
+                    candidate_counts[rep_idx]++;
+                }
+            }
+        }
+        
+        total_candidates += candidate_counts.size();
+        
+
+        double best_dist = std::numeric_limits<double>::max();
+        int best_rep_idx = -1;
+        
+
+        std::vector<std::pair<int, int>> candidates;  // (rep_idx, intersection_count)
+        candidates.reserve(candidate_counts.size());
+        for (const auto& [rep_idx, cnt] : candidate_counts) {
+            candidates.emplace_back(rep_idx, cnt);
+        }
+        
+        #pragma omp parallel for num_threads(threads) schedule(dynamic)
+        for (size_t i = 0; i < candidates.size(); i++) {
+            int rep_idx = candidates[i].first;
+            int common = candidates[i].second;
+            
+            const auto& rep = state.representatives[rep_idx];
+            int sizeRef = rep.hash32_arr.size();
+            
+            // Size ratio filtering
+            double ratio = (double)sizeQry / sizeRef;
+            if (ratio > radio || ratio < 1.0 / radio) {
+                continue;
+            }
+            
+            // Common filtering: min_jaccard = common / (sizeQry + sizeRef - common)
+            // => common >= jaccard_min * (sizeQry + sizeRef) / (1 + jaccard_min)
+            int min_common_needed = (int)(jaccard_min * (sizeQry + sizeRef) / (1.0 + jaccard_min));
+            if (common < min_common_needed) {
+                continue;
+            }
+            
+            // Calculate precise distance
+            #pragma omp atomic
+            total_distance_calcs++;
+            
+            double dist = distance(rep.hash32_arr, new_sketch.hash32_arr, state.kmer_size);
+            
+            if (dist <= state.threshold) {
+                #pragma omp critical
+                {
+                    if (dist < best_dist) {
+                        best_dist = dist;
+                        best_rep_idx = rep_idx;
+                    }
+                }
+            }
+        }
+        
+        
+        if (best_rep_idx != -1) {
+
+            state.clusters[best_rep_idx].push_back(genome_idx);
+            assigned_to_existing++;
+        } else {
+  
+            int new_rep_idx = state.representatives.size();
+            state.representative_ids.push_back(genome_idx);
+            state.representatives.push_back(new_sketch);
+            state.clusters.push_back(vector<int>()); 
+            new_clusters++;
+            
+
+            for (uint32_t hash : new_sketch.hash32_arr) {
+                state.inverted_index[hash].push_back(new_rep_idx);
+            }
+        }
+        
+        if ((new_idx + 1) % 10000 == 0) {
+            std::cerr << "---finished clustering: " << (new_idx + 1) << " new genomes" << std::endl;
+        }
+    }
+    
+    std::cerr << "\n===== Incremental Clustering Results =====" << std::endl;
+    std::cerr << "Assigned to existing clusters: " << assigned_to_existing << std::endl;
+    std::cerr << "New clusters created: " << new_clusters << std::endl;
+    std::cerr << "Total clusters now: " << state.clusters.size() << std::endl;
+    std::cerr << "Average candidates per query: " << (total_candidates / (double)new_sketches.size()) << std::endl;
+    std::cerr << "Total distance calculations: " << total_distance_calcs << std::endl;
+    std::cerr << "Speedup ratio: " << (state.representatives.size() * new_sketches.size() / (double)total_distance_calcs) << "x" << std::endl;
+    std::cerr << "=========================================\n" << std::endl;
+    
+    return state.clusters;
 }
 
 
