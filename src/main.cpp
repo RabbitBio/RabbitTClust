@@ -348,7 +348,7 @@ int main(int argc, char * argv[]){
 #endif
 	
 	if(*option_presketched && !*option_append){
-		clust_from_sketches(folder_path, outputFile, is_newick_tree, no_dense, threshold, threads, use_inverted_index);
+		clust_from_sketches(folder_path, outputFile, is_newick_tree, no_dense, threshold, threads, use_inverted_index, save_rep_index);
 		return 0;
 	}
 
@@ -362,7 +362,7 @@ int main(int argc, char * argv[]){
 
   }
 	
-	clust_from_genomes(inputFile, outputFile, is_newick_tree, is_linkage_matrix, sketchByFile, no_dense, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads, use_inverted_index);
+	clust_from_genomes(inputFile, outputFile, is_newick_tree, is_linkage_matrix, sketchByFile, no_dense, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads, use_inverted_index, save_rep_index);
 
 	return 0;
 }//end main

@@ -12,14 +12,14 @@ using namespace std;
 
 void compute_sketches(vector<SketchInfo>& sketches, string inputFile, string& folder_path, bool sketchByFile, int minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, bool isSave, int threads);
 
-void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index);
+void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index, bool save_rep_index);
 
-void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads, bool use_inverted_index);
+void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads, bool use_inverted_index, bool save_rep_index);
 
 bool tune_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, bool& isJaccard, int& kmerSize, double& threshold, int& containCompress, int& sketchSize);
 bool tune_kssd_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, int& kmerSize, double& threshold, int &drlevel);
 
-void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, double threshold, int threads, bool use_inverted_index);
+void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, double threshold, int threads, bool use_inverted_index, bool save_rep_index);
 
 void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, double threshold, int threads);
 void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, double threshold, int threads);

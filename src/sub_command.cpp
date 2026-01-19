@@ -10,142 +10,253 @@ using namespace std;
 
 #ifdef GREEDY_CLUST
 void append_clust_greedy(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
-	int sketch_func_id_0; 
-	vector<SketchInfo> pre_sketches; 
-	bool pre_sketch_by_file = loadSketches(folder_path, threads, pre_sketches, sketch_func_id_0); 
-	if(pre_sketch_by_file != sketch_by_file){
-		cerr << "ERROR: append_clust_mst(), the input format of append genomes and pre-sketched genome is not same (single input genome vs. genome list)" << endl;
-		//cerr << "the output cluster file may not have the genome file name" << endl;
-		exit(1);
+	bool isSave = !no_save;
+	
+	// Check for existing cluster state (MinHash incremental update)
+	string state_file = folder_path + "/cluster_state.bin";
+	MinHashClusterState minhash_state;
+	struct stat buffer;
+	bool has_state = (stat(state_file.c_str(), &buffer) == 0);
+	
+	if (has_state) {
+		cerr << "===== Incremental Update Mode (MinHash) =====" << endl;
+		cerr << "Found existing cluster state, loading..." << endl;
+		has_state = minhash_state.load(state_file);
 	}
-	int sketch_func_id_1, kmer_size, contain_compress, sketch_size, half_k, half_subk, drlevel;
-	bool is_containment;
-	read_sketch_parameters(folder_path, sketch_func_id_1, kmer_size, is_containment, contain_compress, sketch_size, half_k, half_subk, drlevel);
-	assert(sketch_func_id_0 == sketch_func_id_1);
-	cerr << "-----use the same sketch parameters with pre-generated sketches" << endl;
-	if(sketch_func_id_0 == 0){
-		cerr << "---the kmer size is: " << kmer_size << endl;
-		if(is_containment)
-			cerr << "---use the AAF distance (variable-sketch-size), the sketch size is in proportion with 1/" << contain_compress << endl;
-		else 
-			cerr << "---use the Mash distance (fixed-sketch-size), the sketch size is: " << sketch_size << endl;
+	
+	if (!has_state) {
+		// No state file, perform initial clustering (old behavior for backward compatibility)
+		int sketch_func_id_0; 
+		vector<SketchInfo> pre_sketches; 
+		bool pre_sketch_by_file = loadSketches(folder_path, threads, pre_sketches, sketch_func_id_0); 
+		if(pre_sketch_by_file != sketch_by_file){
+			cerr << "ERROR: append_clust_greedy(), the input format of append genomes and pre-sketched genome is not same (single input genome vs. genome list)" << endl;
+			exit(1);
+		}
+		int sketch_func_id_1, kmer_size, contain_compress, sketch_size, half_k, half_subk, drlevel;
+		bool is_containment;
+		read_sketch_parameters(folder_path, sketch_func_id_1, kmer_size, is_containment, contain_compress, sketch_size, half_k, half_subk, drlevel);
+		assert(sketch_func_id_0 == sketch_func_id_1);
+		cerr << "-----use the same sketch parameters with pre-generated sketches" << endl;
+		if(sketch_func_id_0 == 0){
+			cerr << "---the kmer size is: " << kmer_size << endl;
+			if(is_containment)
+				cerr << "---use the AAF distance (variable-sketch-size), the sketch size is in proportion with 1/" << contain_compress << endl;
+			else 
+				cerr << "---use the Mash distance (fixed-sketch-size), the sketch size is: " << sketch_size << endl;
+		}
+		else if(sketch_func_id_0 == 1){
+			cerr << "---use the KSSD sketches" << endl;
+			cerr << "---the half_k is: " << half_k << endl;
+			cerr << "---the half_subk is: " << half_subk << endl;
+			cerr << "---the drlevel is: " << drlevel << endl;
+		}
+		cerr << "---the thread number is: " << threads << endl;
+		cerr << "---the threshold is: " << threshold << endl;
+		string sketch_func;
+		if(sketch_func_id_0 == 0) 
+			sketch_func = "MinHash";
+		else if(sketch_func_id_0 == 1)
+			sketch_func = "KSSD";
+		vector<SketchInfo> append_sketches;
+		string append_folder_path;
+		compute_sketches(append_sketches, input_file, append_folder_path, sketch_by_file, min_len, kmer_size, sketch_size, sketch_func, is_containment, contain_compress, false, threads);
+		vector<SketchInfo> final_sketches;
+		final_sketches.insert(final_sketches.end(), pre_sketches.begin(), pre_sketches.end());
+		final_sketches.insert(final_sketches.end(), append_sketches.begin(), append_sketches.end());
+		if(sketch_by_file)
+			sort(final_sketches.begin(), final_sketches.end(), cmpGenomeSize);
+		else
+			sort(final_sketches.begin(), final_sketches.end(), cmpSeqSize);
+		vector<SketchInfo>().swap(pre_sketches);
+		vector<SketchInfo>().swap(append_sketches);
+		string new_folder_path = currentDataTime();
+		if(!no_save){
+			string command = "mkdir -p " + new_folder_path;
+			system(command.c_str());
+			saveSketches(final_sketches, new_folder_path, sketch_by_file, sketch_func, is_containment, contain_compress, sketch_size, kmer_size);
+		}
+		vector<vector<int>> cluster;
+		cluster = greedyCluster(final_sketches, sketch_func_id_0, threshold, threads);
+		printResult(cluster, final_sketches, sketch_by_file, output_file);
+		cerr << "-----write the cluster result into: " << output_file << endl;
+		cerr << "-----the cluster number of " << output_file << " is: " << cluster.size() << endl;
+	} else {
+		// Incremental update mode (MinHash)
+		cerr << "---the threshold is: " << threshold << endl;
+		cerr << "---the thread number is: " << threads << endl;
+		
+		// Reload all existing sketches from files (MinHash objects cannot be easily reconstructed)
+		int sketch_func_id_0;
+		vector<SketchInfo> pre_sketches;
+		bool pre_sketch_by_file = loadSketches(folder_path, threads, pre_sketches, sketch_func_id_0);
+		if(pre_sketch_by_file != sketch_by_file){
+			cerr << "Warning: the input format of append genomes and pre-sketched genome is not same" << endl;
+		}
+		
+		// Rebuild representatives from loaded sketches
+		minhash_state.all_sketches = pre_sketches;
+		minhash_state.representatives.clear();
+		minhash_state.representatives.reserve(minhash_state.representative_ids.size());
+		
+		// Build mapping from old rep_id to new rep_idx
+		vector<int> valid_rep_ids;
+		valid_rep_ids.reserve(minhash_state.representative_ids.size());
+		
+		for (int rep_id : minhash_state.representative_ids) {
+			if (rep_id >= 0 && rep_id < pre_sketches.size()) {
+				if (pre_sketches[rep_id].minHash != nullptr) {
+					minhash_state.representatives.push_back(pre_sketches[rep_id]);
+					valid_rep_ids.push_back(rep_id);
+				} else {
+					cerr << "ERROR: Representative " << rep_id << " has null minHash, cannot continue" << endl;
+					exit(1);
+				}
+			} else {
+				cerr << "ERROR: Representative ID " << rep_id << " out of range [0, " << pre_sketches.size() << "), cannot continue" << endl;
+				exit(1);
+			}
+		}
+		
+		// Update representative_ids to match the new representatives
+		minhash_state.representative_ids = valid_rep_ids;
+		
+		cerr << "Successfully loaded " << minhash_state.representatives.size() << " representatives" << endl;
+		
+		// Rebuild inverted index from representatives
+		cerr << "Rebuilding inverted index..." << endl;
+		minhash_state.build_inverted_index();
+		cerr << "Inverted index rebuilt: " << minhash_state.inverted_index.size() << " unique hashes" << endl;
+		
+		// Load sketch parameters to get contain_compress
+		int sketch_func_id_1, kmer_size, contain_compress, sketch_size, half_k, half_subk, drlevel;
+		bool is_containment;
+		read_sketch_parameters(folder_path, sketch_func_id_1, kmer_size, is_containment, contain_compress, sketch_size, half_k, half_subk, drlevel);
+		
+		// Validate parameters
+		if (minhash_state.kmer_size <= 0 || minhash_state.sketch_size <= 0) {
+			cerr << "ERROR: Invalid kmer_size or sketch_size: kmer=" << minhash_state.kmer_size 
+			     << ", sketch=" << minhash_state.sketch_size << endl;
+			exit(1);
+		}
+		
+		// Use contain_compress from loaded parameters (not 0)
+		if (minhash_state.is_containment && contain_compress <= 0) {
+			cerr << "ERROR: is_containment is true but contain_compress is " << contain_compress << endl;
+			exit(1);
+		}
+		
+		string sketch_func = "MinHash";
+		vector<SketchInfo> new_sketches;
+		string new_folder_path;
+		cerr << "Computing sketches for new genomes..." << endl;
+		cerr << "  Parameters: kmer_size=" << minhash_state.kmer_size 
+		     << ", sketch_size=" << minhash_state.sketch_size 
+		     << ", is_containment=" << minhash_state.is_containment 
+		     << ", contain_compress=" << contain_compress << endl;
+		compute_sketches(new_sketches, input_file, new_folder_path, sketch_by_file, min_len, minhash_state.kmer_size, minhash_state.sketch_size, sketch_func, minhash_state.is_containment, contain_compress, false, threads);
+		
+		cerr << "New genomes sketched: " << new_sketches.size() << endl;
+		
+		if (new_sketches.empty()) {
+			cerr << "ERROR: No new sketches generated" << endl;
+			return;
+		}
+		
+		cerr << "Starting incremental clustering..." << endl;
+		vector<vector<int>> cluster = MinHashIncrementalCluster(minhash_state, new_sketches, threads);
+		cerr << "Incremental clustering completed" << endl;
+		
+		if (!no_save) {
+			minhash_state.save(folder_path + "/cluster_state.bin");
+		}
+		
+		printResult(cluster, minhash_state.all_sketches, sketch_by_file, output_file);
+		cerr << "-----write the cluster result into: " << output_file << endl;
+		cerr << "-----the cluster number of " << output_file << " is: " << cluster.size() << endl;
+		cerr << "-----updated cluster state saved" << endl;
 	}
-	else if(sketch_func_id_0 == 1){
-		cerr << "---use the KSSD sketches" << endl;
-		cerr << "---the half_k is: " << half_k << endl;
-		cerr << "---the half_subk is: " << half_subk << endl;
-		cerr << "---the drlevel is: " << drlevel << endl;
-	}
-	cerr << "---the thread number is: " << threads << endl;
-	cerr << "---the threshold is: " << threshold << endl;
-	string sketch_func;
-	if(sketch_func_id_0 == 0) 
-		sketch_func = "MinHash";
-	else if(sketch_func_id_0 == 1)
-		sketch_func = "KSSD";
-	vector<SketchInfo> append_sketches;
-	string append_folder_path;
-	compute_sketches(append_sketches, input_file, append_folder_path, sketch_by_file, min_len, kmer_size, sketch_size, sketch_func, is_containment, contain_compress, false, threads);
-	vector<SketchInfo> final_sketches;
-	final_sketches.insert(final_sketches.end(), pre_sketches.begin(), pre_sketches.end());
-	final_sketches.insert(final_sketches.end(), append_sketches.begin(), append_sketches.end());
-	if(sketch_by_file)
-		sort(final_sketches.begin(), final_sketches.end(), cmpGenomeSize);
-	else
-		sort(final_sketches.begin(), final_sketches.end(), cmpSeqSize);
-	vector<SketchInfo>().swap(pre_sketches);
-	vector<SketchInfo>().swap(append_sketches);
-	string new_folder_path = currentDataTime();
-	if(!no_save){
-		string command = "mkdir -p " + new_folder_path;
-		system(command.c_str());
-		saveSketches(final_sketches, new_folder_path, sketch_by_file, sketch_func, is_containment, contain_compress, sketch_size, kmer_size);
-	}
-	vector<vector<int>> cluster;
-	cluster = greedyCluster(final_sketches, sketch_func_id_0, threshold, threads);
-	printResult(cluster, final_sketches, sketch_by_file, output_file);
-	cerr << "-----write the cluster result into: " << output_file << endl;
-	cerr << "-----the cluster number of " << output_file << " is: " << cluster.size() << endl;
 }
 
 void append_clust_greedy_fast(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
 	bool isSave = !no_save;
 	
+	// --fast means KSSD, so we only handle KSSD here
 	string state_file = folder_path + "/cluster_state.bin";
-	KssdClusterState state;
-	bool has_state = false;
-	
+	KssdClusterState kssd_state;
 	struct stat buffer;
-	if (stat(state_file.c_str(), &buffer) == 0) {
-		cerr << "===== Incremental Update Mode =====" << endl;
+	bool has_state = (stat(state_file.c_str(), &buffer) == 0);
+	
+	if (has_state) {
+		cerr << "===== Incremental Update Mode (KSSD) =====" << endl;
 		cerr << "Found existing cluster state, loading..." << endl;
-		has_state = state.load(state_file);
+		has_state = kssd_state.load(state_file);
 	}
 	
 	if (!has_state) {
-		cerr << "===== Initial State Building Mode =====" << endl;
-		cerr << "No existing state found, building state from pre-sketched genomes..." << endl;
-		
-		vector<KssdSketchInfo> pre_sketches; 
-		KssdParameters pre_info;
-		bool pre_sketch_by_file = loadKssdSketches(folder_path, threads, pre_sketches, pre_info); 
-		if(pre_sketch_by_file != sketch_by_file){
-			cerr << "Warning: the input format of append genomes and pre-sketched genome is not same" << endl;
-		}
-		
-		int kmer_size = pre_info.half_k * 2;
-		int drlevel = pre_info.drlevel;
-		
-		cerr << "-----use the same sketch parameters with pre-generated sketches" << endl;
-		cerr << "---use the KSSD sketches" << endl;
-		cerr << "---the half_k is: " << pre_info.half_k << endl;
-		cerr << "---the half_subk is: " << pre_info.half_subk << endl;
-		cerr << "---the drlevel is: " << drlevel << endl;
-		cerr << "---the threshold is: " << threshold << endl;
-		
-		vector<KssdSketchInfo> append_sketches;
-		KssdParameters append_info;
-		string append_folder_path;
-		compute_kssd_sketches(append_sketches, append_info, isSave, input_file, append_folder_path, sketch_by_file, min_len, kmer_size, drlevel, threads);
-		
-		state = KssdInitialClusterWithState(pre_sketches, pre_info, threshold, threads, kmer_size);
-		
-		if (!no_save) {
-			state.save(folder_path + "/cluster_state.bin");
-		}
-		
-		vector<vector<int>> cluster = KssdIncrementalCluster(state, append_sketches, threads);
-		
-		if (!no_save) {
-			state.save(folder_path + "/cluster_state.bin");
-		}
-		
-		printKssdResult(cluster, state.all_sketches, sketch_by_file, output_file);
-		cerr << "-----write the cluster result into: " << output_file << endl;
-		cerr << "-----the cluster number of " << output_file << " is: " << cluster.size() << endl;
-		cerr << "-----saved cluster state (with inverted index) for future incremental updates" << endl;
-		
-	} else {
-		cerr << "---the threshold is: " << threshold << endl;
-		cerr << "---the thread number is: " << threads << endl;
-		
-		vector<KssdSketchInfo> new_sketches;
-		KssdParameters new_info;
-		string new_folder_path;
-		compute_kssd_sketches(new_sketches, new_info, isSave, input_file, new_folder_path, sketch_by_file, min_len, state.kmer_size, state.params.drlevel, threads);
-		
-		cerr << "New genomes sketched: " << new_sketches.size() << endl;
-		
-		vector<vector<int>> cluster = KssdIncrementalCluster(state, new_sketches, threads);
-		
-		if (!no_save) {
-			state.save(folder_path + "/cluster_state.bin");
-		}
-		
-		printKssdResult(cluster, state.all_sketches, sketch_by_file, output_file);
-		cerr << "-----write the cluster result into: " << output_file << endl;
-		cerr << "-----the cluster number of " << output_file << " is: " << cluster.size() << endl;
-		cerr << "-----updated cluster state saved" << endl;
+			cerr << "===== Initial State Building Mode (KSSD) =====" << endl;
+			cerr << "No existing state found, building state from pre-sketched genomes..." << endl;
+			
+			vector<KssdSketchInfo> pre_sketches; 
+			KssdParameters pre_info;
+			bool pre_sketch_by_file = loadKssdSketches(folder_path, threads, pre_sketches, pre_info); 
+			if(pre_sketch_by_file != sketch_by_file){
+				cerr << "Warning: the input format of append genomes and pre-sketched genome is not same" << endl;
+			}
+			
+			int kmer_size = pre_info.half_k * 2;
+			int drlevel = pre_info.drlevel;
+			
+			cerr << "-----use the same sketch parameters with pre-generated sketches" << endl;
+			cerr << "---use the KSSD sketches" << endl;
+			cerr << "---the half_k is: " << pre_info.half_k << endl;
+			cerr << "---the half_subk is: " << pre_info.half_subk << endl;
+			cerr << "---the drlevel is: " << drlevel << endl;
+			cerr << "---the threshold is: " << threshold << endl;
+			
+			vector<KssdSketchInfo> append_sketches;
+			KssdParameters append_info;
+			string append_folder_path;
+			compute_kssd_sketches(append_sketches, append_info, isSave, input_file, append_folder_path, sketch_by_file, min_len, kmer_size, drlevel, threads);
+			
+			kssd_state = KssdInitialClusterWithState(pre_sketches, pre_info, threshold, threads, kmer_size);
+			
+			if (!no_save) {
+				kssd_state.save(folder_path + "/cluster_state.bin");
+			}
+			
+			vector<vector<int>> cluster = KssdIncrementalCluster(kssd_state, append_sketches, threads);
+			
+			if (!no_save) {
+				kssd_state.save(folder_path + "/cluster_state.bin");
+			}
+			
+			printKssdResult(cluster, kssd_state.all_sketches, sketch_by_file, output_file);
+			cerr << "-----write the cluster result into: " << output_file << endl;
+			cerr << "-----the cluster number of " << output_file << " is: " << cluster.size() << endl;
+			cerr << "-----saved cluster state (with inverted index) for future incremental updates" << endl;
+			
+		} else {
+			cerr << "---the threshold is: " << threshold << endl;
+			cerr << "---the thread number is: " << threads << endl;
+			
+			vector<KssdSketchInfo> new_sketches;
+			KssdParameters new_info;
+			string new_folder_path;
+			compute_kssd_sketches(new_sketches, new_info, isSave, input_file, new_folder_path, sketch_by_file, min_len, kssd_state.kmer_size, kssd_state.params.drlevel, threads);
+			
+			cerr << "New genomes sketched: " << new_sketches.size() << endl;
+			
+			vector<vector<int>> cluster = KssdIncrementalCluster(kssd_state, new_sketches, threads);
+			
+			if (!no_save) {
+				kssd_state.save(folder_path + "/cluster_state.bin");
+			}
+			
+			printKssdResult(cluster, kssd_state.all_sketches, sketch_by_file, output_file);
+			cerr << "-----write the cluster result into: " << output_file << endl;
+			cerr << "-----the cluster number of " << output_file << " is: " << cluster.size() << endl;
+			cerr << "-----updated cluster state saved" << endl;
 	}
 }
 #endif
@@ -784,7 +895,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		cerr << "-----buildDB: finished building KSSD DB at: " << folder_path << endl;
 	}
 
-	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads, bool use_inverted_index){
+	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads, bool use_inverted_index, bool save_rep_index){
 		bool isSave = !noSave;
 		vector<SketchInfo> sketches;
 		int sketch_func_id;
@@ -793,7 +904,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 
 		compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, isSave, threads);
 
-		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_linkage_matrix, no_dense, folder_path, sketch_func_id, threshold, isSave, threads, use_inverted_index);
+		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_linkage_matrix, no_dense, folder_path, sketch_func_id, threshold, isSave, threads, use_inverted_index, save_rep_index);
 	}
 
 	bool tune_kssd_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, int& kmerSize, double& threshold, int &drlevel){
@@ -1088,7 +1199,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 #endif
 }
 
-	void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, double threshold, int threads, bool use_inverted_index){
+	void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, double threshold, int threads, bool use_inverted_index, bool save_rep_index){
 		vector<SketchInfo> sketches;
 		vector<vector<int>> cluster;
 		int sketch_func_id;
@@ -1106,7 +1217,19 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		if (sketch_func_id == 0 && use_inverted_index) {
 			// Get actual kmer_size from first sketch
 			int kmer_size = sketches[0].minHash->getKmerSize();
-			cluster = MinHashGreedyClusterWithInvertedIndex(sketches, sketch_func_id, threshold, threads, kmer_size);
+			int sketch_size = sketches[0].minHash->getSketchSize();
+			bool is_containment = sketches[0].isContainment;
+			
+			// Save state if requested
+			if (save_rep_index) {
+				MinHashClusterState state = MinHashInitialClusterWithState(sketches, threshold, threads, kmer_size, sketch_size, is_containment);
+				string state_file = folder_path + "/cluster_state.bin";
+				state.save(state_file);
+				cerr << "-----saved cluster state (with inverted index) to: " << state_file << endl;
+				cluster = state.clusters;
+			} else {
+				cluster = MinHashGreedyClusterWithInvertedIndex(sketches, sketch_func_id, threshold, threads, kmer_size);
+			}
 		} else {
 			cluster = greedyCluster(sketches, sketch_func_id, threshold, threads);
 		}
@@ -1210,7 +1333,7 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		}
 	}
 
-	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index){
+	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index, bool save_rep_index){
 		vector<vector<int>> cluster;
 		double t2 = get_sec();
 #ifdef GREEDY_CLUST
@@ -1219,7 +1342,19 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		if (sketch_func_id == 0 && use_inverted_index) {
 			// Get kmer_size from first sketch
 			int kmer_size = sketches[0].minHash->getKmerSize();
-			cluster = MinHashGreedyClusterWithInvertedIndex(sketches, sketch_func_id, threshold, threads, kmer_size);
+			int sketch_size = sketches[0].minHash->getSketchSize();
+			bool is_containment = sketches[0].isContainment;
+			
+			// Save state if requested
+			if (save_rep_index && isSave) {
+				MinHashClusterState state = MinHashInitialClusterWithState(sketches, threshold, threads, kmer_size, sketch_size, is_containment);
+				string state_file = folder_path + "/cluster_state.bin";
+				state.save(state_file);
+				cerr << "-----saved cluster state (with inverted index) to: " << state_file << endl;
+				cluster = state.clusters;
+			} else {
+				cluster = MinHashGreedyClusterWithInvertedIndex(sketches, sketch_func_id, threshold, threads, kmer_size);
+			}
 		} else {
 			cluster = greedyCluster(sketches, sketch_func_id, threshold, threads);
 		}

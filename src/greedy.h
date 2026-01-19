@@ -65,5 +65,37 @@ KssdClusterState KssdInitialClusterWithState(
     int threads,
     int kmer_size);
 
+struct MinHashClusterState {
+    vector<int> representative_ids;
+    vector<SketchInfo> representatives;
+    vector<vector<int>> clusters;
+    vector<SketchInfo> all_sketches;
+    double threshold;
+    int kmer_size;
+    int sketch_size;
+    bool is_containment;
+
+    phmap::flat_hash_map<uint64_t, vector<int>> inverted_index;  // MinHash uses uint64_t
+
+    bool save(const string& filepath) const;
+    bool load(const string& filepath);
+
+    void build_inverted_index();
+    void update_inverted_index(int rep_idx);
+};
+
+vector<vector<int>> MinHashIncrementalCluster(
+    MinHashClusterState& state,
+    vector<SketchInfo>& new_sketches,
+    int threads);
+
+MinHashClusterState MinHashInitialClusterWithState(
+    vector<SketchInfo>& sketches,
+    double threshold,
+    int threads,
+    int kmer_size,
+    int sketch_size,
+    bool is_containment);
+
 #endif
 #endif
