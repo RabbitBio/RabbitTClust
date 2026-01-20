@@ -6,6 +6,7 @@
 #include <omp.h>
 #include <fstream>
 #include <sys/stat.h>
+#include <climits>
 using namespace std;
 
 bool cmpEdge(EdgeInfo e1, EdgeInfo e2){
@@ -313,6 +314,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
       cerr << "ERROR: compute_kssd_mst(), error read hash_size, total_index, sketch_size_arr, index_arr" << endl;
       exit(1);
     }
+    fclose(fp_dict);
   }
 
   //int denseSpan = 10;
@@ -344,11 +346,22 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
   }
 
   // start to generate the sub_mst
-  vector<EdgeInfo> mstArr[threads];
+  std::vector<std::vector<EdgeInfo>> mstArr(threads);
   int** intersectionArr = new int*[threads];
   for(int i = 0; i < threads; i++){
     intersectionArr[i] = new int[sketches.size()];
   }
+  int** seenStamp = new int*[threads];
+  int*  epoch     = new int[threads];
+  std::vector<int>* touched = new std::vector<int>[threads];
+
+  for(int t = 0; t < threads; ++t){
+    seenStamp[t] = new int[N];
+    memset(seenStamp[t], 0, N * sizeof(int));
+    epoch[t] = 1;
+    touched[t].reserve(4096);
+  }
+
   int subSize = 8;
   int id = 0;
   //int tailNum = sketches.size() % subSize;
@@ -363,18 +376,39 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 #pragma omp parallel for num_threads(threads) schedule (dynamic)
   for(id = start_index; id < sketches.size() - tailNum; id+=subSize){
     int thread_id = omp_get_thread_num();
-    for(int i = id; i < id+subSize; i++){
-      memset(intersectionArr[thread_id], 0, sketches.size() * sizeof(int));
+    for(int i = id; i < id + subSize; i++){
+      // ===== NEW: per-thread alias =====
+      int* inter = intersectionArr[thread_id];
+      int* stamp = seenStamp[thread_id];
+      int& ep     = epoch[thread_id];
+      auto& cand  = touched[thread_id];
+    
+      // ===== NEW: start a new epoch, no memset(inter,0,N) =====
+      cand.clear();
+      ++ep;
+      if(ep == INT_MAX){ 
+        memset(stamp, 0, N * sizeof(int));
+        ep = 1;
+      }
+    
+      // ===== NEW: accumulate intersection counts AND collect candidates =====
       if(use64){
         for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
           uint64_t hash64 = sketches[i].hash64_arr[j];
-          //if(!(dict[hash64/64] & (0x8000000000000000LLU >> (hash64 % 64))))	continue;
-          if(hash_map_arr.count(hash64) == 0) continue;
-          //for(auto x : hash_map_arr[hash64])
-          for(size_t k = 0; k < hash_map_arr[hash64].size(); k++){
-            size_t cur_index = hash_map_arr[hash64][k];
-            intersectionArr[thread_id][cur_index]++;
-            //cerr << hash64 << '\t' << cur_index << endl;
+    
+          auto it = hash_map_arr.find(hash64);
+          if(it == hash_map_arr.end()) continue;
+    
+          const auto& vec = it->second;
+          for(size_t k = 0; k < vec.size(); k++){
+            int cur = (int)vec[k];
+            if(stamp[cur] != ep){
+              stamp[cur] = ep;
+              inter[cur] = 1;
+              cand.push_back(cur);
+            }else{
+              inter[cur] += 1;
+            }
           }
         }
       }
@@ -382,65 +416,66 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
         for(size_t j = 0; j < sketches[i].hash32_arr.size(); j++){
           uint32_t hash = sketches[i].hash32_arr[j];
           if(sketchSizeArr[hash] == 0) continue;
-          size_t start = hash > 0 ? offset[hash-1] : 0;
-          size_t end = offset[hash];
+    
+          size_t start = (hash > 0) ? offset[hash-1] : 0;
+          size_t end   = offset[hash];
+    
           for(size_t k = start; k < end; k++){
-            size_t curIndex = indexArr[k];
-            intersectionArr[thread_id][curIndex]++;
+            int cur = (int)indexArr[k];
+            if(stamp[cur] != ep){
+              stamp[cur] = ep;
+              inter[cur] = 1;
+              cand.push_back(cur);
+            }else{
+              inter[cur] += 1;
+            }
           }
         }
       }
-
-      for(int j = 0; j < i; j++){
+    
+      // ===== NEW: candidate-only loop (replace for(j=0;j<i;j++)) =====
+      for(int idx = 0; idx < (int)cand.size(); ++idx){
+        int j = cand[idx];
+        if(j >= i) continue; 
+    
         double tmpDist;
-        int common = intersectionArr[thread_id][j];
+        int common = inter[j];
+    
         int size0, size1;
         if(use64){
-          size0 = sketches[i].hash64_arr.size();
-          size1 = sketches[j].hash64_arr.size();
+          size0 = (int)sketches[i].hash64_arr.size();
+          size1 = (int)sketches[j].hash64_arr.size();
+        }else{
+          size0 = (int)sketches[i].hash32_arr.size();
+          size1 = (int)sketches[j].hash32_arr.size();
         }
-        else{
-          size0 = sketches[i].hash32_arr.size();
-          size1 = sketches[j].hash32_arr.size();
-        }
-
-        if (std::max(size0, size1) > radio * std::min(size0, size1)) {
-          continue;
-        }
-
+    
+        if (std::max(size0, size1) > radio * std::min(size0, size1)) continue;
+    
         if(!isContainment){
           int denom = size0 + size1 - common;
           double jaccard;
-          if(size0 == 0 || size1 == 0)
-            jaccard = 0.0;
-          else
-            jaccard = (double)common / denom;
+          if(size0 == 0 || size1 == 0) jaccard = 0.0;
+          else jaccard = (double)common / denom;
+    
           double mashD;
-          if(jaccard == 1.0)
-            mashD = 0.0;
-          else if(jaccard == 0.0)
-            mashD = 1.0;
-          else
-            mashD = (double)-1.0 / kmer_size * log((2 * jaccard)/(1.0 + jaccard));
+          if(jaccard == 1.0) mashD = 0.0;
+          else if(jaccard == 0.0) mashD = 1.0;
+          else mashD = (double)-1.0 / kmer_size * log((2 * jaccard)/(1.0 + jaccard));
           tmpDist = mashD;
-        }
-        else{
+        }else{
           int denom = std::min(size0, size1);
           double containment;
-          if(size0 == 0 || size1 == 0)
-            containment = 0.0;
-          else
-            containment = (double)common / denom;
+          if(size0 == 0 || size1 == 0) containment = 0.0;
+          else containment = (double)common / denom;
+    
           double AafD;
-          if(containment == 1.0)
-            AafD = 0.0;
-          else if(containment == 0.0)
-            AafD = 1.0;
-          else
-            AafD = (double)-1.0 / kmer_size * log(containment);
+          if(containment == 1.0) AafD = 0.0;
+          else if(containment == 0.0) AafD = 1.0;
+          else AafD = (double)-1.0 / kmer_size * log(containment);
           tmpDist = AafD;
         }
-
+    
         if(!no_dense){
           for(int t = 0; t < denseSpan; t++){
             if(tmpDist <= distRadius[t]){
@@ -453,11 +488,10 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
           assert(ANI < 101);
           threadsANI[thread_id][ANI]++;
         }
-
-        EdgeInfo tmpE{i, j, tmpDist};
-        mstArr[thread_id].push_back(tmpE);
+    
+        mstArr[thread_id].push_back(EdgeInfo{i, j, tmpDist});
       }
-    }
+    }    
     if(thread_id == 0){
       //uint64_t computedNum = (uint64_t)(N - id) * (uint64_t)id + (uint64_t)id * (uint64_t)id / 2;
       uint64_t computedNum = (uint64_t)(id-start_index) * (uint64_t)(id+start_index) / 2;
@@ -490,87 +524,112 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
     }
   }
   for(int i = 0; i < threads; i++){
-    delete(threadsANI[i]);
+    delete [] threadsANI[i];
   }
+  delete [] threadsANI;
+  
   for(int i = 0; i < denseSpan * threads; i++){
-    delete(denseLocalArr[i]);
+    delete [] denseLocalArr[i];
   }
+  delete [] denseLocalArr;
 
   if(tailNum != 0){
     for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
-      memset(intersectionArr[0], 0, sketches.size() * sizeof(int));
+      int* inter = intersectionArr[0];
+      int* stamp = seenStamp[0];
+      int& ep     = epoch[0];
+      auto& cand  = touched[0];
+      
+      cand.clear();
+      ++ep;
+      if(ep == INT_MAX){
+        memset(stamp, 0, N * sizeof(int));
+        ep = 1;
+      }
+      
       if(use64){
-        for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
-          uint64_t hash64 = sketches[i].hash64_arr[j];
-          //if(!(dict[hash64/64] & (0x8000000000000000LLU >> (hash64 % 64))))	continue;
-          if(hash_map_arr.count(hash64) == 0) continue;
-          //for(auto x : hash_map_arr[hash64])
-          for(size_t k = 0; k < hash_map_arr[hash64].size(); k++){
-            size_t cur_index = hash_map_arr[hash64][k];
-            intersectionArr[0][cur_index]++;
-            //cerr << hash64 << '\t' << cur_index << endl;
+        for(size_t jj = 0; jj < sketches[i].hash64_arr.size(); jj++){
+          uint64_t hash64 = sketches[i].hash64_arr[jj];
+          auto it = hash_map_arr.find(hash64);
+          if(it == hash_map_arr.end()) continue;
+      
+          const auto& vec = it->second;
+          for(size_t k = 0; k < vec.size(); k++){
+            int cur = (int)vec[k];
+            if(stamp[cur] != ep){
+              stamp[cur] = ep;
+              inter[cur] = 1;
+              cand.push_back(cur);
+            }else{
+              inter[cur] += 1;
+            }
           }
         }
       }
       else{
-        for(size_t j = 0; j < sketches[i].hash32_arr.size(); j++){
-          uint32_t hash = sketches[i].hash32_arr[j];
+        for(size_t jj = 0; jj < sketches[i].hash32_arr.size(); jj++){
+          uint32_t hash = sketches[i].hash32_arr[jj];
           if(sketchSizeArr[hash] == 0) continue;
-          size_t start = hash > 0 ? offset[hash-1] : 0;
-          size_t end = offset[hash];
+      
+          size_t start = (hash > 0) ? offset[hash-1] : 0;
+          size_t end   = offset[hash];
+      
           for(size_t k = start; k < end; k++){
-            size_t curIndex = indexArr[k];
-            intersectionArr[0][curIndex]++;
+            int cur = (int)indexArr[k];
+            if(stamp[cur] != ep){
+              stamp[cur] = ep;
+              inter[cur] = 1;
+              cand.push_back(cur);
+            }else{
+              inter[cur] += 1;
+            }
           }
         }
       }
-
-      for(int j = 0; j < i; j++){
-        //double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
+      
+      // candidate-only
+      for(int idx = 0; idx < (int)cand.size(); ++idx){
+        int j = cand[idx];
+        if(j >= i) continue;
+      
         double tmpDist;
-        int common = intersectionArr[0][j];
+        int common = inter[j];
+      
         int size0, size1;
         if(use64){
-          size0 = sketches[i].hash64_arr.size();
-          size1 = sketches[j].hash64_arr.size();
+          size0 = (int)sketches[i].hash64_arr.size();
+          size1 = (int)sketches[j].hash64_arr.size();
+        }else{
+          size0 = (int)sketches[i].hash32_arr.size();
+          size1 = (int)sketches[j].hash32_arr.size();
         }
-        else{
-          size0 = sketches[i].hash32_arr.size();
-          size1 = sketches[j].hash32_arr.size();
-        }
+      
+
+      
         if(!isContainment){
           int denom = size0 + size1 - common;
           double jaccard;
-          if(size0 == 0 || size1 == 0)
-            jaccard = 0.0;
-          else
-            jaccard = (double)common / denom;
+          if(size0 == 0 || size1 == 0) jaccard = 0.0;
+          else jaccard = (double)common / denom;
+      
           double mashD;
-          if(jaccard == 1.0)
-            mashD = 0.0;
-          else if(jaccard == 0.0)
-            mashD = 1.0;
-          else
-            mashD = (double)-1.0 / kmer_size * log((2 * jaccard)/(1.0 + jaccard));
+          if(jaccard == 1.0) mashD = 0.0;
+          else if(jaccard == 0.0) mashD = 1.0;
+          else mashD = (double)-1.0 / kmer_size * log((2 * jaccard)/(1.0 + jaccard));
           tmpDist = mashD;
-        }
-        else{
+        }else{
           int denom = std::min(size0, size1);
           double containment;
-          if(size0 == 0 || size1 == 0)
-            containment = 0.0;
-          else
-            containment = (double)common / denom;
+          if(size0 == 0 || size1 == 0) containment = 0.0;
+          else containment = (double)common / denom;
+      
           double AafD;
-          if(containment == 1.0)
-            AafD = 0.0;
-          else if(containment == 0.0)
-            AafD = 1.0;
-          else
-            AafD = (double)-1.0 / kmer_size * log(containment);
+          if(containment == 1.0) AafD = 0.0;
+          else if(containment == 0.0) AafD = 1.0;
+          else AafD = (double)-1.0 / kmer_size * log(containment);
           tmpDist = AafD;
         }
-
+      
         if(!no_dense){
           for(int t = 0; t < denseSpan; t++){
             if(tmpDist <= distRadius[t]){
@@ -579,14 +638,14 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
             }
           }
           double tmpANI = 1.0 - tmpDist;
-          int ANI = (int)(tmpANI/0.01);
+          int ANI = (int)(tmpANI / 0.01);
           assert(ANI < 101);
           aniArr[ANI]++;
         }
-
-        EdgeInfo tmpE{i, j, tmpDist};
-        mstArr[0].push_back(tmpE);
+      
+        mstArr[0].push_back(EdgeInfo{i, j, tmpDist});
       }
+      
     }
     if(mstArr[0].size() != 0){
       sort(mstArr[0].begin(), mstArr[0].end(), cmpEdge);
@@ -606,6 +665,22 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 
   vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
   vector<EdgeInfo>().swap(finalGraph);
+  for(int t = 0; t < threads; ++t){
+    delete [] seenStamp[t];
+  }
+  delete [] seenStamp;
+  delete [] epoch;
+  delete [] touched;
+  for(int t = 0; t < threads; ++t){
+    delete [] intersectionArr[t];
+  }
+  delete [] intersectionArr;
+  
+  if(!use64){
+    delete [] sketchSizeArr;
+    delete [] offset;
+    delete [] indexArr;
+  }
 
   return mst;
 }
