@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sys/stat.h>
 #include <climits>
+#include "phmap.h"  // Google's Swiss Tables for faster hash maps
 using namespace std;
 
 bool cmpEdge(EdgeInfo e1, EdgeInfo e2){
@@ -212,11 +213,15 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
   int drlevel = info.drlevel;
   bool use64 = half_k - drlevel > 8 ? true : false;
   int kmer_size = half_k * 2;
-  robin_hood::unordered_map<uint64_t, vector<uint32_t>> hash_map_arr;
+  phmap::flat_hash_map<uint64_t, vector<uint32_t>> hash_map_arr;
   uint32_t* sketchSizeArr = NULL;
   size_t* offset = NULL;
   uint32_t* indexArr = NULL;
-  int radio = calr(threshold, kmer_size-1); 
+  int radio = calr(threshold, kmer_size-1);
+  
+  // Precompute constants for distance calculation
+  const double inv_kmer_size = 1.0 / kmer_size;
+  const double log_2 = log(2.0); 
   if(use64)
   {
     size_t hash_number;
@@ -386,23 +391,42 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
       // ===== NEW: start a new epoch, no memset(inter,0,N) =====
       cand.clear();
       ++ep;
-      if(ep == INT_MAX){ 
+      if(__builtin_expect(ep == INT_MAX, 0)){ 
         memset(stamp, 0, N * sizeof(int));
         ep = 1;
       }
     
+      // Cache sketch size for current genome
+      int size0;
+      if(use64){
+        size0 = (int)sketches[i].hash64_arr.size();
+      }else{
+        size0 = (int)sketches[i].hash32_arr.size();
+      }
+      
+      // Early skip if sketch is empty
+      if(__builtin_expect(size0 == 0, 0)) continue;
+    
       // ===== NEW: accumulate intersection counts AND collect candidates =====
       if(use64){
-        for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
-          uint64_t hash64 = sketches[i].hash64_arr[j];
+        const auto& hash_arr_i = sketches[i].hash64_arr;
+        const size_t hash_size = hash_arr_i.size();
+        for(size_t j = 0; j < hash_size; j++){
+          uint64_t hash64 = hash_arr_i[j];
+          
+          // Prefetch next hash for better cache performance
+          if(__builtin_expect(j + 1 < hash_size, 1)){
+            __builtin_prefetch(&hash_arr_i[j + 1], 0, 1);
+          }
     
           auto it = hash_map_arr.find(hash64);
-          if(it == hash_map_arr.end()) continue;
+          if(__builtin_expect(it == hash_map_arr.end(), 0)) continue;
     
           const auto& vec = it->second;
-          for(size_t k = 0; k < vec.size(); k++){
+          const size_t vec_size = vec.size();
+          for(size_t k = 0; k < vec_size; k++){
             int cur = (int)vec[k];
-            if(stamp[cur] != ep){
+            if(__builtin_expect(stamp[cur] != ep, 1)){
               stamp[cur] = ep;
               inter[cur] = 1;
               cand.push_back(cur);
@@ -413,16 +437,29 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
         }
       }
       else{
-        for(size_t j = 0; j < sketches[i].hash32_arr.size(); j++){
-          uint32_t hash = sketches[i].hash32_arr[j];
-          if(sketchSizeArr[hash] == 0) continue;
+        const auto& hash_arr_i = sketches[i].hash32_arr;
+        const size_t hash_size = hash_arr_i.size();
+        for(size_t j = 0; j < hash_size; j++){
+          uint32_t hash = hash_arr_i[j];
+          
+          // Prefetch next hash
+          if(__builtin_expect(j + 1 < hash_size, 1)){
+            __builtin_prefetch(&hash_arr_i[j + 1], 0, 1);
+          }
+          
+          if(__builtin_expect(sketchSizeArr[hash] == 0, 0)) continue;
     
           size_t start = (hash > 0) ? offset[hash-1] : 0;
           size_t end   = offset[hash];
+          
+          // Prefetch index array region
+          if(__builtin_expect(end > start, 1)){
+            __builtin_prefetch(&indexArr[start], 0, 1);
+          }
     
           for(size_t k = start; k < end; k++){
             int cur = (int)indexArr[k];
-            if(stamp[cur] != ep){
+            if(__builtin_expect(stamp[cur] != ep, 1)){
               stamp[cur] = ep;
               inter[cur] = 1;
               cand.push_back(cur);
@@ -434,58 +471,69 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
       }
     
       // ===== NEW: candidate-only loop (replace for(j=0;j<i;j++)) =====
-      for(int idx = 0; idx < (int)cand.size(); ++idx){
+      const int cand_size = (int)cand.size();
+      for(int idx = 0; idx < cand_size; ++idx){
         int j = cand[idx];
-        if(j >= i) continue; 
+        if(__builtin_expect(j >= i, 0)) continue; 
     
         double tmpDist;
         int common = inter[j];
     
-        int size0, size1;
+        int size1;
         if(use64){
-          size0 = (int)sketches[i].hash64_arr.size();
           size1 = (int)sketches[j].hash64_arr.size();
         }else{
-          size0 = (int)sketches[i].hash32_arr.size();
           size1 = (int)sketches[j].hash32_arr.size();
         }
     
-        if (std::max(size0, size1) > radio * std::min(size0, size1)) continue;
+        // Fast path: skip if size ratio check fails
+        if(__builtin_expect(size0 > 0 && size1 > 0, 1)){
+          int min_size = size0 < size1 ? size0 : size1;
+          int max_size = size0 > size1 ? size0 : size1;
+          if(__builtin_expect(max_size > radio * min_size, 0)) continue;
+        }else{
+          continue;
+        }
     
         if(!isContainment){
           int denom = size0 + size1 - common;
           double jaccard;
-          if(size0 == 0 || size1 == 0) jaccard = 0.0;
+          if(__builtin_expect(denom == 0, 0)) jaccard = 0.0;
           else jaccard = (double)common / denom;
     
           double mashD;
-          if(jaccard == 1.0) mashD = 0.0;
-          else if(jaccard == 0.0) mashD = 1.0;
-          else mashD = (double)-1.0 / kmer_size * log((2 * jaccard)/(1.0 + jaccard));
+          if(__builtin_expect(jaccard == 1.0, 0)) mashD = 0.0;
+          else if(__builtin_expect(jaccard == 0.0, 0)) mashD = 1.0;
+          else {
+            // Optimized: use precomputed constants
+            double ratio = (2.0 * jaccard) / (1.0 + jaccard);
+            mashD = -inv_kmer_size * log(ratio);
+          }
           tmpDist = mashD;
         }else{
-          int denom = std::min(size0, size1);
+          int denom = size0 < size1 ? size0 : size1;
           double containment;
-          if(size0 == 0 || size1 == 0) containment = 0.0;
+          if(__builtin_expect(denom == 0, 0)) containment = 0.0;
           else containment = (double)common / denom;
     
           double AafD;
-          if(containment == 1.0) AafD = 0.0;
-          else if(containment == 0.0) AafD = 1.0;
-          else AafD = (double)-1.0 / kmer_size * log(containment);
+          if(__builtin_expect(containment == 1.0, 0)) AafD = 0.0;
+          else if(__builtin_expect(containment == 0.0, 0)) AafD = 1.0;
+          else AafD = -inv_kmer_size * log(containment);
           tmpDist = AafD;
         }
     
         if(!no_dense){
-          for(int t = 0; t < denseSpan; t++){
-            if(tmpDist <= distRadius[t]){
-              denseLocalArr[t * threads + thread_id][i]++;
-              denseLocalArr[t * threads + thread_id][j]++;
-            }
+          // Optimized: find first threshold that fails, then update all previous
+          int t = 0;
+          for(; t < denseSpan && tmpDist <= distRadius[t]; t++){
+            denseLocalArr[t * threads + thread_id][i]++;
+            denseLocalArr[t * threads + thread_id][j]++;
           }
+          // Calculate ANI (optimized: use multiplication instead of division)
           double tmpANI = 1.0 - tmpDist;
-          int ANI = (int)(tmpANI / 0.01);
-          assert(ANI < 101);
+          int ANI = (int)(tmpANI * 100.0);  // 100.0 = 1/0.01
+          if(__builtin_expect(ANI >= 101, 0)) ANI = 100;
           threadsANI[thread_id][ANI]++;
         }
     
@@ -542,21 +590,39 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
       
       cand.clear();
       ++ep;
-      if(ep == INT_MAX){
+      if(__builtin_expect(ep == INT_MAX, 0)){
         memset(stamp, 0, N * sizeof(int));
         ep = 1;
       }
       
+      // Cache sketch size
+      int size0;
       if(use64){
-        for(size_t jj = 0; jj < sketches[i].hash64_arr.size(); jj++){
-          uint64_t hash64 = sketches[i].hash64_arr[jj];
+        size0 = (int)sketches[i].hash64_arr.size();
+      }else{
+        size0 = (int)sketches[i].hash32_arr.size();
+      }
+      
+      if(__builtin_expect(size0 == 0, 0)) continue;
+      
+      if(use64){
+        const auto& hash_arr_i = sketches[i].hash64_arr;
+        const size_t hash_size = hash_arr_i.size();
+        for(size_t jj = 0; jj < hash_size; jj++){
+          uint64_t hash64 = hash_arr_i[jj];
+          
+          if(__builtin_expect(jj + 1 < hash_size, 1)){
+            __builtin_prefetch(&hash_arr_i[jj + 1], 0, 1);
+          }
+          
           auto it = hash_map_arr.find(hash64);
-          if(it == hash_map_arr.end()) continue;
+          if(__builtin_expect(it == hash_map_arr.end(), 0)) continue;
       
           const auto& vec = it->second;
-          for(size_t k = 0; k < vec.size(); k++){
+          const size_t vec_size = vec.size();
+          for(size_t k = 0; k < vec_size; k++){
             int cur = (int)vec[k];
-            if(stamp[cur] != ep){
+            if(__builtin_expect(stamp[cur] != ep, 1)){
               stamp[cur] = ep;
               inter[cur] = 1;
               cand.push_back(cur);
@@ -567,16 +633,27 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
         }
       }
       else{
-        for(size_t jj = 0; jj < sketches[i].hash32_arr.size(); jj++){
-          uint32_t hash = sketches[i].hash32_arr[jj];
-          if(sketchSizeArr[hash] == 0) continue;
+        const auto& hash_arr_i = sketches[i].hash32_arr;
+        const size_t hash_size = hash_arr_i.size();
+        for(size_t jj = 0; jj < hash_size; jj++){
+          uint32_t hash = hash_arr_i[jj];
+          
+          if(__builtin_expect(jj + 1 < hash_size, 1)){
+            __builtin_prefetch(&hash_arr_i[jj + 1], 0, 1);
+          }
+          
+          if(__builtin_expect(sketchSizeArr[hash] == 0, 0)) continue;
       
           size_t start = (hash > 0) ? offset[hash-1] : 0;
           size_t end   = offset[hash];
+          
+          if(__builtin_expect(end > start, 1)){
+            __builtin_prefetch(&indexArr[start], 0, 1);
+          }
       
           for(size_t k = start; k < end; k++){
             int cur = (int)indexArr[k];
-            if(stamp[cur] != ep){
+            if(__builtin_expect(stamp[cur] != ep, 1)){
               stamp[cur] = ep;
               inter[cur] = 1;
               cand.push_back(cur);
@@ -588,58 +665,67 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
       }
       
       // candidate-only
-      for(int idx = 0; idx < (int)cand.size(); ++idx){
+      const int cand_size = (int)cand.size();
+      for(int idx = 0; idx < cand_size; ++idx){
         int j = cand[idx];
-        if(j >= i) continue;
+        if(__builtin_expect(j >= i, 0)) continue;
       
         double tmpDist;
         int common = inter[j];
       
-        int size0, size1;
+        int size1;
         if(use64){
-          size0 = (int)sketches[i].hash64_arr.size();
           size1 = (int)sketches[j].hash64_arr.size();
         }else{
-          size0 = (int)sketches[i].hash32_arr.size();
           size1 = (int)sketches[j].hash32_arr.size();
         }
       
-
+        // Fast path: skip if size ratio check fails
+        if(__builtin_expect(size0 > 0 && size1 > 0, 1)){
+          int min_size = size0 < size1 ? size0 : size1;
+          int max_size = size0 > size1 ? size0 : size1;
+          if(__builtin_expect(max_size > radio * min_size, 0)) continue;
+        }else{
+          continue;
+        }
       
         if(!isContainment){
           int denom = size0 + size1 - common;
           double jaccard;
-          if(size0 == 0 || size1 == 0) jaccard = 0.0;
+          if(__builtin_expect(denom == 0, 0)) jaccard = 0.0;
           else jaccard = (double)common / denom;
       
           double mashD;
-          if(jaccard == 1.0) mashD = 0.0;
-          else if(jaccard == 0.0) mashD = 1.0;
-          else mashD = (double)-1.0 / kmer_size * log((2 * jaccard)/(1.0 + jaccard));
+          if(__builtin_expect(jaccard == 1.0, 0)) mashD = 0.0;
+          else if(__builtin_expect(jaccard == 0.0, 0)) mashD = 1.0;
+          else {
+            double ratio = (2.0 * jaccard) / (1.0 + jaccard);
+            mashD = -inv_kmer_size * log(ratio);
+          }
           tmpDist = mashD;
         }else{
-          int denom = std::min(size0, size1);
+          int denom = size0 < size1 ? size0 : size1;
           double containment;
-          if(size0 == 0 || size1 == 0) containment = 0.0;
+          if(__builtin_expect(denom == 0, 0)) containment = 0.0;
           else containment = (double)common / denom;
       
           double AafD;
-          if(containment == 1.0) AafD = 0.0;
-          else if(containment == 0.0) AafD = 1.0;
-          else AafD = (double)-1.0 / kmer_size * log(containment);
+          if(__builtin_expect(containment == 1.0, 0)) AafD = 0.0;
+          else if(__builtin_expect(containment == 0.0, 0)) AafD = 1.0;
+          else AafD = -inv_kmer_size * log(containment);
           tmpDist = AafD;
         }
       
         if(!no_dense){
-          for(int t = 0; t < denseSpan; t++){
-            if(tmpDist <= distRadius[t]){
-              denseArr[t][i]++;
-              denseArr[t][j]++;
-            }
+          // Optimized: find first threshold that fails
+          int t = 0;
+          for(; t < denseSpan && tmpDist <= distRadius[t]; t++){
+            denseArr[t][i]++;
+            denseArr[t][j]++;
           }
           double tmpANI = 1.0 - tmpDist;
-          int ANI = (int)(tmpANI / 0.01);
-          assert(ANI < 101);
+          int ANI = (int)(tmpANI * 100.0);
+          if(__builtin_expect(ANI >= 101, 0)) ANI = 100;
           aniArr[ANI]++;
         }
       
