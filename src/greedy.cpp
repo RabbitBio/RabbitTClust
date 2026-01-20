@@ -99,7 +99,7 @@ double jaccard(const std::vector<uint32_t>& hashesRef, const std::vector<uint32_
 
 
 
-double distance(const std::vector<uint32_t>& hashesRef, const std::vector<uint32_t>& hashesQry, double kmerSize)
+double calculate_mash_distance(const std::vector<uint32_t>& hashesRef, const std::vector<uint32_t>& hashesQry, double kmerSize)
 {
   double jaccard_ = jaccard(hashesRef, hashesQry);
 
@@ -107,13 +107,13 @@ double distance(const std::vector<uint32_t>& hashesRef, const std::vector<uint32
     return 0.0;
   }
 
-  double distance = -log(2 * jaccard_ / (1.0 + jaccard_)) / kmerSize;
+  double dist = -log(2 * jaccard_ / (1.0 + jaccard_)) / kmerSize;
 
-  if (distance > 1.0) {
-    distance = 1.0;
+  if (dist > 1.0) {
+    dist = 1.0;
   }
 
-  return distance;
+  return dist;
 }
 
 
@@ -185,7 +185,7 @@ vector<std::vector<int>> KssdgreedyCluster(std::vector<KssdSketchInfo>& sketches
             }
 
             // Calculate distance
-            double dist = distance(sketches[repId].hash32_arr, sketches[j].hash32_arr, 19);
+            double dist = calculate_mash_distance(sketches[repId].hash32_arr, sketches[j].hash32_arr, 19);
             
             if(dist <= threshold){
                 // Use thread-local storage to avoid critical section
@@ -224,7 +224,9 @@ vector<std::vector<int>> KssdgreedyCluster(std::vector<KssdSketchInfo>& sketches
 
     // Build final clusters
     cluster.reserve(semiClust.size());
-    for(auto const& [center, redundantArr] : semiClust){
+    for(auto const& pair : semiClust){
+        int center = pair.first;
+        const std::vector<int>& redundantArr = pair.second;
         std::vector<int> curClust;
         curClust.reserve(1 + redundantArr.size());
         curClust.push_back(center);
@@ -345,7 +347,9 @@ public:
         // Insert all hashes of this representative into the index
         // Optimization: use try_emplace to avoid double lookup (operator[] does find + insert)
         for(uint32_t hash : hash_array) {
-            auto [it, inserted] = index_map.try_emplace(hash);
+            auto result = index_map.try_emplace(hash);
+            auto it = result.first;
+            // bool inserted = result.second;  // unused
             it->second.push_back(rep_id);
         }
     }
@@ -971,7 +975,9 @@ vector<std::vector<int>> MinHashGreedyClusterWithInvertedIndex(
             // Insert all hashes of this representative into the index
             // Optimization: use try_emplace to avoid double lookup (operator[] does find + insert)
             for(uint64_t hash : hash_array) {
-                auto [it, inserted] = index_map.try_emplace(hash);
+                auto result = index_map.try_emplace(hash);
+            auto it = result.first;
+            // bool inserted = result.second;  // unused
                 it->second.push_back(rep_id);
             }
         }
@@ -1397,7 +1403,9 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
             dynamic_index.calculate_intersections_sparse(sketches[j].hash32_arr, intersection_map);
             
             // Find best representative (directly traverse map, more efficient)
-            for(const auto& [repId, common] : intersection_map) {
+            for(const auto& pair : intersection_map) {
+                int repId = pair.first;
+                int common = pair.second;
                 int sizeQry = sketches[repId].hash32_arr.size();
                 
                 double dist = calculate_mash_distance_fast(common, sizeRef, sizeQry, kmer_size);
@@ -1438,7 +1446,9 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
     // Build final results
     std::vector<std::vector<int>> cluster;
     cluster.reserve(semiClust.size());
-    for(const auto& [center, members] : semiClust) {
+    for(const auto& pair : semiClust) {
+        int center = pair.first;
+        const std::vector<int>& members = pair.second;
         std::vector<int> curClust;
         curClust.push_back(center);
         curClust.insert(curClust.end(), members.begin(), members.end());
@@ -1517,7 +1527,9 @@ bool KssdClusterState::save(const string& filepath) const {
     ofs.write((char*)&index_size, sizeof(size_t));
     std::cerr << "Saving inverted index: " << index_size << " unique hashes..." << std::endl;
     
-    for (const auto& [hash, rep_list] : inverted_index) {
+    for (const auto& pair : inverted_index) {
+        uint32_t hash = pair.first;
+        const std::vector<int>& rep_list = pair.second;
         ofs.write((char*)&hash, sizeof(uint32_t));
         size_t list_size = rep_list.size();
         ofs.write((char*)&list_size, sizeof(size_t));
@@ -1688,7 +1700,9 @@ vector<vector<int>> KssdIncrementalCluster(
 
         std::vector<std::pair<int, int>> candidates;  // (rep_idx, intersection_count)
         candidates.reserve(candidate_counts.size());
-        for (const auto& [rep_idx, cnt] : candidate_counts) {
+        for (const auto& pair : candidate_counts) {
+            int rep_idx = pair.first;
+            int cnt = pair.second;
             candidates.emplace_back(rep_idx, cnt);
         }
         
@@ -1717,7 +1731,7 @@ vector<vector<int>> KssdIncrementalCluster(
             #pragma omp atomic
             total_distance_calcs++;
             
-            double dist = distance(rep.hash32_arr, new_sketch.hash32_arr, state.kmer_size);
+            double dist = calculate_mash_distance(rep.hash32_arr, new_sketch.hash32_arr, state.kmer_size);
             
             if (dist <= state.threshold) {
                 #pragma omp critical
@@ -1899,7 +1913,9 @@ vector<vector<int>> MinHashIncrementalCluster(
         
         std::vector<std::pair<int, int>> candidates;  // (rep_idx, intersection_count)
         candidates.reserve(candidate_counts.size());
-        for (const auto& [rep_idx, cnt] : candidate_counts) {
+        for (const auto& pair : candidate_counts) {
+            int rep_idx = pair.first;
+            int cnt = pair.second;
             candidates.emplace_back(rep_idx, cnt);
         }
         
@@ -2043,7 +2059,9 @@ bool MinHashClusterState::save(const string& filepath) const {
     ofs.write((char*)&index_size, sizeof(size_t));
     std::cerr << "Saving inverted index: " << index_size << " unique hashes..." << std::endl;
     
-    for (const auto& [hash, rep_list] : inverted_index) {
+    for (const auto& pair : inverted_index) {
+        uint64_t hash = pair.first;
+        const std::vector<int>& rep_list = pair.second;
         ofs.write((char*)&hash, sizeof(uint64_t));
         size_t list_size = rep_list.size();
         ofs.write((char*)&list_size, sizeof(size_t));
