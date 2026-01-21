@@ -567,12 +567,15 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
       }
     }
 
-    // Merge per-thread start-bucket counts.
-    for(int i = 0; i < denseSpan; i++){
-      for(int j = 0; j < threads; j++){
-        for(int k = 0; k < N; k++){
-          denseArr[i][k] += denseLocalArr[i*threads+j][k];
+    // Merge per-thread start-bucket counts (optimized: cache-friendly order + parallel k).
+    for(int t = 0; t < denseSpan; t++){
+      #pragma omp parallel for schedule(static) num_threads(threads)
+      for(int k = 0; k < N; k++){
+        int sum = 0;
+        for(int th = 0; th < threads; th++){
+          sum += denseLocalArr[t*threads + th][k];
         }
+        denseArr[t][k] = sum;
       }
     }
   }
@@ -747,6 +750,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 
   // Convert start-bucket counts to cumulative density counts to match base semantics.
   if(!no_dense){
+    #pragma omp parallel for schedule(static) num_threads(threads)
     for(int k = 0; k < N; k++){
       int acc = 0;
       for(int t = 0; t < denseSpan; t++){
@@ -898,11 +902,15 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
         aniArr[i] += threadsANI[j][i];
       }
     }
-    for(int i = 0; i < denseSpan; i++){
-      for(int j = 0; j < threads; j++){
-        for(int k = 0; k < N; k++){
-          denseArr[i][k] += denseLocalArr[i*threads+j][k];
+    // Merge per-thread start-bucket counts (optimized: cache-friendly order + parallel k).
+    for(int t = 0; t < denseSpan; t++){
+      #pragma omp parallel for schedule(static) num_threads(threads)
+      for(int k = 0; k < N; k++){
+        int sum = 0;
+        for(int th = 0; th < threads; th++){
+          sum += denseLocalArr[t*threads + th][k];
         }
+        denseArr[t][k] = sum;
       }
     }
   }
@@ -967,6 +975,7 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
 
   // Convert start-bucket counts to cumulative density counts to match base semantics.
   if(!no_dense){
+    #pragma omp parallel for schedule(static) num_threads(threads)
     for(int k = 0; k < N; k++){
       int acc = 0;
       for(int t = 0; t < denseSpan; t++){
