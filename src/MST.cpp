@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sys/stat.h>
 #include <climits>
+#include <algorithm>
 #include "phmap.h"  // Google's Swiss Tables for faster hash maps
 using namespace std;
 
@@ -447,7 +448,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
             __builtin_prefetch(&hash_arr_i[j + 1], 0, 1);
           }
           
-          if(__builtin_expect(sketchSizeArr[hash] == 0, 0)) continue;
+          if(__builtin_expect(sketchSizeArr[hash] <= 1, 0)) continue;
     
           size_t start = (hash > 0) ? offset[hash-1] : 0;
           size_t end   = offset[hash];
@@ -524,12 +525,15 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
         }
     
         if(!no_dense){
-          // Optimized: find first threshold that fails, then update all previous
-          int t = 0;
-          for(; t < denseSpan && tmpDist <= distRadius[t]; t++){
-            denseLocalArr[t * threads + thread_id][i]++;
-            denseLocalArr[t * threads + thread_id][j]++;
+          // Dense semantics are cumulative over thresholds:
+          // base: for each t, if(tmpDist <= distRadius[t]) ++
+          // Optimized: store only the first satisfied bucket t0, then prefix-sum later.
+          int t0 = (int)(std::lower_bound(distRadius, distRadius + denseSpan, tmpDist) - distRadius);
+          if(__builtin_expect(t0 < denseSpan, 1)){
+            denseLocalArr[t0 * threads + thread_id][i]++;
+            denseLocalArr[t0 * threads + thread_id][j]++;
           }
+
           // Calculate ANI (optimized: use multiplication instead of division)
           double tmpANI = 1.0 - tmpDist;
           int ANI = (int)(tmpANI * 100.0);  // 100.0 = 1/0.01
@@ -563,6 +567,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
       }
     }
 
+    // Merge per-thread start-bucket counts.
     for(int i = 0; i < denseSpan; i++){
       for(int j = 0; j < threads; j++){
         for(int k = 0; k < N; k++){
@@ -642,7 +647,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
             __builtin_prefetch(&hash_arr_i[jj + 1], 0, 1);
           }
           
-          if(__builtin_expect(sketchSizeArr[hash] == 0, 0)) continue;
+          if(__builtin_expect(sketchSizeArr[hash] <= 1, 0)) continue;
       
           size_t start = (hash > 0) ? offset[hash-1] : 0;
           size_t end   = offset[hash];
@@ -717,11 +722,10 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
         }
       
         if(!no_dense){
-          // Optimized: find first threshold that fails
-          int t = 0;
-          for(; t < denseSpan && tmpDist <= distRadius[t]; t++){
-            denseArr[t][i]++;
-            denseArr[t][j]++;
+          int t0 = (int)(std::lower_bound(distRadius, distRadius + denseSpan, tmpDist) - distRadius);
+          if(__builtin_expect(t0 < denseSpan, 1)){
+            denseArr[t0][i]++;
+            denseArr[t0][j]++;
           }
           double tmpANI = 1.0 - tmpDist;
           int ANI = (int)(tmpANI * 100.0);
@@ -739,6 +743,17 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
       mstArr[0].swap(tmpMst);
     }
 
+  }
+
+  // Convert start-bucket counts to cumulative density counts to match base semantics.
+  if(!no_dense){
+    for(int k = 0; k < N; k++){
+      int acc = 0;
+      for(int t = 0; t < denseSpan; t++){
+        acc += denseArr[t][k];
+        denseArr[t][k] = acc;
+      }
+    }
   }
 
   vector<EdgeInfo> finalGraph;
@@ -847,11 +862,10 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
           break;
 
         if(!no_dense){
-          for(int t = 0; t < denseSpan; t++){
-            if(tmpDist <= distRadius[t]){
-              denseLocalArr[t * threads + thread_id][i]++;
-              denseLocalArr[t * threads + thread_id][j]++;
-            }
+          int t0 = (int)(std::lower_bound(distRadius, distRadius + denseSpan, tmpDist) - distRadius);
+          if(t0 < denseSpan){
+            denseLocalArr[t0 * threads + thread_id][i]++;
+            denseLocalArr[t0 * threads + thread_id][j]++;
           }
           double tmpANI = 1.0 - tmpDist;
           int ANI = (int)(tmpANI / 0.01);
@@ -893,12 +907,14 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
     }
   }
   for(int i = 0; i < threads; i++){
-    delete(threadsANI[i]);
+    delete [] threadsANI[i];
   }
+  delete [] threadsANI;
 
   for(int i = 0; i < denseSpan * threads; i++){
-    delete(denseLocalArr[i]);
+    delete [] denseLocalArr[i];
   }
+  delete [] denseLocalArr;
 
   if(tailNum != 0){
     for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
@@ -926,11 +942,10 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
           break;
 
         if(!no_dense){
-          for(int t = 0; t < denseSpan; t++){
-            if(tmpDist <= distRadius[t]){
-              denseArr[t][i]++;
-              denseArr[t][j]++;
-            }
+          int t0 = (int)(std::lower_bound(distRadius, distRadius + denseSpan, tmpDist) - distRadius);
+          if(t0 < denseSpan){
+            denseArr[t0][i]++;
+            denseArr[t0][j]++;
           }
           double tmpANI = 1.0 - tmpDist;
           int ANI = (int)(tmpANI/0.01);
@@ -948,6 +963,17 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
       mstArr[0].swap(tmpMst);
     }
 
+  }
+
+  // Convert start-bucket counts to cumulative density counts to match base semantics.
+  if(!no_dense){
+    for(int k = 0; k < N; k++){
+      int acc = 0;
+      for(int t = 0; t < denseSpan; t++){
+        acc += denseArr[t][k];
+        denseArr[t][k] = acc;
+      }
+    }
   }
 
   vector<EdgeInfo> finalGraph;
