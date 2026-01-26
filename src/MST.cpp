@@ -208,8 +208,8 @@ vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha){
 }
 
 
-vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold){
-  // init from the dictFile and indexFile
+vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold, KssdInvertedIndex* inverted_index){
+  // init from memory inverted index or dictFile and indexFile
   int half_k = info.half_k;
   int drlevel = info.drlevel;
   bool use64 = half_k - drlevel > 8 ? true : false;
@@ -223,8 +223,38 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
   // Precompute constants for distance calculation
   const double inv_kmer_size = 1.0 / kmer_size;
   const double log_2 = log(2.0); 
-  if(use64)
-  {
+  
+  // Use memory index if available, otherwise load from file
+  const phmap::flat_hash_map<uint64_t, vector<uint32_t>>* hash_map_ptr = nullptr;
+  if(inverted_index != nullptr && inverted_index->use64 == use64) {
+    // Use memory index directly
+    if(use64) {
+      hash_map_ptr = &(inverted_index->hash_map_64);  // Use pointer to avoid copy
+    } else {
+      // For non-use64, need to build sketchSizeArr, offset, and indexArr from memory index
+      size_t hashSize = inverted_index->hashSize;
+      sketchSizeArr = new uint32_t[hashSize];
+      offset = new size_t[hashSize];
+      uint64_t totalHashNumber = 0;
+      
+      for(size_t i = 0; i < hashSize; i++){
+        sketchSizeArr[i] = inverted_index->hash_map_32[i].size();
+        totalHashNumber += sketchSizeArr[i];
+        offset[i] = sketchSizeArr[i];
+        if(i > 0) offset[i] += offset[i-1];
+      }
+      
+      indexArr = new uint32_t[totalHashNumber];
+      size_t idx = 0;
+      for(size_t i = 0; i < hashSize; i++){
+        for(size_t j = 0; j < inverted_index->hash_map_32[i].size(); j++){
+          indexArr[idx++] = inverted_index->hash_map_32[i][j];
+        }
+      }
+    }
+    cerr << "-----using memory inverted index in compute_kssd_mst()" << endl;
+  } else if(use64) {
+    // Load from file (original code)
     size_t hash_number;
     string cur_index_file = folder_path + '/' + "kssd.sketch.index";
     FILE* fp_index = fopen(cur_index_file.c_str(), "rb");
@@ -273,6 +303,7 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
     fclose(fp_dict);
   }
   else{
+    // Load from file for non-use64 (original code)
     cerr << "-----not use hash64 in compute_kssd_mst() " << endl;
     size_t hashSize;
     uint64_t totalIndex;
@@ -420,8 +451,9 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
             __builtin_prefetch(&hash_arr_i[j + 1], 0, 1);
           }
     
-          auto it = hash_map_arr.find(hash64);
-          if(__builtin_expect(it == hash_map_arr.end(), 0)) continue;
+          const phmap::flat_hash_map<uint64_t, vector<uint32_t>>* map_to_use = hash_map_ptr ? hash_map_ptr : &hash_map_arr;
+          auto it = map_to_use->find(hash64);
+          if(__builtin_expect(it == map_to_use->end(), 0)) continue;
     
           const auto& vec = it->second;
           const size_t vec_size = vec.size();
@@ -623,8 +655,9 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
             __builtin_prefetch(&hash_arr_i[jj + 1], 0, 1);
           }
           
-          auto it = hash_map_arr.find(hash64);
-          if(__builtin_expect(it == hash_map_arr.end(), 0)) continue;
+          const phmap::flat_hash_map<uint64_t, vector<uint32_t>>* map_to_use = hash_map_ptr ? hash_map_ptr : &hash_map_arr;
+          auto it = map_to_use->find(hash64);
+          if(__builtin_expect(it == map_to_use->end(), 0)) continue;
       
           const auto& vec = it->second;
           const size_t vec_size = vec.size();

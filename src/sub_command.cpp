@@ -632,16 +632,22 @@ void clust_from_genome_fast(const string inputFile, string outputFile, string fo
 	bool isSave = !noSave;
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
-	compute_kssd_sketches(sketches, info, isSave, inputFile, folder_path, sketchByFile, minLen, kmerSize, drlevel, threads);
+	KssdInvertedIndex inverted_index;  // Build index while generating sketches
+	
+	// Generate sketches and build inverted index simultaneously (pipeline optimization)
+	compute_kssd_sketches_with_index(sketches, info, inverted_index, isSave, inputFile, folder_path, sketchByFile, minLen, kmerSize, drlevel, threads);
+	
 #ifndef GREEDY_CLUST	
-	transSketches(sketches, info, folder_path, threads);
+	// Write index to files (index already built during sketch generation)
+	transSketchesFromIndex(inverted_index, info, folder_path);
 #else
 #endif
-	compute_kssd_clusters(sketches, info, sketchByFile, no_dense, isContainment, folder_path, outputFile, is_newick_tree, is_linkage_matrix, threshold, isSave, threads, dedup_dist, reps_per_cluster, save_rep_index);
+	// Pass memory index to compute_kssd_clusters, which will pass it to compute_kssd_mst
+	compute_kssd_clusters(sketches, info, sketchByFile, no_dense, isContainment, folder_path, outputFile, is_newick_tree, is_linkage_matrix, threshold, isSave, threads, dedup_dist, reps_per_cluster, save_rep_index, &inverted_index);
 
 }
 
-void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, double threshold, bool isSave, int threads, double dedup_dist, int reps_per_cluster, bool save_rep_index){
+void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, double threshold, bool isSave, int threads, double dedup_dist, int reps_per_cluster, bool save_rep_index, KssdInvertedIndex* inverted_index){
 	vector<vector<int>> cluster;
 	double t2 = get_sec();
 
@@ -679,7 +685,8 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 	int **denseArr;
 	uint64_t* aniArr; //= new uint64_t[101];
 	int denseSpan = DENSE_SPAN;
-	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, no_dense, isContainment, threads, denseArr, denseSpan, aniArr, threshold);
+	// Use memory inverted index if available, otherwise load from file
+	vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, folder_path, 0, no_dense, isContainment, threads, denseArr, denseSpan, aniArr, threshold, inverted_index);
 	double t3 = get_sec();
 #ifdef Timer
 	cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
@@ -816,6 +823,40 @@ void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& inf
 		}
 
 	}
+
+// Pipeline version: generate sketches and build inverted index simultaneously
+void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdParameters& info, KssdInvertedIndex& inverted_index, bool isSave, const string inputFile, string& folder_path, bool sketchByFile, const int minLen, const int kmerSize, const int drlevel, int threads){
+	double t0 = get_sec();
+	if(sketchByFile){
+		if(!sketchFileWithKssd(inputFile, minLen, kmerSize, drlevel, sketches, info, threads, &inverted_index)){
+			cerr << "ERROR: sketchFileWithKssd(), cannot finish the sketch generation by genome files" << endl;
+			exit(1);
+		}
+	} else {
+		cerr << "use the sketch sequence with kssd " << endl;
+		if(!sketchSequencesWithKssd(inputFile, minLen, kmerSize, drlevel, sketches, info, threads, &inverted_index)){
+			cerr << "ERROR: sketchSequencesWithKssd (), cannot finish the sketch generation by genome sequences" << endl;
+			exit(1);
+		}
+	}
+	cerr << "-----the size of sketches (number of genomes or sequences) is: " << sketches.size() << endl;
+	double t1 = get_sec();
+#ifdef Timer
+	cerr << "========time of computing sketch (with index) is: " << t1 - t0 << "========" << endl;
+#endif
+	if(folder_path.empty()){
+		folder_path = currentDataTime();
+	}
+	if(isSave){
+		string command = "mkdir -p " + folder_path;
+		system(command.c_str());
+		saveKssdSketches(sketches, info, folder_path, sketchByFile);
+		double t2 = get_sec();
+#ifdef Timer
+		cerr << "========time of saveKssdSketches is: " << t2 - t1 << "========" << endl;
+#endif
+	}
+}
 
 	static bool looks_like_cluster_result_file(const string& filePath){
 		std::ifstream in(filePath);

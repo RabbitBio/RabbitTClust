@@ -551,7 +551,7 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, 
 	cerr << "\t===the averageSize is: " << averageSize << endl;
 }
 
-bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
+bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads, KssdInvertedIndex* inverted_index){
 	int sufIndex = inputFile.find_last_of('.');
 	string sufName = inputFile.substr(sufIndex+1);
 	if(sufName != "fasta" && sufName != "fna" && sufName != "fa")
@@ -606,6 +606,32 @@ bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int
 	info.drlevel = drlevel;
 	info.id = (half_k << 8) + (half_subk << 4) + drlevel;
 	info.genomeNumber = sketches.size();
+	
+	// Build inverted index while generating sketches (pipeline optimization)
+	if(inverted_index != nullptr) {
+		bool use64 = half_k - drlevel > 8 ? true : false;
+		size_t hashSize = use64 ? 0 : (1LLU << (4 * (half_k - drlevel)));
+		inverted_index->init(use64, hashSize);
+		
+		// Insert all sketches into inverted index after merging
+		// Update IDs to match position in merged vector
+		#pragma omp parallel num_threads(threads)
+		{
+			#pragma omp for schedule(dynamic)
+			for(size_t i = 0; i < sketches.size(); i++){
+				sketches[i].id = i;  // Ensure ID matches position
+				if(use64) {
+					for(size_t j = 0; j < sketches[i].hash64_arr.size(); j++){
+						inverted_index->insert_hash_safe(sketches[i].hash64_arr[j], i);
+					}
+				} else {
+					for(size_t j = 0; j < sketches[i].hash32_arr.size(); j++){
+						inverted_index->insert_hash_safe(sketches[i].hash32_arr[j], i);
+					}
+				}
+			}
+		}
+	}
 	
 	return true;
 #else
@@ -998,7 +1024,7 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 	return true;
 }
 
-bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads){
+bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads, KssdInvertedIndex* inverted_index){
 	fprintf(stderr, "-----input fileList, sketch by file\n");
 	ifstream ifs(inputFile);
 	if(!ifs){
@@ -1036,6 +1062,12 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 	info.drlevel = drlevel;
 	info.id = (half_k << 8) + (half_subk << 4) + drlevel;
 	info.genomeNumber = fileList.size();
+	
+	// Initialize inverted index if provided
+	if(inverted_index != nullptr) {
+		size_t hashSize = use64 ? 0 : (1LLU << (4 * (half_k - drlevel)));
+		inverted_index->init(use64, hashSize);
+	}
 
 	int comp_bittl = 64 - 4 * half_k;
 	int half_outctx_len = half_k - half_subk;
@@ -1193,6 +1225,9 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 			std::sort(hashArr32.begin(), hashArr32.end());
 		}
 
+		uint32_t actual_id = 0;
+		bool sketch_added = false;
+		
 		#pragma omp critical
 		{
 			KssdSketchInfo tmpKssdSketchInfo;
@@ -1205,15 +1240,49 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 			tmpKssdSketchInfo.hash32_arr = std::move(hashArr32);  // Move instead of copy!
 			tmpKssdSketchInfo.hash64_arr = std::move(hashArr64);  // Move instead of copy!
 			tmpKssdSketchInfo.sketchsize = use64 ? tmpKssdSketchInfo.hash64_arr.size() : tmpKssdSketchInfo.hash32_arr.size();  // Fix: use correct size
-			if(totalLength >= minLen)//filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
+			if(totalLength >= minLen) {  //filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
+				actual_id = sketches.size();  // Actual index in sketches vector
+				tmpKssdSketchInfo.id = actual_id;
 				sketches.push_back(std::move(tmpKssdSketchInfo));  // Move instead of copy!
+				sketch_added = true;
+				
+				// Insert into inverted index while generating sketch (pipeline optimization)
+				// Do this inside critical section to ensure thread safety and correct ID
+				if(inverted_index != nullptr) {
+					if(use64) {
+						for(size_t j = 0; j < sketches[actual_id].hash64_arr.size(); j++){
+							inverted_index->hash_map_64[sketches[actual_id].hash64_arr[j]].push_back(actual_id);
+						}
+					} else {
+						for(size_t j = 0; j < sketches[actual_id].hash32_arr.size(); j++){
+							uint32_t hash = sketches[actual_id].hash32_arr[j];
+							if(hash < inverted_index->hash_map_32.size()) {
+								inverted_index->hash_map_32[hash].push_back(actual_id);
+							}
+						}
+					}
+				}
+			}
 			if(i % 10000 == 0)	cerr << "---finished sketching: " << i << " genomes" << endl;
 		}
 
 		gzclose(fp1);
 		kseq_destroy(ks1);
 	}//end for
-	sort(sketches.begin(), sketches.end(), KssdcmpSketchSize);
+	
+	// Note: We don't sort here anymore. The clustering algorithms will sort if needed:
+	// - Greedy algorithm sorts by sketch size in KssdGreedyClusterWithInvertedIndex
+	// - MST algorithm doesn't require sorting
+	// This avoids the expensive index rebuild after sorting.
+	// The inverted index is already built correctly during sketch generation.
+	
+	// Just ensure IDs match positions (they should already be correct from generation)
+	if(inverted_index != nullptr) {
+		for(size_t i = 0; i < sketches.size(); i++){
+			sketches[i].id = i;
+		}
+	}
+	
 	return true;
 }
 
@@ -1338,6 +1407,91 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 
 	//cerr << "the hashSize is: " << hashSize << endl;
 	//cerr << "the totalIndex is: " << totalIndex << endl;
+}
+
+// Write inverted index to files (pipeline version - index already built in memory)
+void transSketchesFromIndex(const KssdInvertedIndex& inverted_index, const KssdParameters& info, const string folder_path){
+	double t0 = get_sec();
+	bool use64 = inverted_index.use64;
+	
+	if(use64){
+		const auto& hash_map_arr = inverted_index.hash_map_64;
+		size_t hash_number = hash_map_arr.size();
+		cerr << "the hash_number is: " << hash_number << endl;
+		
+		size_t total_size = 0;
+		uint64_t* hash_arr = (uint64_t*)malloc(hash_number * sizeof(uint64_t));
+		uint32_t* hash_size_arr = (uint32_t*)malloc(hash_number * sizeof(uint32_t));
+		
+		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
+		FILE* fp_dict = fopen((cur_dict_file).c_str(), "w+");
+		if(!fp_dict){
+			cerr << "ERROR: transSketchesFromIndex, cannot open dictFile: " << cur_dict_file << endl;
+			exit(1);
+		}
+		size_t cur_id = 0;
+		for(const auto& x : hash_map_arr){
+			hash_arr[cur_id] = x.first;
+			fwrite(x.second.data(), sizeof(uint32_t), x.second.size(), fp_dict);
+			hash_size_arr[cur_id] = x.second.size();
+			total_size += x.second.size();
+			cur_id++;
+		}
+		cerr << "the total size is: " << total_size << endl;
+		fclose(fp_dict);
+		
+		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
+		FILE* fp_index = fopen(cur_index_file.c_str(), "w+");
+		if(!fp_index){
+			cerr << "ERROR: transSketchesFromIndex, cannot open indexFile: " << cur_index_file << endl;
+			exit(1);
+		}
+		fwrite(&hash_number, sizeof(size_t), 1, fp_index);
+		fwrite(hash_arr, sizeof(uint64_t), hash_number, fp_index);
+		fwrite(hash_size_arr, sizeof(uint32_t), hash_number, fp_index);
+		fclose(fp_index);
+		free(hash_arr);
+		free(hash_size_arr);
+	}
+	else{
+		const auto& hashMapId = inverted_index.hash_map_32;
+		size_t hashSize = inverted_index.hashSize;
+		uint32_t* offsetArr = (uint32_t*)calloc(hashSize, sizeof(uint32_t));
+		
+		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
+		FILE * fp0 = fopen(cur_dict_file.c_str(), "w+");
+		if(!fp0){
+			cerr << "ERROR: transSketchesFromIndex, cannot open dictFile: " << cur_dict_file << endl;
+			exit(1);
+		}
+		uint64_t totalIndex = 0;
+		for(size_t hash = 0; hash < hashSize; hash++){
+			offsetArr[hash] = 0;
+			if(hashMapId[hash].size() != 0){
+				fwrite(hashMapId[hash].data(), sizeof(uint32_t), hashMapId[hash].size(), fp0);
+				totalIndex += hashMapId[hash].size();
+				offsetArr[hash] = hashMapId[hash].size();
+			}
+		}
+		fclose(fp0);
+		
+		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
+		FILE * fp1 = fopen(cur_index_file.c_str(), "w+");
+		if(!fp1){
+			cerr << "ERROR: transSketchesFromIndex, cannot open indexFile: " << cur_index_file << endl;
+			exit(1);
+		}
+		fwrite(&hashSize, sizeof(size_t), 1, fp1);
+		fwrite(&totalIndex, sizeof(uint64_t), 1, fp1);
+		fwrite(offsetArr, sizeof(uint32_t), hashSize, fp1);
+		fclose(fp1);
+		free(offsetArr);
+	}
+	
+	double t1 = get_sec();
+	#ifdef Timer_inner
+	cerr << "the time of writing index from pre-built inverted index is: " << t1 - t0 << endl;
+	#endif
 }
 
 
