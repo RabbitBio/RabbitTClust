@@ -95,12 +95,30 @@ struct KssdInvertedIndex{
 	}
 };
 
+// Inverted index structure for MinHash (similar to KssdInvertedIndex)
+struct MinHashInvertedIndex{
+	// Hash map from hash value to list of genome IDs
+	phmap::flat_hash_map<uint64_t, vector<uint32_t>> hash_map;
+	
+	MinHashInvertedIndex() {
+		hash_map.reserve(1000000);  // Pre-allocate
+	}
+	
+	// Thread-safe insert with critical section
+	void insert_hash_safe(uint64_t hash_val, uint32_t genome_id) {
+		#pragma omp critical
+		{
+			hash_map[hash_val].push_back(genome_id);
+		}
+	}
+};
+
 bool cmpGenomeSize(SketchInfo s1, SketchInfo s2);
 bool cmpSeqSize(SketchInfo s1, SketchInfo s2);
 
 void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, uint64_t &maxSize, uint64_t& minSize, uint64_t& averageSize);
-bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads);
-bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads);
+bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads, MinHashInvertedIndex* inverted_index = nullptr);
+bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads, MinHashInvertedIndex* inverted_index = nullptr);
 bool cmpSketch(SketchInfo s1, SketchInfo s2);
 //bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, int threads);
 bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads, KssdInvertedIndex* inverted_index = nullptr);

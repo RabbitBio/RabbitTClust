@@ -641,7 +641,7 @@ bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int
 }
 
 
-bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
+bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads, MinHashInvertedIndex* inverted_index){
 	//cerr << "input File is: " << inputFile << endl;
 	//cerr << "in sketchSequences(), the minLen is: " << minLen << endl;
 	int sufIndex = inputFile.find_last_of('.');
@@ -824,6 +824,15 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen,
 
 		tmpSketchInfo.id = index;
 		sketches.push_back(tmpSketchInfo);
+		
+		// Build inverted index if provided and sketchFunc is MinHash
+		if(inverted_index != nullptr && sketchFunc == "MinHash" && tmpSketchInfo.minHash != nullptr) {
+			vector<uint64_t> hashes = tmpSketchInfo.minHash->storeMinHashes();
+			for(uint64_t hash : hashes) {
+				inverted_index->insert_hash_safe(hash, index);
+			}
+		}
+		
 		index++;
 	}//end while
 	#endif
@@ -832,13 +841,27 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen,
 	gzclose(fp1);
 	kseq_destroy(ks1);
 
+	// Build inverted index after merging all sketches (for RABBIT_FX case)
+	if(inverted_index != nullptr && sketchFunc == "MinHash") {
+		#pragma omp parallel for num_threads(threads) schedule(dynamic)
+		for(size_t i = 0; i < sketches.size(); i++){
+			if(sketches[i].minHash != nullptr) {
+				sketches[i].id = i;  // Ensure ID matches position
+				vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
+				for(uint64_t hash : hashes) {
+					inverted_index->insert_hash_safe(hash, i);
+				}
+			}
+		}
+	}
+
 	//sort(sketches.begin(), sketches.end(), cmpSketch);
 	sort(sketches.begin(), sketches.end(), cmpSeqSize);
 
 	return true;
 }
 
-bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads){
+bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads, MinHashInvertedIndex* inverted_index){
 	fprintf(stderr, "-----input fileList, sketch by file\n");
 	fstream fs(inputFile);
 	if(!fs){
@@ -1005,18 +1028,41 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 				tmpSketchInfo.OMH = omh;
 			}
 
+			uint32_t actual_id = 0;
+			bool sketch_added = false;
+			
 			tmpSketchInfo.id = i;
 			tmpSketchInfo.fileName = fileList[i];
 			tmpSketchInfo.totalSeqLength = totalLength;
 			tmpSketchInfo.fileSeqs = curFileSeqs;
-			if(totalLength >= minLen)//filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
+			if(totalLength >= minLen) {  //filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
+				actual_id = sketches.size();  // Actual index in sketches vector
+				tmpSketchInfo.id = actual_id;
 				sketches.push_back(tmpSketchInfo);
+				sketch_added = true;
+				
+				// Insert into inverted index while generating sketch (pipeline optimization)
+				// Do this inside critical section to ensure thread safety and correct ID
+				if(inverted_index != nullptr && sketchFunc == "MinHash" && tmpSketchInfo.minHash != nullptr) {
+					vector<uint64_t> hashes = tmpSketchInfo.minHash->storeMinHashes();
+					for(uint64_t hash : hashes) {
+						inverted_index->insert_hash_safe(hash, actual_id);
+					}
+				}
+			}
 			if(i % 10000 == 0)	cerr << "---finished sketching: " << i << " genomes" << endl;
 		}
 
 		gzclose(fp1);
 		kseq_destroy(ks1);
 	}//end for
+
+	// Ensure IDs match positions (they should already be correct from generation)
+	if(inverted_index != nullptr && sketchFunc == "MinHash") {
+		for(size_t i = 0; i < sketches.size(); i++){
+			sketches[i].id = i;
+		}
+	}
 
 	//sort(sketches.begin(), sketches.end(), cmpSketch);
 	sort(sketches.begin(), sketches.end(), cmpGenomeSize);

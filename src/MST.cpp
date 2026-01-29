@@ -208,9 +208,9 @@ vector<int> getNoiseNode(vector<PairInt> densePairArr, int alpha){
 }
 
 
-vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold, KssdInvertedIndex* inverted_index){
+
   // init from memory inverted index or dictFile and indexFile
-  int half_k = info.half_k;
+vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold, KssdInvertedIndex* inverted_index){  int half_k = info.half_k;
   int drlevel = info.drlevel;
   bool use64 = half_k - drlevel > 8 ? true : false;
   int kmer_size = half_k * 2;
@@ -1299,5 +1299,447 @@ vector<LinkageRow> get_linkage_from_mst(int N, const vector<EdgeInfo>& mst){
   }
 
   return Z;
+}
+
+// MinHash version of MST computation using inverted index (similar to compute_kssd_mst)
+vector<EdgeInfo> compute_minhash_mst(vector<SketchInfo>& sketches, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold, int kmerSize, MinHashInvertedIndex* inverted_index){
+  int kmer_size = kmerSize;
+  int radio = calr(threshold, kmer_size-1);
+  
+  // Precompute constants for distance calculation
+  const double inv_kmer_size = 1.0 / kmer_size;
+  
+  // Use memory index if available
+  const phmap::flat_hash_map<uint64_t, vector<uint32_t>>* hash_map_ptr = nullptr;
+  if(inverted_index != nullptr) {
+    hash_map_ptr = &(inverted_index->hash_map);  // Use pointer to avoid copy
+    cerr << "-----using memory inverted index in compute_minhash_mst()" << endl;
+  } else {
+    cerr << "WARNING: compute_minhash_mst() called without inverted index. Consider using modifyMST() for traditional approach." << endl;
+    // Without inverted index, we can still work but need to build index on-the-fly (slower)
+    // For better performance, use modifyMST() instead
+  }
+
+  // CRITICAL OPTIMIZATION: Pre-cache all hash arrays to avoid repeated storeMinHashes() calls
+  // This is similar to how KSSD directly accesses hash32_arr/hash64_arr
+  cerr << "-----pre-caching MinHash sketches..." << endl;
+  vector<vector<uint64_t>> cached_hashes(sketches.size());
+  vector<int> cached_sizes(sketches.size());
+  
+  #pragma omp parallel for num_threads(threads) schedule(dynamic, 100)
+  for(size_t i = 0; i < sketches.size(); i++){
+    if(sketches[i].minHash != nullptr) {
+      cached_hashes[i] = sketches[i].minHash->storeMinHashes();
+      cached_sizes[i] = (int)cached_hashes[i].size();
+    } else {
+      cached_sizes[i] = 0;
+    }
+  }
+  cerr << "-----MinHash sketches cached" << endl;
+
+  //int denseSpan = 10;
+  double step = 1.0 / denseSpan;
+
+  int N = sketches.size();
+  denseArr = new int*[denseSpan];
+  int** denseLocalArr = new int*[denseSpan * threads];
+  double distRadius[denseSpan];
+  for(int i = 0; i < denseSpan; i++){
+    distRadius[i] = step * i;
+    denseArr[i] = new int[N];
+    memset(denseArr[i], 0, N * sizeof(int));
+    for(int j = 0; j < threads; j++){
+      denseLocalArr[i * threads + j] = new int[N];
+      memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
+    }
+  }
+  //for ANI distribution calculation.
+  aniArr = new uint64_t[101];
+  memset(aniArr, 0, 101 * sizeof(uint64_t));
+  uint64_t** threadsANI = new uint64_t*[threads];
+  for(int i = 0; i < threads; i++){
+    threadsANI[i] = new uint64_t[101];
+    memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+  }
+
+  // start to generate the sub_mst
+  std::vector<std::vector<EdgeInfo>> mstArr(threads);
+  int** intersectionArr = new int*[threads];
+  for(int i = 0; i < threads; i++){
+    intersectionArr[i] = new int[sketches.size()];
+  }
+  int** seenStamp = new int*[threads];
+  int*  epoch     = new int[threads];
+  std::vector<int>* touched = new std::vector<int>[threads];
+
+  for(int t = 0; t < threads; ++t){
+    seenStamp[t] = new int[N];
+    memset(seenStamp[t], 0, N * sizeof(int));
+    epoch[t] = 1;
+    touched[t].reserve(4096);
+  }
+
+  int subSize = 8;
+  int id = 0;
+  int tailNum = (N - start_index) % subSize;
+  uint64_t totalCompNum = (uint64_t)(N-start_index) * (uint64_t)(N+start_index)/2;
+  uint64_t percentNum = totalCompNum / 100;
+  cerr << "---the percentNum is: " << percentNum << endl;
+  cerr << "---the start_index is: " << start_index << endl;
+  uint64_t percentId = 0;
+  
+#pragma omp parallel for num_threads(threads) schedule (dynamic)
+  for(id = start_index; id < sketches.size() - tailNum; id+=subSize){
+    int thread_id = omp_get_thread_num();
+    for(int i = id; i < id + subSize; i++){
+      // ===== per-thread alias =====
+      int* inter = intersectionArr[thread_id];
+      int* stamp = seenStamp[thread_id];
+      int& ep     = epoch[thread_id];
+      auto& cand  = touched[thread_id];
+    
+      // ===== start a new epoch =====
+      cand.clear();
+      ++ep;
+      if(__builtin_expect(ep == INT_MAX, 0)){ 
+        memset(stamp, 0, N * sizeof(int));
+        ep = 1;
+      }
+    
+      // Get MinHash sketch for current genome (use cached version)
+      int size0 = cached_sizes[i];
+      
+      // Early skip if sketch is empty
+      if(__builtin_expect(size0 == 0, 0)) continue;
+      
+      const auto& hash_arr_i = cached_hashes[i];
+    
+      // ===== accumulate intersection counts AND collect candidates using inverted index =====
+      if(hash_map_ptr != nullptr) {
+        // Use memory inverted index
+        const size_t hash_size = hash_arr_i.size();
+        for(size_t j = 0; j < hash_size; j++){
+          uint64_t hash64 = hash_arr_i[j];
+          
+          // Prefetch next hash for better cache performance
+          if(__builtin_expect(j + 1 < hash_size, 1)){
+            __builtin_prefetch(&hash_arr_i[j + 1], 0, 1);
+          }
+    
+          auto it = hash_map_ptr->find(hash64);
+          if(__builtin_expect(it == hash_map_ptr->end(), 0)) continue;
+    
+          const auto& vec = it->second;
+          const size_t vec_size = vec.size();
+          for(size_t k = 0; k < vec_size; k++){
+            int cur = (int)vec[k];
+            if(__builtin_expect(stamp[cur] != ep, 1)){
+              stamp[cur] = ep;
+              inter[cur] = 1;
+              cand.push_back(cur);
+            }else{
+              inter[cur] += 1;
+            }
+          }
+        }
+      } else {
+        // Fallback: without pre-built index, use cached hashes to compute intersections
+        // This is slower but works. For better performance, build inverted index during sketch generation.
+        const size_t hash_size = hash_arr_i.size();
+        for(size_t j = 0; j < sketches.size(); j++){
+          if(j == i || cached_sizes[j] == 0) continue;
+          const auto& hash_arr_j = cached_hashes[j];
+          
+          // Count intersection using cached arrays (much faster than calling storeMinHashes)
+          int common = 0;
+          // Use hash set for faster lookup
+          phmap::flat_hash_set<uint64_t> hash_set_j(hash_arr_j.begin(), hash_arr_j.end());
+          for(uint64_t hash_i : hash_arr_i) {
+            if(hash_set_j.count(hash_i) > 0) {
+              common++;
+            }
+          }
+          
+          if(common > 0) {
+            if(__builtin_expect(stamp[j] != ep, 1)){
+              stamp[j] = ep;
+              inter[j] = common;
+              cand.push_back(j);
+            }else{
+              inter[j] += common;
+            }
+          }
+        }
+      }
+    
+      // ===== candidate-only loop (replace for(j=0;j<i;j++)) =====
+      const int cand_size = (int)cand.size();
+      for(int idx = 0; idx < cand_size; ++idx){
+        int j = cand[idx];
+        if(__builtin_expect(j >= i, 0)) continue; 
+    
+        double tmpDist;
+        int common = inter[j];
+    
+        // Use cached hash array (avoid expensive storeMinHashes() call)
+        int size1 = cached_sizes[j];
+        if(__builtin_expect(size1 == 0, 0)) continue;
+        const auto& hash_arr_j = cached_hashes[j];
+    
+        // Fast path: skip if size ratio check fails
+        if(__builtin_expect(size0 > 0 && size1 > 0, 1)){
+          int min_size = size0 < size1 ? size0 : size1;
+          int max_size = size0 > size1 ? size0 : size1;
+          if(__builtin_expect(max_size > radio * min_size, 0)) continue;
+        }else{
+          continue;
+        }
+    
+        if(!isContainment){
+          int denom = size0 + size1 - common;
+          double jaccard;
+          if(__builtin_expect(denom == 0, 0)) jaccard = 0.0;
+          else jaccard = (double)common / denom;
+    
+          double mashD;
+          if(__builtin_expect(jaccard == 1.0, 0)) mashD = 0.0;
+          else if(__builtin_expect(jaccard == 0.0, 0)) mashD = 1.0;
+          else {
+            // Optimized: use precomputed constants
+            double ratio = (2.0 * jaccard) / (1.0 + jaccard);
+            mashD = -inv_kmer_size * log(ratio);
+          }
+          tmpDist = mashD;
+        }else{
+          int denom = size0 < size1 ? size0 : size1;
+          double containment;
+          if(__builtin_expect(denom == 0, 0)) containment = 0.0;
+          else containment = (double)common / denom;
+    
+          double AafD;
+          if(__builtin_expect(containment == 1.0, 0)) AafD = 0.0;
+          else if(__builtin_expect(containment == 0.0, 0)) AafD = 1.0;
+          else AafD = -inv_kmer_size * log(containment);
+          tmpDist = AafD;
+        }
+    
+        if(!no_dense){
+          // Dense semantics are cumulative over thresholds
+          int t0 = (int)(std::lower_bound(distRadius, distRadius + denseSpan, tmpDist) - distRadius);
+          if(__builtin_expect(t0 < denseSpan, 1)){
+            denseLocalArr[t0 * threads + thread_id][i]++;
+            denseLocalArr[t0 * threads + thread_id][j]++;
+          }
+
+          // Calculate ANI
+          double tmpANI = 1.0 - tmpDist;
+          int ANI = (int)(tmpANI * 100.0);
+          if(__builtin_expect(ANI >= 101, 0)) ANI = 100;
+          threadsANI[thread_id][ANI]++;
+        }
+    
+        mstArr[thread_id].push_back(EdgeInfo{i, j, tmpDist});
+      }
+    }    
+    if(thread_id == 0){
+      uint64_t computedNum = (uint64_t)(id-start_index) * (uint64_t)(id+start_index) / 2;
+      if(computedNum >= percentId * percentNum){
+        fprintf(stderr, "---finish MST generation %d %\n", percentId);
+        percentId++;
+      }
+    }
+
+    sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
+    vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], sketches.size());
+    mstArr[thread_id].swap(tmpMst);
+    vector<EdgeInfo>().swap(tmpMst);
+  }
+  cerr << "-----finish the 100 % multiThreads mst generate" << endl;
+
+  if(!no_dense){
+    for(int i = 0; i < 101; i++){
+      for(int j = 0; j < threads; j++){
+        aniArr[i] += threadsANI[j][i];
+      }
+    }
+
+    // Merge per-thread start-bucket counts
+    for(int t = 0; t < denseSpan; t++){
+      #pragma omp parallel for schedule(static) num_threads(threads)
+      for(int k = 0; k < N; k++){
+        int sum = 0;
+        for(int th = 0; th < threads; th++){
+          sum += denseLocalArr[t*threads + th][k];
+        }
+        denseArr[t][k] = sum;
+      }
+    }
+  }
+  for(int i = 0; i < threads; i++){
+    delete [] threadsANI[i];
+  }
+  delete [] threadsANI;
+  
+  for(int i = 0; i < denseSpan * threads; i++){
+    delete [] denseLocalArr[i];
+  }
+  delete [] denseLocalArr;
+
+  if(tailNum != 0){
+    for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
+      int* inter = intersectionArr[0];
+      int* stamp = seenStamp[0];
+      int& ep     = epoch[0];
+      auto& cand  = touched[0];
+      
+      cand.clear();
+      ++ep;
+      if(__builtin_expect(ep == INT_MAX, 0)){
+        memset(stamp, 0, N * sizeof(int));
+        ep = 1;
+      }
+      
+      // Get MinHash sketch (use cached version)
+      int size0 = cached_sizes[i];
+      
+      if(__builtin_expect(size0 == 0, 0)) continue;
+      
+      const auto& hash_arr_i = cached_hashes[i];
+      
+      if(hash_map_ptr != nullptr) {
+        const size_t hash_size = hash_arr_i.size();
+        for(size_t jj = 0; jj < hash_size; jj++){
+          uint64_t hash64 = hash_arr_i[jj];
+          
+          if(__builtin_expect(jj + 1 < hash_size, 1)){
+            __builtin_prefetch(&hash_arr_i[jj + 1], 0, 1);
+          }
+          
+          auto it = hash_map_ptr->find(hash64);
+          if(__builtin_expect(it == hash_map_ptr->end(), 0)) continue;
+      
+          const auto& vec = it->second;
+          const size_t vec_size = vec.size();
+          for(size_t k = 0; k < vec_size; k++){
+            int cur = (int)vec[k];
+            if(__builtin_expect(stamp[cur] != ep, 1)){
+              stamp[cur] = ep;
+              inter[cur] = 1;
+              cand.push_back(cur);
+            }else{
+              inter[cur] += 1;
+            }
+          }
+        }
+      }
+      
+      // candidate-only
+      const int cand_size = (int)cand.size();
+      for(int idx = 0; idx < cand_size; ++idx){
+        int j = cand[idx];
+        if(__builtin_expect(j >= i, 0)) continue;
+      
+        double tmpDist;
+        int common = inter[j];
+      
+        // Use cached hash array (avoid expensive storeMinHashes() call)
+        int size1 = cached_sizes[j];
+        if(__builtin_expect(size1 == 0, 0)) continue;
+        const auto& hash_arr_j = cached_hashes[j];
+      
+        // Fast path: skip if size ratio check fails
+        if(__builtin_expect(size0 > 0 && size1 > 0, 1)){
+          int min_size = size0 < size1 ? size0 : size1;
+          int max_size = size0 > size1 ? size0 : size1;
+          if(__builtin_expect(max_size > radio * min_size, 0)) continue;
+        }else{
+          continue;
+        }
+      
+        if(!isContainment){
+          int denom = size0 + size1 - common;
+          double jaccard;
+          if(__builtin_expect(denom == 0, 0)) jaccard = 0.0;
+          else jaccard = (double)common / denom;
+      
+          double mashD;
+          if(__builtin_expect(jaccard == 1.0, 0)) mashD = 0.0;
+          else if(__builtin_expect(jaccard == 0.0, 0)) mashD = 1.0;
+          else {
+            double ratio = (2.0 * jaccard) / (1.0 + jaccard);
+            mashD = -inv_kmer_size * log(ratio);
+          }
+          tmpDist = mashD;
+        }else{
+          int denom = size0 < size1 ? size0 : size1;
+          double containment;
+          if(__builtin_expect(denom == 0, 0)) containment = 0.0;
+          else containment = (double)common / denom;
+      
+          double AafD;
+          if(__builtin_expect(containment == 1.0, 0)) AafD = 0.0;
+          else if(__builtin_expect(containment == 0.0, 0)) AafD = 1.0;
+          else AafD = -inv_kmer_size * log(containment);
+          tmpDist = AafD;
+        }
+      
+        if(!no_dense){
+          int t0 = (int)(std::lower_bound(distRadius, distRadius + denseSpan, tmpDist) - distRadius);
+          if(__builtin_expect(t0 < denseSpan, 1)){
+            denseArr[t0][i]++;
+            denseArr[t0][j]++;
+          }
+          double tmpANI = 1.0 - tmpDist;
+          int ANI = (int)(tmpANI * 100.0);
+          if(__builtin_expect(ANI >= 101, 0)) ANI = 100;
+          aniArr[ANI]++;
+        }
+      
+        mstArr[0].push_back(EdgeInfo{i, j, tmpDist});
+      }
+      
+    }
+    if(mstArr[0].size() != 0){
+      sort(mstArr[0].begin(), mstArr[0].end(), cmpEdge);
+      vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[0], sketches.size());
+      mstArr[0].swap(tmpMst);
+    }
+
+  }
+
+  // Convert start-bucket counts to cumulative density counts
+  if(!no_dense){
+    #pragma omp parallel for schedule(static) num_threads(threads)
+    for(int k = 0; k < N; k++){
+      int acc = 0;
+      for(int t = 0; t < denseSpan; t++){
+        acc += denseArr[t][k];
+        denseArr[t][k] = acc;
+      }
+    }
+  }
+
+  vector<EdgeInfo> finalGraph;
+  for(int i = 0; i < threads; i++){
+    finalGraph.insert(finalGraph.end(), mstArr[i].begin(), mstArr[i].end());
+    vector<EdgeInfo>().swap(mstArr[i]);
+  }
+
+  sort(finalGraph.begin(), finalGraph.end(), cmpEdge);
+
+  vector<EdgeInfo> mst = kruskalAlgorithm(finalGraph, sketches.size());
+  vector<EdgeInfo>().swap(finalGraph);
+  for(int t = 0; t < threads; ++t){
+    delete [] seenStamp[t];
+  }
+  delete [] seenStamp;
+  delete [] epoch;
+  delete [] touched;
+  for(int t = 0; t < threads; ++t){
+    delete [] intersectionArr[t];
+  }
+  delete [] intersectionArr;
+
+  return mst;
 }
 

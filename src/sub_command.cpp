@@ -5,6 +5,7 @@
 #include <sstream>
 #include <unordered_set>
 #include <sys/stat.h>  // For stat()
+#include <omp.h>  // For OpenMP functions
 
 using namespace std;
 
@@ -60,7 +61,7 @@ void append_clust_greedy(string folder_path, string input_file, string output_fi
 			sketch_func = "KSSD";
 		vector<SketchInfo> append_sketches;
 		string append_folder_path;
-		compute_sketches(append_sketches, input_file, append_folder_path, sketch_by_file, min_len, kmer_size, sketch_size, sketch_func, is_containment, contain_compress, false, threads);
+		compute_sketches(append_sketches, input_file, append_folder_path, sketch_by_file, min_len, kmer_size, sketch_size, sketch_func, is_containment, contain_compress, false, threads, nullptr);
 		vector<SketchInfo> final_sketches;
 		final_sketches.insert(final_sketches.end(), pre_sketches.begin(), pre_sketches.end());
 		final_sketches.insert(final_sketches.end(), append_sketches.begin(), append_sketches.end());
@@ -154,7 +155,7 @@ void append_clust_greedy(string folder_path, string input_file, string output_fi
 		     << ", sketch_size=" << minhash_state.sketch_size 
 		     << ", is_containment=" << minhash_state.is_containment 
 		     << ", contain_compress=" << contain_compress << endl;
-		compute_sketches(new_sketches, input_file, new_folder_path, sketch_by_file, min_len, minhash_state.kmer_size, minhash_state.sketch_size, sketch_func, minhash_state.is_containment, contain_compress, false, threads);
+		compute_sketches(new_sketches, input_file, new_folder_path, sketch_by_file, min_len, minhash_state.kmer_size, minhash_state.sketch_size, sketch_func, minhash_state.is_containment, contain_compress, false, threads, nullptr);
 		
 		cerr << "New genomes sketched: " << new_sketches.size() << endl;
 		
@@ -943,7 +944,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		if(sketchFunc == "MinHash")	sketch_func_id = 0;
 		else if(sketchFunc == "KSSD") sketch_func_id = 1;
 
-		compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, isSave, threads);
+		compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, isSave, threads, nullptr);
 
 		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_linkage_matrix, no_dense, folder_path, sketch_func_id, threshold, isSave, threads, use_inverted_index, save_rep_index);
 	}
@@ -1294,7 +1295,70 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		int** denseArr;
 		uint64_t* aniArr; //= new uint64_t[101];
 		int denseSpan = DENSE_SPAN;
-		vector<EdgeInfo> mst = modifyMST(sketches, 0, sketch_func_id, threads, no_dense, denseArr, denseSpan, aniArr);
+		
+		// Use inverted index optimization for MinHash MST
+		vector<EdgeInfo> mst;
+		if(sketch_func_id == 0 && sketches.size() > 0 && sketches[0].minHash != nullptr) {
+			// Read kmerSize from sketch parameters file (more reliable than from sketch object)
+			int kmer_size_from_file = 21;  // Default for MinHash
+			int sketch_func_id_check, contain_compress, sketch_size, half_k, half_subk, drlevel;
+			bool is_containment_from_file;
+			read_sketch_parameters(folder_path, sketch_func_id_check, kmer_size_from_file, is_containment_from_file, contain_compress, sketch_size, half_k, half_subk, drlevel);
+			
+			// Build inverted index from loaded sketches using thread-local indices (like KSSD)
+			MinHashInvertedIndex inverted_index;
+			cerr << "-----building MinHash inverted index for MST computation..." << endl;
+			
+			// Use thread-local indices to reduce lock contention (similar to KSSD optimization)
+			vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
+			
+			#pragma omp parallel num_threads(threads)
+			{
+				int tid = omp_get_thread_num();
+				auto& local_index = thread_local_indices[tid];
+				
+				#pragma omp for schedule(dynamic, 100)
+				for(size_t i = 0; i < sketches.size(); i++){
+					if(sketches[i].minHash != nullptr) {
+						sketches[i].id = i;  // Ensure ID matches position
+						vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
+						for(uint64_t hash : hashes) {
+							local_index[hash].push_back(i);
+						}
+					}
+				}
+			}
+			
+			// Merge thread-local indices (no lock needed here)
+			cerr << "-----merging thread-local indices..." << endl;
+			for(int tid = 0; tid < threads; tid++){
+				for(auto& entry : thread_local_indices[tid]){
+					uint64_t hash = entry.first;
+					auto& seq_ids = entry.second;
+					inverted_index.hash_map[hash].insert(
+						inverted_index.hash_map[hash].end(), 
+						seq_ids.begin(), seq_ids.end()
+					);
+				}
+			}
+			
+			cerr << "-----MinHash inverted index built: " << inverted_index.hash_map.size() << " unique hashes" << endl;
+			
+			// Use kmerSize from file (default 21 for MinHash), fallback to sketch object if file read fails
+			int kmer_size = kmer_size_from_file;
+			bool is_containment = is_containment_from_file;
+			if(kmer_size <= 0) {
+				// Fallback: get from sketch object
+				kmer_size = sketches[0].minHash->getKmerSize();
+				is_containment = sketches[0].isContainment;
+			}
+			
+			// Use compute_minhash_mst with inverted index
+			mst = compute_minhash_mst(sketches, 0, no_dense, is_containment, threads, denseArr, denseSpan, aniArr, threshold, kmer_size, &inverted_index);
+		} else {
+			// Fallback to traditional modifyMST for non-MinHash or when MinHash is not available
+			mst = modifyMST(sketches, 0, sketch_func_id, threads, no_dense, denseArr, denseSpan, aniArr);
+		}
 		double time2 = get_sec();
 #ifdef Timer
 		cerr << "========time of generateMST is: " << time2 - time1 << "========" << endl;
@@ -1343,16 +1407,16 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 #endif
 	}
 
-	void compute_sketches(vector<SketchInfo>& sketches, string inputFile, string& folder_path, bool sketchByFile, int minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress,  bool isSave, int threads){
+	void compute_sketches(vector<SketchInfo>& sketches, string inputFile, string& folder_path, bool sketchByFile, int minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress,  bool isSave, int threads, MinHashInvertedIndex* inverted_index){
 		double t0 = get_sec();
 		if(sketchByFile){
-			if(!sketchFiles(inputFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads)){
+			if(!sketchFiles(inputFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads, inverted_index)){
 				cerr << "ERROR: generate_sketches(), cannot finish the sketch generation by genome files" << endl;
 				exit(1);
 			}
 		}//end sketch by sequence
 		else{
-			if(!sketchSequences(inputFile, kmerSize, sketchSize, minLen, sketchFunc, isContainment, containCompress, sketches, threads)){
+			if(!sketchSequences(inputFile, kmerSize, sketchSize, minLen, sketchFunc, isContainment, containCompress, sketches, threads, inverted_index)){
 				cerr << "ERROR: generate_sketches(), cannot finish the sketch generation by genome sequences" << endl;
 				exit(1);
 			}
@@ -1412,7 +1476,70 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		int **denseArr;
 		uint64_t* aniArr; //= new uint64_t[101];
 		int denseSpan = DENSE_SPAN;
-		vector<EdgeInfo> mst = modifyMST(sketches, 0, sketch_func_id, threads, no_dense, denseArr, denseSpan, aniArr);
+		
+		// Use inverted index optimization for MinHash MST
+		vector<EdgeInfo> mst;
+		if(sketch_func_id == 0 && sketches.size() > 0 && sketches[0].minHash != nullptr) {
+			// Read kmerSize from sketch parameters file (more reliable than from sketch object)
+			int kmer_size_from_file = 21;  // Default for MinHash
+			int sketch_func_id_check, contain_compress, sketch_size, half_k, half_subk, drlevel;
+			bool is_containment_from_file;
+			read_sketch_parameters(folder_path, sketch_func_id_check, kmer_size_from_file, is_containment_from_file, contain_compress, sketch_size, half_k, half_subk, drlevel);
+			
+			// Build inverted index from sketches using thread-local indices (like KSSD)
+			MinHashInvertedIndex inverted_index;
+			cerr << "-----building MinHash inverted index for MST computation..." << endl;
+			
+			// Use thread-local indices to reduce lock contention
+			vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
+			
+			#pragma omp parallel num_threads(threads)
+			{
+				int tid = omp_get_thread_num();
+				auto& local_index = thread_local_indices[tid];
+				
+				#pragma omp for schedule(dynamic, 100)
+				for(size_t i = 0; i < sketches.size(); i++){
+					if(sketches[i].minHash != nullptr) {
+						sketches[i].id = i;  // Ensure ID matches position
+						vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
+						for(uint64_t hash : hashes) {
+							local_index[hash].push_back(i);
+						}
+					}
+				}
+			}
+			
+			// Merge thread-local indices (no lock needed here)
+			cerr << "-----merging thread-local indices..." << endl;
+			for(int tid = 0; tid < threads; tid++){
+				for(auto& entry : thread_local_indices[tid]){
+					uint64_t hash = entry.first;
+					auto& seq_ids = entry.second;
+					inverted_index.hash_map[hash].insert(
+						inverted_index.hash_map[hash].end(), 
+						seq_ids.begin(), seq_ids.end()
+					);
+				}
+			}
+			
+			cerr << "-----MinHash inverted index built: " << inverted_index.hash_map.size() << " unique hashes" << endl;
+			
+			// Use kmerSize from file (default 21 for MinHash), fallback to sketch object if file read fails
+			int kmer_size = kmer_size_from_file;
+			bool is_containment = is_containment_from_file;
+			if(kmer_size <= 0) {
+				// Fallback: get from sketch object
+				kmer_size = sketches[0].minHash->getKmerSize();
+				is_containment = sketches[0].isContainment;
+			}
+			
+			// Use compute_minhash_mst with inverted index
+			mst = compute_minhash_mst(sketches, 0, no_dense, is_containment, threads, denseArr, denseSpan, aniArr, threshold, kmer_size, &inverted_index);
+		} else {
+			// Fallback to traditional modifyMST for non-MinHash or when MinHash is not available
+			mst = modifyMST(sketches, 0, sketch_func_id, threads, no_dense, denseArr, denseSpan, aniArr);
+		}
 		double t3 = get_sec();
 #ifdef Timer
 		cerr << "========time of generateMST is: " << t3 - t2 << "========" << endl;
