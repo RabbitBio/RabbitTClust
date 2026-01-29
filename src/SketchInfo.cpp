@@ -874,44 +874,20 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 		fileList.push_back(fileName);
 	}
 
-	int half_k = 10;
-	int half_subk = 6;
-	int drlevel = 3;
-	Sketch::KSSDParameters kssdPara(half_k, half_subk, drlevel);
-
-	Sketch::WMHParameters parameter;
-	if(sketchFunc == "WMH"){
-		parameter.kmerSize = kmerSize;
-		parameter.sketchSize = WMH_SKETCH_SIZE;
-		parameter.windowSize = WINDOW_SIZE;
-		parameter.r = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-		parameter.c = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-		parameter.b = (double *)malloc(parameter.sketchSize * pow(parameter.kmerSize, 4) * sizeof(double));
-		getCWS(parameter.r, parameter.c, parameter.b, parameter.sketchSize, pow(parameter.kmerSize, 4));
-	}
-
 	#pragma omp parallel for num_threads(threads) schedule(dynamic)
 	for(int i = 0; i < fileList.size(); i++){
-		//cerr << "start the file: " << fileList[i] << endl;
 		gzFile fp1;
 		kseq_t* ks1;
 		fp1 = gzopen(fileList[i].c_str(), "r");
 		if(fp1 == NULL){
 			fprintf(stderr, "cannot open the genome file: %s\n", fileList[i].c_str());
 			exit(1);
-			//return false;
 		}
 		ks1 = kseq_init(fp1);
 		uint64_t totalLength = 0;
 		int fileLength = 0;
 
-		Sketch::MinHash * mh1;
-		Sketch::KSSD * kssd;
-		Sketch::WMinHash * wmh1;
-		Sketch::HyperLogLog * hll;
-		Sketch::OrderMinHash * omh;
-
-		//get the fileSize(for the sketchSize init)
+		// Get the fileSize (for the sketchSize init if containment)
 		if(isContainment)
 		{
 			FILE * fp = fopen(fileList[i].c_str(), "r");
@@ -927,44 +903,24 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 				int nUnCompress = 0;
 				fread(&nUnCompress, sizeof(int), 1, fp);
 				fileLength = nUnCompress;
-				//cerr << "compressed fileLength is: " << fileLength << endl;
 			}
 			else//fna file
 			{
 				fseek(fp, 0, SEEK_END);
 				int nUnCompress = ftell(fp);
 				fileLength =  nUnCompress;
-				//cerr << "uncompressed fileLength is: " << fileLength << endl;
 			}
 			fclose(fp);
 		}
 
-		if(sketchFunc == "MinHash"){
-			if(isContainment){
-				int curSketchSize = std::max(fileLength / containCompress, 100);
-				mh1 = new Sketch::MinHash(kmerSize, curSketchSize);
-			}
-			else
-				mh1 = new Sketch::MinHash(kmerSize, sketchSize);
+		// Create MinHash sketch
+		Sketch::MinHash * mh1;
+		if(isContainment){
+			int curSketchSize = std::max(fileLength / containCompress, 100);
+			mh1 = new Sketch::MinHash(kmerSize, curSketchSize);
 		}
-		else if(sketchFunc == "KSSD"){
-			kssd = new Sketch::KSSD(kssdPara);
-		}
-		else if(sketchFunc == "WMH"){
-			wmh1 = new Sketch::WMinHash(parameter);
-		}
-		else if(sketchFunc == "HLL"){
-			hll = new Sketch::HyperLogLog(HLL_SKETCH_BIT);
-		}
-		else if(sketchFunc == "OMH"){
-			omh = new Sketch::OrderMinHash();
-		}
-		else{
-			fprintf(stderr, "Invaild sketch function: %s\n", sketchFunc.c_str());
-			exit(1);
-			//return false;
-		}
-
+		else
+			mh1 = new Sketch::MinHash(kmerSize, sketchSize);
 
 		Vec_SeqInfo curFileSeqs;
 		
@@ -982,54 +938,22 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 				comment = ks1->comment.s;
 			SequenceInfo tmpSeq{name, comment, 0, length};
 			
-			if(sketchFunc == "MinHash"){
-				mh1->update(ks1->seq.s);
-			}
-			else if(sketchFunc == "KSSD"){
-				kssd->update(ks1->seq.s);
-			}
-			else if(sketchFunc == "WMH"){
-				wmh1->update(ks1->seq.s);
-			}
-			else if(sketchFunc == "HLL"){
-				hll->update(ks1->seq.s);
-			}
-			else if(sketchFunc == "OMH"){
-				omh->buildSketch(ks1->seq.s);
-			}
+			mh1->update(ks1->seq.s);
 
 			//only save the info of the first sequence for reducing the memory footprint
 			//and the overhead of sorting the sketches vector array.
 			if(curFileSeqs.size() == 0)
 				curFileSeqs.push_back(tmpSeq);
 		}//end while, end sketch current file.
-		if(sketchFunc == "WMH"){
-			wmh1->computeHistoSketch();
-		}
 
 		#pragma omp critical
 		{
 			SketchInfo tmpSketchInfo;
-			if(sketchFunc == "MinHash"){
-				if(isContainment)
-					tmpSketchInfo.isContainment = true;
-				tmpSketchInfo.minHash = mh1;
-			}
-			else if(sketchFunc == "KSSD"){
-				tmpSketchInfo.KSSD = kssd;
-			}
-			else if(sketchFunc == "WMH"){
-				tmpSketchInfo.WMinHash = wmh1;
-			}
-			else if(sketchFunc == "HLL"){
-				tmpSketchInfo.HLL = hll;
-			}
-			else if(sketchFunc == "OMH"){
-				tmpSketchInfo.OMH = omh;
-			}
-
+			if(isContainment)
+				tmpSketchInfo.isContainment = true;
+			tmpSketchInfo.minHash = mh1;
+			
 			uint32_t actual_id = 0;
-			bool sketch_added = false;
 			
 			tmpSketchInfo.id = i;
 			tmpSketchInfo.fileName = fileList[i];
@@ -1039,11 +963,10 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 				actual_id = sketches.size();  // Actual index in sketches vector
 				tmpSketchInfo.id = actual_id;
 				sketches.push_back(tmpSketchInfo);
-				sketch_added = true;
 				
 				// Insert into inverted index while generating sketch (pipeline optimization)
 				// Do this inside critical section to ensure thread safety and correct ID
-				if(inverted_index != nullptr && sketchFunc == "MinHash" && tmpSketchInfo.minHash != nullptr) {
+				if(inverted_index != nullptr && tmpSketchInfo.minHash != nullptr) {
 					vector<uint64_t> hashes = tmpSketchInfo.minHash->storeMinHashes();
 					for(uint64_t hash : hashes) {
 						inverted_index->insert_hash_safe(hash, actual_id);
@@ -1058,7 +981,7 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 	}//end for
 
 	// Ensure IDs match positions (they should already be correct from generation)
-	if(inverted_index != nullptr && sketchFunc == "MinHash") {
+	if(inverted_index != nullptr) {
 		for(size_t i = 0; i < sketches.size(); i++){
 			sketches[i].id = i;
 		}
