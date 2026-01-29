@@ -446,7 +446,55 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 	int ** dense_arr;
 	int dense_span = DENSE_SPAN;
 	uint64_t* ani_arr;
-	vector<EdgeInfo> append_mst = modifyMST(final_sketches, pre_sketch_size, sketch_func_id_0, threads, no_dense, dense_arr, dense_span, ani_arr);
+	
+	// Use inverted index optimization for MinHash MST append
+	vector<EdgeInfo> append_mst;
+	if(sketch_func_id_0 == 0 && final_sketches.size() > 0 && final_sketches[0].minHash != nullptr) {
+		// Build inverted index from all final_sketches (pre + append) using thread-local indices
+		MinHashInvertedIndex inverted_index;
+		cerr << "-----building MinHash inverted index for append MST computation..." << endl;
+		
+		// Use thread-local indices to reduce lock contention
+		vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
+		
+		#pragma omp parallel num_threads(threads)
+		{
+			int tid = omp_get_thread_num();
+			auto& local_index = thread_local_indices[tid];
+			
+			#pragma omp for schedule(dynamic, 100)
+			for(size_t i = 0; i < final_sketches.size(); i++){
+				if(final_sketches[i].minHash != nullptr) {
+					final_sketches[i].id = i;  // Ensure ID matches position
+					vector<uint64_t> hashes = final_sketches[i].minHash->storeMinHashes();
+					for(uint64_t hash : hashes) {
+						local_index[hash].push_back(i);
+					}
+				}
+			}
+		}
+		
+		// Merge thread-local indices (no lock needed here)
+		cerr << "-----merging thread-local indices..." << endl;
+		for(int tid = 0; tid < threads; tid++){
+			for(auto& entry : thread_local_indices[tid]){
+				uint64_t hash = entry.first;
+				auto& seq_ids = entry.second;
+				inverted_index.hash_map[hash].insert(
+					inverted_index.hash_map[hash].end(), 
+					seq_ids.begin(), seq_ids.end()
+				);
+			}
+		}
+		
+		cerr << "-----MinHash inverted index built: " << inverted_index.hash_map.size() << " unique hashes" << endl;
+		
+		// Use compute_minhash_mst with start_index=pre_sketch_size (only compute edges for new sketches)
+		append_mst = compute_minhash_mst(final_sketches, pre_sketch_size, no_dense, is_containment, threads, dense_arr, dense_span, ani_arr, threshold, kmer_size, &inverted_index);
+	} else {
+		// Fallback to traditional modifyMST for non-MinHash
+		append_mst = modifyMST(final_sketches, pre_sketch_size, sketch_func_id_0, threads, no_dense, dense_arr, dense_span, ani_arr);
+	}
 	vector<EdgeInfo> final_graph;
 	final_graph.insert(final_graph.end(), pre_mst.begin(), pre_mst.end());
 	final_graph.insert(final_graph.end(), append_mst.begin(), append_mst.end());
