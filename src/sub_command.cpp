@@ -1935,7 +1935,7 @@ void clust_from_pregraph_leiden(string folder_path, string outputFile,
 #ifdef DBSCAN_CLUST
 // ==================== DBSCAN Clustering Functions ====================
 
-void clust_from_sketch_dbscan(string folder_path, string outputFile, bool sketchByFile, double eps, int minPts, int threads) {
+void clust_from_sketch_dbscan(string folder_path, string outputFile, bool sketchByFile, double eps, int minPts, int threads, int knn_k) {
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
 	
@@ -1953,7 +1953,7 @@ void clust_from_sketch_dbscan(string folder_path, string outputFile, bool sketch
 	int kmer_size = info.half_k * 2;
 	
 	// Run DBSCAN clustering
-	DBSCANResult result = KssdDBSCAN(sketches, eps, minPts, kmer_size, threads);
+	DBSCANResult result = KssdDBSCAN(sketches, eps, minPts, kmer_size, threads, knn_k);
 	
 	// Print results
 	printKssdDBSCANResult(result, sketches, sketchByFile, outputFile, eps, minPts);
@@ -1967,7 +1967,7 @@ void clust_from_sketch_dbscan(string folder_path, string outputFile, bool sketch
 #endif
 }
 
-void clust_from_genome_dbscan(const string inputFile, string outputFile, string folder_path, bool sketchByFile, const int kmerSize, const int drlevel, const int minLen, bool noSave, double eps, int minPts, int threads) {
+void clust_from_genome_dbscan(const string inputFile, string outputFile, string folder_path, bool sketchByFile, const int kmerSize, const int drlevel, const int minLen, bool noSave, double eps, int minPts, int threads, int knn_k) {
 	bool isSave = !noSave;
 	
 	vector<KssdSketchInfo> sketches;
@@ -1983,7 +1983,7 @@ void clust_from_genome_dbscan(const string inputFile, string outputFile, string 
 #endif
 	
 	// Run DBSCAN clustering
-	DBSCANResult result = KssdDBSCAN(sketches, eps, minPts, kmerSize, threads);
+	DBSCANResult result = KssdDBSCAN(sketches, eps, minPts, kmerSize, threads, knn_k);
 	
 	// Print results
 	printKssdDBSCANResult(result, sketches, sketchByFile, outputFile, eps, minPts);

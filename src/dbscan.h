@@ -36,6 +36,7 @@ struct DBSCANResult {
  * @param minPts Minimum number of points required to form a cluster
  * @param kmer_size K-mer size for distance calculation
  * @param threads Number of threads for parallel computation
+ * @param knn_k k-NN parameter: keep only k nearest neighbors per point (0 to disable, default 0)
  * @return DBSCANResult containing clusters and noise points
  */
 DBSCANResult KssdDBSCAN(
@@ -43,7 +44,8 @@ DBSCANResult KssdDBSCAN(
     double eps,
     int minPts,
     int kmer_size,
-    int threads
+    int threads,
+    int knn_k = 0
 );
 
 /**

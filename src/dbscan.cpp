@@ -95,6 +95,221 @@ phmap::flat_hash_map<uint32_t, vector<int>> buildInvertedIndex32(
 }
 
 /**
+ * @brief Build k-NN graph for all points (k-NN pre-filtering optimization)
+ * For each point, find and store its k nearest neighbors
+ * 
+ * @param sketches Input sketches
+ * @param inverted_index Inverted index for fast candidate lookup
+ * @param jaccard_min Pre-calculated minimum jaccard threshold
+ * @param k Number of nearest neighbors to keep
+ * @param kmer_size K-mer size for distance calculation
+ * @param threads Number of threads
+ * @return k-NN graph: point_id -> vector of neighbor IDs
+ */
+vector<vector<int>> buildKNNGraph(
+    const vector<KssdSketchInfo>& sketches,
+    const phmap::flat_hash_map<uint32_t, vector<int>>& inverted_index,
+    double jaccard_min,
+    int k,
+    int kmer_size,
+    int threads
+) {
+    int n = sketches.size();
+    vector<vector<int>> knn_graph(n);
+    
+    if(k <= 0) {
+        // No k-NN filtering, return empty graph
+        return knn_graph;
+    }
+    
+    cerr << "-----Building k-NN graph (k=" << k << ")..." << endl;
+    
+    // Global arrays for counting (reused across queries)
+    vector<uint32_t> mark(n, 0);
+    vector<uint32_t> cnt(n, 0);
+    vector<int> touched;
+    touched.reserve(10000);
+    uint32_t cur_mark = 0;
+    
+    // Thread-local buffers
+    vector<vector<int>> thread_neighbors(threads);
+    for(auto& v : thread_neighbors) {
+        v.reserve(256);
+    }
+    
+    // Process each point to find its k nearest neighbors
+    for(int i = 0; i < n; i++) {
+        if(sketches[i].use64 || sketches[i].hash32_arr.empty()) {
+            continue;  // Skip 64-bit or empty sketches
+        }
+        
+        // Find all candidates using inverted index
+        cur_mark++;
+        if(cur_mark == 0) {
+            std::fill(mark.begin(), mark.end(), 0);
+            cur_mark = 1;
+        }
+        touched.clear();
+        
+        int sizeRef = sketches[i].hash32_arr.size();
+        
+        // Count intersections
+        for(uint32_t hash : sketches[i].hash32_arr) {
+            auto it = inverted_index.find(hash);
+            if(it != inverted_index.end()) {
+                for(int candidate_id : it->second) {
+                    if(candidate_id == i) continue;
+                    
+                    if(mark[candidate_id] != cur_mark) {
+                        mark[candidate_id] = cur_mark;
+                        cnt[candidate_id] = 1;
+                        touched.push_back(candidate_id);
+                    } else {
+                        cnt[candidate_id]++;
+                    }
+                }
+            }
+        }
+        
+        if(touched.empty()) {
+            continue;
+        }
+        
+        // Use max-heap to maintain top-k nearest neighbors
+        // Heap stores (distance, neighbor_id), max-heap so we can pop largest
+        using DistPair = std::pair<double, int>;
+        std::priority_queue<DistPair> topk;  // max-heap
+        
+        // Clear thread buffers
+        for(auto& v : thread_neighbors) v.clear();
+        
+        // Parallel distance calculation
+        const size_t PARALLEL_THRESHOLD = 5000;
+        if(touched.size() < PARALLEL_THRESHOLD || threads <= 1) {
+            // Serial processing
+            for(int candidate_id : touched) {
+                const auto& candidate = sketches[candidate_id];
+                if(candidate.use64) continue;
+                
+                int common = cnt[candidate_id];
+                int sizeQry = candidate.hash32_arr.size();
+                
+                // Filter by common
+                double v = jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min);
+                int min_common_needed = (int)std::ceil(v - 1e-12);
+                if(common < min_common_needed) continue;
+                
+                // Calculate Jaccard
+                uint64_t union_size = sizeRef + sizeQry - common;
+                double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
+                
+                if(jaccard_ >= jaccard_min) {
+                    // Convert jaccard to distance for heap (use kmer_size from parameter)
+                    double dist = (jaccard_ == 1.0) ? 0.0 : -log(2.0 * jaccard_ / (1.0 + jaccard_)) / kmer_size;
+                    if(dist > 1.0) dist = 1.0;
+                    
+                    if((int)topk.size() < k) {
+                        topk.push({dist, candidate_id});
+                    } else if(dist < topk.top().first) {
+                        topk.pop();
+                        topk.push({dist, candidate_id});
+                    }
+                }
+            }
+        } else {
+            // Parallel processing
+            #pragma omp parallel num_threads(threads)
+            {
+                int tid = omp_get_thread_num();
+                auto& local_topk = thread_neighbors[tid];
+                std::priority_queue<DistPair> local_heap;
+                
+                #pragma omp for schedule(guided)
+                for(size_t idx = 0; idx < touched.size(); idx++) {
+                    int candidate_id = touched[idx];
+                    const auto& candidate = sketches[candidate_id];
+                    if(candidate.use64) continue;
+                    
+                    int common = cnt[candidate_id];
+                    int sizeQry = candidate.hash32_arr.size();
+                    
+                    // Filter by common
+                    double v = jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min);
+                    int min_common_needed = (int)std::ceil(v - 1e-12);
+                    if(common < min_common_needed) continue;
+                    
+                    // Calculate Jaccard
+                    uint64_t union_size = sizeRef + sizeQry - common;
+                    double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
+                    
+                    if(jaccard_ >= jaccard_min) {
+                        // Convert jaccard to distance
+                        double dist = (jaccard_ == 1.0) ? 0.0 : -log(2.0 * jaccard_ / (1.0 + jaccard_)) / kmer_size;
+                        if(dist > 1.0) dist = 1.0;
+                        
+                        if((int)local_heap.size() < k) {
+                            local_heap.push({dist, candidate_id});
+                        } else if(dist < local_heap.top().first) {
+                            local_heap.pop();
+                            local_heap.push({dist, candidate_id});
+                        }
+                    }
+                }
+                
+                // Merge local heap to thread buffer
+                while(!local_heap.empty()) {
+                    local_topk.push_back(local_heap.top().second);
+                    local_heap.pop();
+                }
+            }
+            
+            // Merge all thread-local top-k
+            for(int t = 0; t < threads; t++) {
+                for(int neighbor_id : thread_neighbors[t]) {
+                    const auto& candidate = sketches[neighbor_id];
+                    if(candidate.use64) continue;
+                    
+                    int common = cnt[neighbor_id];
+                    int sizeQry = candidate.hash32_arr.size();
+                    uint64_t union_size = sizeRef + sizeQry - common;
+                    double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
+                    double dist = (jaccard_ == 1.0) ? 0.0 : -log(2.0 * jaccard_ / (1.0 + jaccard_)) / kmer_size;
+                    if(dist > 1.0) dist = 1.0;
+                    
+                    if((int)topk.size() < k) {
+                        topk.push({dist, neighbor_id});
+                    } else if(dist < topk.top().first) {
+                        topk.pop();
+                        topk.push({dist, neighbor_id});
+                    }
+                }
+            }
+        }
+        
+        // Extract k-NN neighbors
+        knn_graph[i].reserve(k);
+        while(!topk.empty()) {
+            knn_graph[i].push_back(topk.top().second);
+            topk.pop();
+        }
+        
+        if((i + 1) % 10000 == 0) {
+            cerr << "-----Built k-NN for " << (i + 1) << " / " << n << " points" << endl;
+        }
+    }
+    
+    // Count total edges
+    size_t total_edges = 0;
+    for(const auto& neighbors : knn_graph) {
+        total_edges += neighbors.size();
+    }
+    cerr << "-----k-NN graph built: " << total_edges << " edges (avg " 
+         << (n > 0 ? total_edges / n : 0) << " neighbors per point)" << endl;
+    
+    return knn_graph;
+}
+
+/**
  * @brief Find all points within epsilon distance using inverted index (KSSD, 32-bit)
  * Optimized version using global stamp+count arrays and direct Jaccard calculation
  */
@@ -103,6 +318,7 @@ vector<int> findNeighborsKSSDWithIndex(
     int point_idx,
     double jaccard_min,           // Pre-calculated jaccard_min (optimization 5)
     const phmap::flat_hash_map<uint32_t, vector<int>>& inverted_index,
+    const vector<vector<int>>& knn_graph,  // k-NN graph for pre-filtering
     vector<uint32_t>& mark,      // Global mark array (epoch-based)
     vector<uint32_t>& cnt,        // Global count array
     vector<int>& touched,         // Global touched list
@@ -166,26 +382,79 @@ vector<int> findNeighborsKSSDWithIndex(
     }
     
     // Use inverted index for 32-bit hashes with optimized stamp+count arrays
-    touched.clear();
-    
     int sizeRef = point.hash32_arr.size();
     if(sizeRef == 0) return vector<int>();  // Optimization 7: Skip empty sketches
     
-    // Step 1: Count intersections using inverted index (no hash map allocation)
-    for(uint32_t hash : point.hash32_arr) {
-        auto it = inverted_index.find(hash);
-        if(it != inverted_index.end()) {
-            for(int candidate_id : it->second) {
-                if(candidate_id == point_idx) continue;
-                
-                if(mark[candidate_id] != cur_mark) {
-                    // First time seeing this candidate in current query
-                    mark[candidate_id] = cur_mark;
-                    cnt[candidate_id] = 1;
-                    touched.push_back(candidate_id);
+    // k-NN pre-filtering: if k-NN graph is available, only consider k-NN neighbors
+    if(!knn_graph.empty() && !knn_graph[point_idx].empty()) {
+        // Use k-NN graph: only check neighbors in k-NN graph
+        touched.clear();
+        for(int neighbor_id : knn_graph[point_idx]) {
+            if(neighbor_id == point_idx) continue;
+            touched.push_back(neighbor_id);
+        }
+        
+        // Count intersections for k-NN neighbors only
+        cur_mark++;
+        if(cur_mark == 0) {
+            std::fill(mark.begin(), mark.end(), 0);
+            cur_mark = 1;
+        }
+        
+        for(int candidate_id : touched) {
+            mark[candidate_id] = cur_mark;
+            // Calculate intersection for k-NN neighbors
+            const auto& candidate = sketches[candidate_id];
+            if(candidate.use64 || candidate.hash32_arr.empty()) {
+                cnt[candidate_id] = 0;
+                continue;
+            }
+            
+            // Count common hashes
+            int common = 0;
+            size_t i1 = 0, i2 = 0;
+            size_t size1 = point.hash32_arr.size();
+            size_t size2 = candidate.hash32_arr.size();
+            
+            while(i1 < size1 && i2 < size2) {
+                if(point.hash32_arr[i1] < candidate.hash32_arr[i2]) {
+                    i1++;
+                } else if(point.hash32_arr[i1] > candidate.hash32_arr[i2]) {
+                    i2++;
                 } else {
-                    // Already seen, increment count
-                    cnt[candidate_id]++;
+                    common++;
+                    i1++;
+                    i2++;
+                }
+            }
+            cnt[candidate_id] = common;
+        }
+    } else {
+        // Standard mode: use inverted index to find all candidates
+        touched.clear();
+        
+        // Step 1: Count intersections using inverted index (no hash map allocation)
+        cur_mark++;
+        if(cur_mark == 0) {
+            std::fill(mark.begin(), mark.end(), 0);
+            cur_mark = 1;
+        }
+        
+        for(uint32_t hash : point.hash32_arr) {
+            auto it = inverted_index.find(hash);
+            if(it != inverted_index.end()) {
+                for(int candidate_id : it->second) {
+                    if(candidate_id == point_idx) continue;
+                    
+                    if(mark[candidate_id] != cur_mark) {
+                        // First time seeing this candidate in current query
+                        mark[candidate_id] = cur_mark;
+                        cnt[candidate_id] = 1;
+                        touched.push_back(candidate_id);
+                    } else {
+                        // Already seen, increment count
+                        cnt[candidate_id]++;
+                    }
                 }
             }
         }
@@ -392,7 +661,8 @@ DBSCANResult KssdDBSCAN(
     double eps,
     int minPts,
     int kmer_size,
-    int threads
+    int threads,
+    int knn_k
 ) {
     DBSCANResult result;
     int n = sketches.size();
@@ -418,6 +688,12 @@ DBSCANResult KssdDBSCAN(
     cerr << "-----Building inverted index for acceleration..." << endl;
     phmap::flat_hash_map<uint32_t, vector<int>> inverted_index = buildInvertedIndex32(sketches);
     cerr << "-----Inverted index built: " << inverted_index.size() << " unique hashes" << endl;
+    
+    // Build k-NN graph for pre-filtering (if enabled)
+    vector<vector<int>> knn_graph;
+    if(knn_k > 0) {
+        knn_graph = buildKNNGraph(sketches, inverted_index, jaccard_min, knn_k, kmer_size, threads);
+    }
     
     // Initialize global stamp+count arrays (optimization 1: avoid per-query allocation)
     vector<uint32_t> mark(n, 0);      // Epoch-based marking
@@ -448,9 +724,9 @@ DBSCANResult KssdDBSCAN(
         
         processed_count++;
         
-        // Find neighbors using inverted index with optimized arrays
+        // Find neighbors using inverted index with optimized arrays (and k-NN graph if available)
         vector<int> neighbors = findNeighborsKSSDWithIndex(
-            sketches, i, jaccard_min, inverted_index, 
+            sketches, i, jaccard_min, inverted_index, knn_graph,
             mark, cnt, touched, cur_mark, thread_neighbors, threads
         );
         
@@ -503,9 +779,9 @@ DBSCANResult KssdDBSCAN(
             cluster_size++;
             processed_count++;
             
-            // Find neighbors of q using inverted index
+            // Find neighbors of q using inverted index (and k-NN graph if available)
             vector<int> q_neighbors = findNeighborsKSSDWithIndex(
-                sketches, q, jaccard_min, inverted_index,
+                sketches, q, jaccard_min, inverted_index, knn_graph,
                 mark, cnt, touched, cur_mark, thread_neighbors, threads
             );
             
@@ -684,6 +960,7 @@ DBSCANResult MinHashDBSCAN(
 
 /**
  * @brief Print DBSCAN results for MinHash sketches
+ * Format matches printResult() from MST_IO.cpp
  */
 void printDBSCANResult(
     const DBSCANResult& result,
@@ -699,33 +976,91 @@ void printDBSCANResult(
         exit(1);
     }
     
-    fprintf(fp, "# DBSCAN Clustering Results\n");
-    fprintf(fp, "# Parameters: eps=%.6f, minPts=%d\n", eps, minPts);
+    // Write threshold information at the beginning (matching printResult format)
+    fprintf(fp, "# DBSCAN clustering parameters: eps=%.6f, minPts=%d\n", eps, minPts);
     fprintf(fp, "# Total clusters: %d\n", result.num_clusters);
-    fprintf(fp, "# Total noise points (outliers): %d\n", result.num_noise);
+    if(result.num_noise > 0) {
+        fprintf(fp, "# Total noise points (outliers): %d\n", result.num_noise);
+    }
     fprintf(fp, "#\n");
     
-    // Print clusters
-    for(size_t i = 0; i < result.clusters.size(); i++) {
-        fprintf(fp, "# Cluster %zu (size: %zu)\n", i, result.clusters[i].size());
-        for(int idx : result.clusters[i]) {
-            if(sketch_by_file) {
-                fprintf(fp, "%s\n", sketches[idx].fileName.c_str());
-            } else {
-                fprintf(fp, "%s\n", sketches[idx].seqInfo.name.c_str());
+    if(sketch_by_file) {
+        // Print clusters
+        for(int i = 0; i < (int)result.clusters.size(); i++) {
+            fprintf(fp, "the cluster %d is: \n", i);
+            for(int j = 0; j < (int)result.clusters[i].size(); j++) {
+                int curId = result.clusters[i][j];
+                if(curId < 0 || curId >= (int)sketches.size()) {
+                    cerr << "ERROR: printDBSCANResult(), invalid index " << curId << " (sketches.size=" << sketches.size() << "), skipping." << endl;
+                    continue;
+                }
+                const char* seqName = "N/A";
+                const char* seqComment = "N/A";
+                if(!sketches[curId].fileSeqs.empty()) {
+                    seqName = sketches[curId].fileSeqs[0].name.c_str();
+                    seqComment = sketches[curId].fileSeqs[0].comment.c_str();
+                }
+                fprintf(fp, "\t%5d\t%6d\t%12dnt\t%20s\t%20s\t%s\n",
+                    j, curId, sketches[curId].totalSeqLength,
+                    sketches[curId].fileName.c_str(), seqName, seqComment);
+            }
+            fprintf(fp, "\n");
+        }
+        
+        // Print noise points as separate clusters (if any)
+        if(!result.noise.empty()) {
+            for(int i = 0; i < (int)result.noise.size(); i++) {
+                int curId = result.noise[i];
+                if(curId < 0 || curId >= (int)sketches.size()) {
+                    cerr << "ERROR: printDBSCANResult(), invalid noise index " << curId << " (sketches.size=" << sketches.size() << "), skipping." << endl;
+                    continue;
+                }
+                fprintf(fp, "the cluster %d is: \n", (int)result.clusters.size() + i);
+                const char* seqName = "N/A";
+                const char* seqComment = "N/A";
+                if(!sketches[curId].fileSeqs.empty()) {
+                    seqName = sketches[curId].fileSeqs[0].name.c_str();
+                    seqComment = sketches[curId].fileSeqs[0].comment.c_str();
+                }
+                fprintf(fp, "\t%5d\t%6d\t%12dnt\t%20s\t%20s\t%s\n",
+                    0, curId, sketches[curId].totalSeqLength,
+                    sketches[curId].fileName.c_str(), seqName, seqComment);
+                fprintf(fp, "\n");
             }
         }
-        fprintf(fp, "\n");
-    }
-    
-    // Print noise points (outliers)
-    if(!result.noise.empty()) {
-        fprintf(fp, "# Noise points (outliers) - %d points\n", result.num_noise);
-        for(int idx : result.noise) {
-            if(sketch_by_file) {
-                fprintf(fp, "%s\n", sketches[idx].fileName.c_str());
-            } else {
-                fprintf(fp, "%s\n", sketches[idx].seqInfo.name.c_str());
+    } else {
+        // sketch by sequence
+        // Print clusters
+        for(int i = 0; i < (int)result.clusters.size(); i++) {
+            fprintf(fp, "the cluster %d is: \n", i);
+            for(int j = 0; j < (int)result.clusters[i].size(); j++) {
+                int curId = result.clusters[i][j];
+                if(curId < 0 || curId >= (int)sketches.size()) {
+                    cerr << "ERROR: printDBSCANResult(), invalid index " << curId << " (sketches.size=" << sketches.size() << "), skipping." << endl;
+                    continue;
+                }
+                fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n",
+                    j, curId, sketches[curId].seqInfo.length,
+                    sketches[curId].seqInfo.name.c_str(),
+                    sketches[curId].seqInfo.comment.c_str());
+            }
+            fprintf(fp, "\n");
+        }
+        
+        // Print noise points as separate clusters (if any)
+        if(!result.noise.empty()) {
+            for(int i = 0; i < (int)result.noise.size(); i++) {
+                int curId = result.noise[i];
+                if(curId < 0 || curId >= (int)sketches.size()) {
+                    cerr << "ERROR: printDBSCANResult(), invalid noise index " << curId << " (sketches.size=" << sketches.size() << "), skipping." << endl;
+                    continue;
+                }
+                fprintf(fp, "the cluster %d is: \n", (int)result.clusters.size() + i);
+                fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n",
+                    0, curId, sketches[curId].seqInfo.length,
+                    sketches[curId].seqInfo.name.c_str(),
+                    sketches[curId].seqInfo.comment.c_str());
+                fprintf(fp, "\n");
             }
         }
     }
@@ -735,6 +1070,7 @@ void printDBSCANResult(
 
 /**
  * @brief Print DBSCAN results for KSSD sketches
+ * Format matches printKssdResult() from MST_IO.cpp
  */
 void printKssdDBSCANResult(
     const DBSCANResult& result,
@@ -750,33 +1086,91 @@ void printKssdDBSCANResult(
         exit(1);
     }
     
-    fprintf(fp, "# DBSCAN Clustering Results\n");
-    fprintf(fp, "# Parameters: eps=%.6f, minPts=%d\n", eps, minPts);
+    // Write threshold information at the beginning (matching printKssdResult format)
+    fprintf(fp, "# DBSCAN clustering parameters: eps=%.6f, minPts=%d\n", eps, minPts);
     fprintf(fp, "# Total clusters: %d\n", result.num_clusters);
-    fprintf(fp, "# Total noise points (outliers): %d\n", result.num_noise);
+    if(result.num_noise > 0) {
+        fprintf(fp, "# Total noise points (outliers): %d\n", result.num_noise);
+    }
     fprintf(fp, "#\n");
     
-    // Print clusters
-    for(size_t i = 0; i < result.clusters.size(); i++) {
-        fprintf(fp, "# Cluster %zu (size: %zu)\n", i, result.clusters[i].size());
-        for(int idx : result.clusters[i]) {
-            if(sketch_by_file) {
-                fprintf(fp, "%s\n", sketches[idx].fileName.c_str());
-            } else {
-                fprintf(fp, "%s\n", sketches[idx].seqInfo.name.c_str());
+    if(sketch_by_file) {
+        // Print clusters
+        for(int i = 0; i < (int)result.clusters.size(); i++) {
+            fprintf(fp, "the cluster %d is: \n", i);
+            for(int j = 0; j < (int)result.clusters[i].size(); j++) {
+                int curId = result.clusters[i][j];
+                if(curId < 0 || curId >= (int)sketches.size()) {
+                    cerr << "ERROR: printKssdDBSCANResult(), invalid index " << curId << " (sketches.size=" << sketches.size() << "), skipping." << endl;
+                    continue;
+                }
+                const char* seqName = "N/A";
+                const char* seqComment = "N/A";
+                if(!sketches[curId].fileSeqs.empty()) {
+                    seqName = sketches[curId].fileSeqs[0].name.c_str();
+                    seqComment = sketches[curId].fileSeqs[0].comment.c_str();
+                }
+                fprintf(fp, "\t%5d\t%6d\t%12dnt\t%20s\t%20s\t%s\n",
+                    j, curId, sketches[curId].totalSeqLength,
+                    sketches[curId].fileName.c_str(), seqName, seqComment);
+            }
+            fprintf(fp, "\n");
+        }
+        
+        // Print noise points as separate clusters (if any)
+        if(!result.noise.empty()) {
+            for(int i = 0; i < (int)result.noise.size(); i++) {
+                int curId = result.noise[i];
+                if(curId < 0 || curId >= (int)sketches.size()) {
+                    cerr << "ERROR: printKssdDBSCANResult(), invalid noise index " << curId << " (sketches.size=" << sketches.size() << "), skipping." << endl;
+                    continue;
+                }
+                fprintf(fp, "the cluster %d is: \n", (int)result.clusters.size() + i);
+                const char* seqName = "N/A";
+                const char* seqComment = "N/A";
+                if(!sketches[curId].fileSeqs.empty()) {
+                    seqName = sketches[curId].fileSeqs[0].name.c_str();
+                    seqComment = sketches[curId].fileSeqs[0].comment.c_str();
+                }
+                fprintf(fp, "\t%5d\t%6d\t%12dnt\t%20s\t%20s\t%s\n",
+                    0, curId, sketches[curId].totalSeqLength,
+                    sketches[curId].fileName.c_str(), seqName, seqComment);
+                fprintf(fp, "\n");
             }
         }
-        fprintf(fp, "\n");
-    }
-    
-    // Print noise points (outliers)
-    if(!result.noise.empty()) {
-        fprintf(fp, "# Noise points (outliers) - %d points\n", result.num_noise);
-        for(int idx : result.noise) {
-            if(sketch_by_file) {
-                fprintf(fp, "%s\n", sketches[idx].fileName.c_str());
-            } else {
-                fprintf(fp, "%s\n", sketches[idx].seqInfo.name.c_str());
+    } else {
+        // sketch by sequence
+        // Print clusters
+        for(int i = 0; i < (int)result.clusters.size(); i++) {
+            fprintf(fp, "the cluster %d is: \n", i);
+            for(int j = 0; j < (int)result.clusters[i].size(); j++) {
+                int curId = result.clusters[i][j];
+                if(curId < 0 || curId >= (int)sketches.size()) {
+                    cerr << "ERROR: printKssdDBSCANResult(), invalid index " << curId << " (sketches.size=" << sketches.size() << "), skipping." << endl;
+                    continue;
+                }
+                fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n",
+                    j, curId, sketches[curId].seqInfo.length,
+                    sketches[curId].seqInfo.name.c_str(),
+                    sketches[curId].seqInfo.comment.c_str());
+            }
+            fprintf(fp, "\n");
+        }
+        
+        // Print noise points as separate clusters (if any)
+        if(!result.noise.empty()) {
+            for(int i = 0; i < (int)result.noise.size(); i++) {
+                int curId = result.noise[i];
+                if(curId < 0 || curId >= (int)sketches.size()) {
+                    cerr << "ERROR: printKssdDBSCANResult(), invalid noise index " << curId << " (sketches.size=" << sketches.size() << "), skipping." << endl;
+                    continue;
+                }
+                fprintf(fp, "the cluster %d is: \n", (int)result.clusters.size() + i);
+                fprintf(fp, "\t%6d\t%6d\t%12dnt\t%20s\t%s\n",
+                    0, curId, sketches[curId].seqInfo.length,
+                    sketches[curId].seqInfo.name.c_str(),
+                    sketches[curId].seqInfo.comment.c_str());
+                fprintf(fp, "\n");
             }
         }
     }

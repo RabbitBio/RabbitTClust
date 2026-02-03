@@ -123,8 +123,10 @@ int main(int argc, char * argv[]){
 	// DBSCAN parameters (only for DBSCAN mode)
 	double dbscan_eps = 0.05;
 	int dbscan_minpts = 5;
+	int dbscan_knn = 0;  // k-NN parameter: 0 = disabled, >0 = keep k nearest neighbors per point
 	auto option_dbscan_eps = app.add_option("--eps", dbscan_eps, "DBSCAN epsilon parameter (distance threshold, default 0.05)");
 	auto option_dbscan_minpts = app.add_option("--minpts", dbscan_minpts, "DBSCAN minPts parameter (minimum points to form cluster, default 5)");
+	auto option_dbscan_knn = app.add_option("--knn", dbscan_knn, "k-NN pre-filtering: keep only k nearest neighbors per point (0=disabled, recommended: 500-1000, default 0)");
 	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
 #elif defined(LEIDEN_CLUST)
 	double leiden_resolution = 1.0;
@@ -315,7 +317,11 @@ int main(int argc, char * argv[]){
 	}
 	
 	cerr << "-----Using DBSCAN clustering" << endl;
-	cerr << "-----DBSCAN parameters: eps=" << dbscan_eps << ", minPts=" << dbscan_minpts << endl;
+	cerr << "-----DBSCAN parameters: eps=" << dbscan_eps << ", minPts=" << dbscan_minpts;
+	if(dbscan_knn > 0) {
+		cerr << ", knn=" << dbscan_knn;
+	}
+	cerr << endl;
 	
 	if(!isSetKmer){
 		kmerSize = 19;
@@ -328,7 +334,7 @@ int main(int argc, char * argv[]){
 	}
 	
 	if(*option_presketched && !*option_append){
-		clust_from_sketch_dbscan(folder_path, outputFile, sketchByFile, dbscan_eps, dbscan_minpts, threads);
+		clust_from_sketch_dbscan(folder_path, outputFile, sketchByFile, dbscan_eps, dbscan_minpts, threads, dbscan_knn);
 		return 0;
 	}
 	
@@ -341,7 +347,7 @@ int main(int argc, char * argv[]){
 		return 1;
 	}
 	
-	clust_from_genome_dbscan(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, dbscan_eps, dbscan_minpts, threads);
+	clust_from_genome_dbscan(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, dbscan_eps, dbscan_minpts, threads, dbscan_knn);
 	return 0;
 //======clust-dbscan======================================================================
 #else
