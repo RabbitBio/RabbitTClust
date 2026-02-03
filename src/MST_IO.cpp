@@ -69,13 +69,20 @@ void loadMST(string folderPath, vector<EdgeInfo>& mst)
 	cerr << "-----read the mst file from " << file_mst << endl;
 }
 
-void printKssdResult(vector<vector<int>>& cluster, vector<KssdSketchInfo>& sketches, bool sketchByFile, string outputFile)
+void printKssdResult(vector<vector<int>>& cluster, vector<KssdSketchInfo>& sketches, bool sketchByFile, string outputFile, double threshold)
 {
 	//cerr << "output the result into: " << outputFile << endl;
 	FILE *fp = fopen(outputFile.c_str(), "w");
 	if(!fp){
 		cerr << "Error in printKssdResult(), cannot open file: " << outputFile << endl;
 		exit(1);
+	}
+	
+	// Write threshold information at the beginning of the file
+	if(threshold >= 0.0){
+		fprintf(fp, "# Clustering threshold: %.6f\n", threshold);
+		fprintf(fp, "# Total clusters: %zu\n", cluster.size());
+		fprintf(fp, "#\n");
 	}
 	
 	if(sketchByFile)
@@ -126,13 +133,20 @@ void printKssdResult(vector<vector<int>>& cluster, vector<KssdSketchInfo>& sketc
 
 }
 
-void printResult(vector<vector<int>>& cluster, vector<SketchInfo>& sketches, bool sketchByFile, string outputFile)
+void printResult(vector<vector<int>>& cluster, vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, double threshold)
 {
 	//cerr << "output the result into: " << outputFile << endl;
 	FILE *fp = fopen(outputFile.c_str(), "w");
 	if(!fp){
 		cerr << "Error in printResult(), cannot open file: " << outputFile << endl;
 		exit(1);
+	}
+	
+	// Write threshold information at the beginning of the file
+	if(threshold >= 0.0){
+		fprintf(fp, "# Clustering threshold: %.6f\n", threshold);
+		fprintf(fp, "# Total clusters: %zu\n", cluster.size());
+		fprintf(fp, "#\n");
 	}
 	
 	if(sketchByFile)

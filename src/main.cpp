@@ -37,6 +37,10 @@
 #include "leiden.h"
 #endif
 
+#ifdef DBSCAN_CLUST
+#include "dbscan.h"
+#endif
+
 #include <fstream>
 #include <sstream>
 #include <sys/sysinfo.h>
@@ -57,6 +61,8 @@ int main(int argc, char * argv[]){
 		CLI::App app{"clust-greedy v.2.2.1, greedy incremental clustering module for RabbitTClust"};
 	#elif defined(LEIDEN_CLUST)
 		CLI::App app{"clust-leiden v.2.2.1, Graph-based community detection (Louvain) clustering module for RabbitTClust"};
+	#elif defined(DBSCAN_CLUST)
+		CLI::App app{"clust-dbscan v.2.2.1, DBSCAN density-based clustering module for RabbitTClust"};
 	#else
 		CLI::App app{"clust-mst v.2.2.1, minimum-spanning-tree-based module for RabbitTClust"};
 	#endif
@@ -84,6 +90,8 @@ int main(int argc, char * argv[]){
 	string folder_path;
 	bool is_newick_tree = false;
 	bool is_linkage_matrix = false;
+	bool is_auto_threshold = false;
+	bool is_stability = false;
 	bool is_fast = false;
 	bool no_dense = false;
 	double dedup_dist = -1.0;
@@ -110,7 +118,15 @@ int main(int argc, char * argv[]){
 	auto option_presketched = app.add_option("--presketched", folder_path, "clustering by the pre-generated sketch files rather than genomes");
 	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing");
 	auto flag_inverted_index = app.add_flag("--inverted-index", use_inverted_index, "use inverted index optimization for greedy clustering (MinHash only)");
-#ifdef LEIDEN_CLUST
+	
+#ifdef DBSCAN_CLUST
+	// DBSCAN parameters (only for DBSCAN mode)
+	double dbscan_eps = 0.05;
+	int dbscan_minpts = 5;
+	auto option_dbscan_eps = app.add_option("--eps", dbscan_eps, "DBSCAN epsilon parameter (distance threshold, default 0.05)");
+	auto option_dbscan_minpts = app.add_option("--minpts", dbscan_minpts, "DBSCAN minPts parameter (minimum points to form cluster, default 5)");
+	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
+#elif defined(LEIDEN_CLUST)
 	double leiden_resolution = 1.0;
 	bool use_louvain = false;  // Default: use Leiden (this is clust-leiden!)
 	int knn_k = 0;  // k-NN parameter: if > 0, keep only k nearest neighbors per node; if 0, use smart defaults
@@ -129,6 +145,8 @@ int main(int argc, char * argv[]){
 	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
 	auto flag_newick_tree = app.add_flag("--newick-tree", is_newick_tree, "output the newick tree format file for clust-mst");
 	auto flag_linkage_matrix = app.add_flag("--linkage-matrix", is_linkage_matrix, "output the single-linkage linkage matrix for clust-mst");
+	auto flag_auto_threshold = app.add_flag("--auto-threshold", is_auto_threshold, "automatically select optimal threshold based on MST edge length distribution");
+	auto flag_stability = app.add_flag("--stability", is_stability, "evaluate threshold stability by measuring clustering consistency under small perturbations (works with --auto-threshold or user-specified threshold)");
 	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
 	auto flag_no_dense = app.add_flag("--no-dense", no_dense, "not calculate the density and ANI datas");
 	auto option_dedup_dist = app.add_option("--dedup-dist", dedup_dist, "within each cluster, collapse near-duplicate nodes connected by forest edges with dist <= dedup-dist; output to <output>.dedup");
@@ -183,7 +201,7 @@ int main(int argc, char * argv[]){
 	}
 	
  if (is_fast && *option_presketched && !*option_append) {
-    clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster, use_inverted_index, save_rep_index);
+    clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, is_auto_threshold, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster, use_inverted_index, save_rep_index);
     return 0;
 } 
 
@@ -288,6 +306,44 @@ int main(int argc, char * argv[]){
 		return 1;
 	}
 //======clust-leiden======================================================================
+#elif defined(DBSCAN_CLUST)
+//======clust-dbscan======================================================================
+	// DBSCAN requires --fast (KSSD)
+	if(!is_fast){
+		cerr << "ERROR: clust-dbscan requires --fast option" << endl;
+		return 1;
+	}
+	
+	cerr << "-----Using DBSCAN clustering" << endl;
+	cerr << "-----DBSCAN parameters: eps=" << dbscan_eps << ", minPts=" << dbscan_minpts << endl;
+	
+	if(!isSetKmer){
+		kmerSize = 19;
+		cerr << "-----use default kmerSize: " << kmerSize << endl;
+	}
+	
+	if(drlevel < 0 || drlevel > 8){
+		cerr << "ERROR: invalid drlevel " << drlevel << ", should be in [0, 8]" << endl;
+		return 1;
+	}
+	
+	if(*option_presketched && !*option_append){
+		clust_from_sketch_dbscan(folder_path, outputFile, sketchByFile, dbscan_eps, dbscan_minpts, threads);
+		return 0;
+	}
+	
+	if(*option_append){
+		cerr << "ERROR: --append not supported for DBSCAN clustering" << endl;
+		return 1;
+	}
+	
+	if(!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)){
+		return 1;
+	}
+	
+	clust_from_genome_dbscan(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, dbscan_eps, dbscan_minpts, threads);
+	return 0;
+//======clust-dbscan======================================================================
 #else
 //======clust-mst=========================================================================
 	// Set default threshold for MST clustering if not provided
@@ -310,11 +366,11 @@ int main(int argc, char * argv[]){
 			return 0;
 		}
 		if(*option_premsted && !*option_append){
-			clust_from_mst_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, threshold, threads);
+			clust_from_mst_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, is_auto_threshold, is_stability, no_dense, threshold, threads);
 			return 0;
 		}
 		if(*option_presketched && !*option_append){
-			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster, use_inverted_index, save_rep_index);
+			clust_from_sketch_fast(folder_path, outputFile, is_newick_tree, is_linkage_matrix, is_auto_threshold, no_dense, isContainment, threshold, threads, dedup_dist, reps_per_cluster, use_inverted_index, save_rep_index);
 			return 0;
 		}
 		if(*option_append && !*option_premsted && !*option_presketched){
@@ -328,12 +384,12 @@ int main(int argc, char * argv[]){
 		if(!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)){
 			return 1;
 		}
-		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster, save_rep_index);
+		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, is_auto_threshold, is_stability, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster, save_rep_index);
 		return 0;
 	}
 
 	if(*option_premsted && !*option_append){
-		clust_from_mst(folder_path, outputFile, is_newick_tree, is_linkage_matrix, no_dense, threshold, threads);
+		clust_from_mst(folder_path, outputFile, is_newick_tree, is_linkage_matrix, is_auto_threshold, is_stability, no_dense, threshold, threads);
 		return 0;
 	}
 	if(*option_append && !*option_presketched && !*option_premsted){
@@ -348,7 +404,7 @@ int main(int argc, char * argv[]){
 #endif
 	
 	if(*option_presketched && !*option_append){
-		clust_from_sketches(folder_path, outputFile, is_newick_tree, no_dense, threshold, threads, use_inverted_index, save_rep_index);
+		clust_from_sketches(folder_path, outputFile, is_newick_tree, is_auto_threshold, is_stability, no_dense, threshold, threads, use_inverted_index, save_rep_index);
 		return 0;
 	}
 
@@ -357,12 +413,12 @@ int main(int argc, char * argv[]){
 	}
   if(is_fast){
   
-    clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster, save_rep_index);
+    clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, is_auto_threshold, is_stability, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster, save_rep_index);
     return 1;
 
   }
 	
-	clust_from_genomes(inputFile, outputFile, is_newick_tree, is_linkage_matrix, sketchByFile, no_dense, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads, use_inverted_index, save_rep_index);
+	clust_from_genomes(inputFile, outputFile, is_newick_tree, is_linkage_matrix, is_auto_threshold, is_stability, sketchByFile, no_dense, kmerSize, sketchSize, threshold,sketchFunc, isContainment, containCompress, minLen, folder_path, noSave, threads, use_inverted_index, save_rep_index);
 
 	return 0;
 }//end main

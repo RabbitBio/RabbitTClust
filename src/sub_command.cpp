@@ -7,6 +7,10 @@
 #include <sys/stat.h>  // For stat()
 #include <omp.h>  // For OpenMP functions
 
+#ifdef DBSCAN_CLUST
+#include "dbscan.h"
+#endif
+
 using namespace std;
 
 #ifdef GREEDY_CLUST
@@ -334,7 +338,7 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 
 	vector<EdgeInfo> forest = generateForest(final_mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, final_sketches.size());
-	printKssdResult(tmpClust, final_sketches, pre_sketch_by_file, output_file);
+	printKssdResult(tmpClust, final_sketches, pre_sketch_by_file, output_file, threshold);
 	cerr << "-----write the cluster result into: " << output_file << endl;
 	cerr << "-----the cluster number of: " << output_file << " is: " << tmpClust.size() << endl;
 	if(!no_save){
@@ -518,7 +522,7 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 
 	vector<EdgeInfo> forest = generateForest(final_mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, final_sketches.size());
-	printResult(tmpClust, final_sketches, pre_sketch_by_file, output_file);
+	printResult(tmpClust, final_sketches, pre_sketch_by_file, output_file, threshold);
 	cerr << "-----write the cluster result into: " << output_file << endl;
 	cerr << "-----the cluster number of: " << output_file << " is: " << tmpClust.size() << endl;
 	if(!no_save){
@@ -565,7 +569,7 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 	}
 
 }
-void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, double threshold, int threads){
+void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, double threshold, int threads){
 	vector<KssdSketchInfo> sketches;
 	vector<EdgeInfo> mst;
 	vector<vector<int>> cluster;
@@ -586,7 +590,7 @@ void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_t
 
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
-	printKssdResult(tmpClust, sketches, sketchByFile, outputFile);
+	printKssdResult(tmpClust, sketches, sketchByFile, outputFile, threshold);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
 	cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
 	if(!no_dense){
@@ -620,7 +624,7 @@ void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_t
 	}
 }
 
-void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, double threshold, int threads){
+void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, double threshold, int threads){
 	vector<SketchInfo> sketches;
 	vector<EdgeInfo> mst;
 	vector<vector<int>> cluster;
@@ -637,6 +641,50 @@ void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, 
 		string output_linkage_file = outputFile + ".linkage.txt";
 		print_linkage_matrix(sketches, mst, output_linkage_file);
 		cerr << "-----write the linkage matrix into: " << output_linkage_file << endl;
+	}
+	
+	// Automatic threshold selection based on MST edge length distribution
+	if(is_auto_threshold){
+		if(mst.empty()){
+			cerr << "-----WARNING: MST is empty, cannot perform automatic threshold selection" << endl;
+		} else if(mst.size() < 2){
+			cerr << "-----WARNING: MST has only " << mst.size() << " edge(s), cannot perform automatic threshold selection" << endl;
+		} else {
+			cerr << "-----analyzing MST edge length distribution for automatic threshold selection..." << endl;
+			if(is_stability){
+				cerr << "-----stability evaluation enabled (this may take longer)..." << endl;
+			}
+			EdgeLengthStats stats = analyzeEdgeLengthDistribution(mst);
+			// Use smaller min_gap_ratio (0.05 instead of 0.1) to detect more gaps
+			// This helps find natural breakpoints even when distribution is dense
+			vector<ThresholdCandidate> candidates = findThresholdCandidates(mst, 5, 0.05, is_stability, sketches.size());
+			ThresholdCandidate optimal = selectOptimalThreshold(candidates, mst);
+			
+			string threshold_analysis_file = outputFile + ".threshold_analysis.txt";
+			printThresholdAnalysis(mst, stats, candidates, optimal, threshold_analysis_file);
+			
+			cerr << "-----optimal threshold: " << optimal.threshold << " (confidence: " << optimal.confidence 
+			     << ", suggested level: " << optimal.level << ")" << endl;
+			if(is_stability){
+				cerr << "-----stability: " << optimal.stability_score 
+				     << " (split: " << optimal.stability_split << ", merge: " << optimal.stability_merge << ")" << endl;
+				cerr << "-----near edges: " << optimal.near_edge_count << ", clusters: " << optimal.cluster_count << endl;
+			}
+			cerr << "-----threshold analysis written to: " << threshold_analysis_file << endl;
+		}
+	} else if(is_stability){
+		// Evaluate stability for user-specified threshold (without auto-threshold)
+		if(mst.empty()){
+			cerr << "-----WARNING: MST is empty, cannot evaluate threshold stability" << endl;
+		} else {
+			cerr << "-----evaluating stability for threshold: " << threshold << "..." << endl;
+			StabilityResult stability = computeThresholdStability(mst, threshold, sketches.size(), 0.01, 5, 100);
+			vector<EdgeInfo> forest = generateForest(mst, threshold);
+			vector<vector<int>> clusters = generateClusterWithBfs(forest, sketches.size());
+			cerr << "-----threshold stability: " << stability.overall 
+			     << " (split: " << stability.split << ", merge: " << stability.merge << ")" << endl;
+			cerr << "-----near edges evaluated: " << stability.near_edge_count << ", clusters: " << clusters.size() << endl;
+		}
 	}
 
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
@@ -677,7 +725,7 @@ void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, 
 }
 #endif
 
-void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads, double dedup_dist, int reps_per_cluster, bool save_rep_index){
+void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads, double dedup_dist, int reps_per_cluster, bool save_rep_index){
 	bool isSave = !noSave;
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
@@ -692,11 +740,11 @@ void clust_from_genome_fast(const string inputFile, string outputFile, string fo
 #else
 #endif
 	// Pass memory index to compute_kssd_clusters, which will pass it to compute_kssd_mst
-	compute_kssd_clusters(sketches, info, sketchByFile, no_dense, isContainment, folder_path, outputFile, is_newick_tree, is_linkage_matrix, threshold, isSave, threads, dedup_dist, reps_per_cluster, save_rep_index, &inverted_index);
+	compute_kssd_clusters(sketches, info, sketchByFile, no_dense, isContainment, folder_path, outputFile, is_newick_tree, is_linkage_matrix, is_auto_threshold, is_stability, threshold, isSave, threads, dedup_dist, reps_per_cluster, save_rep_index, &inverted_index);
 
 }
 
-void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, double threshold, bool isSave, int threads, double dedup_dist, int reps_per_cluster, bool save_rep_index, KssdInvertedIndex* inverted_index){
+void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, double threshold, bool isSave, int threads, double dedup_dist, int reps_per_cluster, bool save_rep_index, KssdInvertedIndex* inverted_index){
 	vector<vector<int>> cluster;
 	double t2 = get_sec();
 
@@ -765,10 +813,54 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 		print_kssd_linkage_matrix(sketches, mst, output_linkage_file);
 		cerr << "-----write the linkage matrix into: " << output_linkage_file << endl;
 	}
+	
+	// Automatic threshold selection based on MST edge length distribution
+	if(is_auto_threshold){
+		if(mst.empty()){
+			cerr << "-----WARNING: MST is empty, cannot perform automatic threshold selection" << endl;
+		} else if(mst.size() < 2){
+			cerr << "-----WARNING: MST has only " << mst.size() << " edge(s), cannot perform automatic threshold selection" << endl;
+		} else {
+			cerr << "-----analyzing MST edge length distribution for automatic threshold selection..." << endl;
+			if(is_stability){
+				cerr << "-----stability evaluation enabled (this may take longer)..." << endl;
+			}
+			EdgeLengthStats stats = analyzeEdgeLengthDistribution(mst);
+			// Use smaller min_gap_ratio (0.05 instead of 0.1) to detect more gaps
+			// This helps find natural breakpoints even when distribution is dense
+			vector<ThresholdCandidate> candidates = findThresholdCandidates(mst, 5, 0.05, is_stability, sketches.size());
+			ThresholdCandidate optimal = selectOptimalThreshold(candidates, mst);
+			
+			string threshold_analysis_file = outputFile + ".threshold_analysis.txt";
+			printThresholdAnalysis(mst, stats, candidates, optimal, threshold_analysis_file);
+			
+			cerr << "-----optimal threshold: " << optimal.threshold << " (confidence: " << optimal.confidence 
+			     << ", suggested level: " << optimal.level << ")" << endl;
+			if(is_stability){
+				cerr << "-----stability: " << optimal.stability_score 
+				     << " (split: " << optimal.stability_split << ", merge: " << optimal.stability_merge << ")" << endl;
+				cerr << "-----near edges: " << optimal.near_edge_count << ", clusters: " << optimal.cluster_count << endl;
+			}
+			cerr << "-----threshold analysis written to: " << threshold_analysis_file << endl;
+		}
+	} else if(is_stability){
+		// Evaluate stability for user-specified threshold (without auto-threshold)
+		if(mst.empty()){
+			cerr << "-----WARNING: MST is empty, cannot evaluate threshold stability" << endl;
+		} else {
+			cerr << "-----evaluating stability for threshold: " << threshold << "..." << endl;
+			StabilityResult stability = computeThresholdStability(mst, threshold, sketches.size(), 0.01, 5, 100);
+			vector<EdgeInfo> forest = generateForest(mst, threshold);
+			vector<vector<int>> clusters = generateClusterWithBfs(forest, sketches.size());
+			cerr << "-----threshold stability: " << stability.overall 
+			     << " (split: " << stability.split << ", merge: " << stability.merge << ")" << endl;
+			cerr << "-----near edges evaluated: " << stability.near_edge_count << ", clusters: " << clusters.size() << endl;
+		}
+	}
 
 	vector<EdgeInfo> forest = generateForest(mst, threshold);
 	vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
-	printKssdResult(tmpClust, sketches, sketchByFile, outputFile);
+	printKssdResult(tmpClust, sketches, sketchByFile, outputFile, threshold);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
 	cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
 
@@ -985,7 +1077,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		cerr << "-----buildDB: finished building KSSD DB at: " << folder_path << endl;
 	}
 
-	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads, bool use_inverted_index, bool save_rep_index){
+	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads, bool use_inverted_index, bool save_rep_index){
 		bool isSave = !noSave;
 		vector<SketchInfo> sketches;
 		int sketch_func_id;
@@ -994,7 +1086,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 
 		compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, isSave, threads, nullptr);
 
-		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_linkage_matrix, no_dense, folder_path, sketch_func_id, threshold, isSave, threads, use_inverted_index, save_rep_index);
+		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_linkage_matrix, is_auto_threshold, is_stability, no_dense, folder_path, sketch_func_id, threshold, isSave, threads, use_inverted_index, save_rep_index);
 	}
 
 	bool tune_kssd_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, int& kmerSize, double& threshold, int &drlevel){
@@ -1149,7 +1241,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		return true;
 	}
 
-	void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool isContainment, double threshold, int threads, double dedup_dist, int reps_per_cluster, bool use_inverted_index, bool save_rep_index){
+	void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool no_dense, bool isContainment, double threshold, int threads, double dedup_dist, int reps_per_cluster, bool use_inverted_index, bool save_rep_index){
 		vector<KssdSketchInfo> sketches;
 		vector<vector<int>> cluster;
 		bool sketchByFile;
@@ -1219,9 +1311,31 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			print_kssd_linkage_matrix(sketches, mst, output_linkage_file);
 			cerr << "-----write the linkage matrix into: " << output_linkage_file << endl;
 		}
+		
+		// Automatic threshold selection based on MST edge length distribution
+		if(is_auto_threshold){
+			if(mst.empty()){
+				cerr << "-----WARNING: MST is empty, cannot perform automatic threshold selection" << endl;
+			} else if(mst.size() < 2){
+				cerr << "-----WARNING: MST has only " << mst.size() << " edge(s), cannot perform automatic threshold selection" << endl;
+			} else {
+				cerr << "-----analyzing MST edge length distribution for automatic threshold selection..." << endl;
+				EdgeLengthStats stats = analyzeEdgeLengthDistribution(mst);
+				vector<ThresholdCandidate> candidates = findThresholdCandidates(mst, 5, 0.1, false, sketches.size());
+				ThresholdCandidate optimal = selectOptimalThreshold(candidates, mst);
+				
+				string threshold_analysis_file = outputFile + ".threshold_analysis.txt";
+				printThresholdAnalysis(mst, stats, candidates, optimal, threshold_analysis_file);
+				
+				cerr << "-----optimal threshold: " << optimal.threshold << " (confidence: " << optimal.confidence 
+				     << ", suggested level: " << optimal.level << ")" << endl;
+				cerr << "-----threshold analysis written to: " << threshold_analysis_file << endl;
+			}
+		}
+		
 		vector<EdgeInfo> forest = generateForest(mst, threshold);
 		vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
-		printKssdResult(tmpClust, sketches, sketchByFile, outputFile);
+		printKssdResult(tmpClust, sketches, sketchByFile, outputFile, threshold);
 		cerr << "-----write the cluster result into: " << outputFile << endl;
 		cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
 
@@ -1289,7 +1403,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 #endif
 }
 
-	void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, bool no_dense, double threshold, int threads, bool use_inverted_index, bool save_rep_index){
+	void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, bool is_auto_threshold, bool is_stability, bool no_dense, double threshold, int threads, bool use_inverted_index, bool save_rep_index){
 		vector<SketchInfo> sketches;
 		vector<vector<int>> cluster;
 		int sketch_func_id;
@@ -1416,9 +1530,31 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 			cerr << "-----write the newick tree into: " << output_newick_file << endl;
 		}
+		
+		// Automatic threshold selection based on MST edge length distribution
+		if(is_auto_threshold){
+			if(mst.empty()){
+				cerr << "-----WARNING: MST is empty, cannot perform automatic threshold selection" << endl;
+			} else if(mst.size() < 2){
+				cerr << "-----WARNING: MST has only " << mst.size() << " edge(s), cannot perform automatic threshold selection" << endl;
+			} else {
+				cerr << "-----analyzing MST edge length distribution for automatic threshold selection..." << endl;
+				EdgeLengthStats stats = analyzeEdgeLengthDistribution(mst);
+				vector<ThresholdCandidate> candidates = findThresholdCandidates(mst, 5, 0.1, false, sketches.size());
+				ThresholdCandidate optimal = selectOptimalThreshold(candidates, mst);
+				
+				string threshold_analysis_file = outputFile + ".threshold_analysis.txt";
+				printThresholdAnalysis(mst, stats, candidates, optimal, threshold_analysis_file);
+				
+				cerr << "-----optimal threshold: " << optimal.threshold << " (confidence: " << optimal.confidence 
+				     << ", suggested level: " << optimal.level << ")" << endl;
+				cerr << "-----threshold analysis written to: " << threshold_analysis_file << endl;
+			}
+		}
+		
 		vector<EdgeInfo> forest = generateForest(mst, threshold);
 		vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
-		printResult(tmpClust, sketches, sketchByFile, outputFile);
+		printResult(tmpClust, sketches, sketchByFile, outputFile, threshold);
 		cerr << "-----write the cluster result into: " << outputFile << endl;
 		cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
 
@@ -1486,7 +1622,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		}
 	}
 
-	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index, bool save_rep_index){
+	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index, bool save_rep_index){
 		vector<vector<int>> cluster;
 		double t2 = get_sec();
 #ifdef GREEDY_CLUST
@@ -1612,10 +1748,28 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			print_linkage_matrix(sketches, mst, output_linkage_file);
 			cerr << "-----write the linkage matrix into: " << output_linkage_file << endl;
 		}
+		
+		// Automatic threshold selection based on MST edge length distribution
+		bool use_auto_threshold = false;  // Will be set from parameter
+		if(use_auto_threshold){
+			cerr << "-----analyzing MST edge length distribution for automatic threshold selection..." << endl;
+			EdgeLengthStats stats = analyzeEdgeLengthDistribution(mst);
+			// Use smaller min_gap_ratio (0.05 instead of 0.1) to detect more gaps
+			// This helps find natural breakpoints even when distribution is dense
+			vector<ThresholdCandidate> candidates = findThresholdCandidates(mst, 5, 0.05);
+			ThresholdCandidate optimal = selectOptimalThreshold(candidates, mst);
+			
+			string threshold_analysis_file = outputFile + ".threshold_analysis.txt";
+			printThresholdAnalysis(mst, stats, candidates, optimal, threshold_analysis_file);
+			
+			cerr << "-----optimal threshold: " << optimal.threshold << " (confidence: " << optimal.confidence 
+			     << ", suggested level: " << optimal.level << ")" << endl;
+			cerr << "-----threshold analysis written to: " << threshold_analysis_file << endl;
+		}
 
 		vector<EdgeInfo> forest = generateForest(mst, threshold);
 		vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
-		printResult(tmpClust, sketches, sketchByFile, outputFile);
+		printResult(tmpClust, sketches, sketchByFile, outputFile, threshold);
 		cerr << "-----write the cluster result into: " << outputFile << endl;
 		cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
 
@@ -1778,5 +1932,69 @@ void clust_from_pregraph_leiden(string folder_path, string outputFile,
 
 #endif // LEIDEN_CLUST
 
+#ifdef DBSCAN_CLUST
+// ==================== DBSCAN Clustering Functions ====================
 
+void clust_from_sketch_dbscan(string folder_path, string outputFile, bool sketchByFile, double eps, int minPts, int threads) {
+	vector<KssdSketchInfo> sketches;
+	KssdParameters info;
+	
+	double time0 = get_sec();
+	bool loaded_sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
+	if(loaded_sketchByFile != sketchByFile) {
+		cerr << "Warning: sketch format mismatch" << endl;
+	}
+	cerr << "-----the size of sketches is: " << sketches.size() << endl;
+	double time1 = get_sec();
+#ifdef Timer
+	cerr << "========time of load sketches is: " << time1 - time0 << endl;
+#endif
+	
+	int kmer_size = info.half_k * 2;
+	
+	// Run DBSCAN clustering
+	DBSCANResult result = KssdDBSCAN(sketches, eps, minPts, kmer_size, threads);
+	
+	// Print results
+	printKssdDBSCANResult(result, sketches, sketchByFile, outputFile, eps, minPts);
+	cerr << "-----write the cluster result into: " << outputFile << endl;
+	cerr << "-----the cluster number of " << outputFile << " is: " << result.num_clusters << endl;
+	cerr << "-----the noise point number is: " << result.num_noise << endl;
+	
+	double time2 = get_sec();
+#ifdef Timer
+	cerr << "========time of DBSCAN clustering is: " << time2 - time1 << endl;
+#endif
+}
 
+void clust_from_genome_dbscan(const string inputFile, string outputFile, string folder_path, bool sketchByFile, const int kmerSize, const int drlevel, const int minLen, bool noSave, double eps, int minPts, int threads) {
+	bool isSave = !noSave;
+	
+	vector<KssdSketchInfo> sketches;
+	KssdParameters info;
+	string sketch_folder_path;
+	
+	double time0 = get_sec();
+	compute_kssd_sketches(sketches, info, isSave, inputFile, sketch_folder_path, sketchByFile, minLen, kmerSize, drlevel, threads);
+	cerr << "-----the size of sketches is: " << sketches.size() << endl;
+	double time1 = get_sec();
+#ifdef Timer
+	cerr << "========time of compute sketches is: " << time1 - time0 << endl;
+#endif
+	
+	// Run DBSCAN clustering
+	DBSCANResult result = KssdDBSCAN(sketches, eps, minPts, kmerSize, threads);
+	
+	// Print results
+	printKssdDBSCANResult(result, sketches, sketchByFile, outputFile, eps, minPts);
+	cerr << "-----write the cluster result into: " << outputFile << endl;
+	cerr << "-----the cluster number of " << outputFile << " is: " << result.num_clusters << endl;
+	cerr << "-----the noise point number is: " << result.num_noise << endl;
+	
+	double time2 = get_sec();
+#ifdef Timer
+	cerr << "========time of DBSCAN clustering is: " << time2 - time1 << endl;
+#endif
+}
+
+#endif // DBSCAN_CLUST

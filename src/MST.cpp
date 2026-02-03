@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <climits>
 #include <algorithm>
+#include <cmath>
+#include <numeric>
 #include "phmap.h"  // Google's Swiss Tables for faster hash maps
 using namespace std;
 
@@ -1741,5 +1743,643 @@ vector<EdgeInfo> compute_minhash_mst(vector<SketchInfo>& sketches, int start_ind
   delete [] intersectionArr;
 
   return mst;
+}
+
+// ============================================================================
+// Automatic Threshold Selection Based on MST Edge Length Distribution
+// ============================================================================
+
+EdgeLengthStats analyzeEdgeLengthDistribution(const vector<EdgeInfo>& mst){
+  EdgeLengthStats stats;
+  
+  if(mst.empty()){
+    stats.min_dist = stats.max_dist = stats.median_dist = stats.mean_dist = 0.0;
+    stats.q1_dist = stats.q3_dist = stats.std_dev = 0.0;
+    return stats;
+  }
+  
+  // Extract and sort all edge distances
+  // Filter out zero-distance edges for better gap detection (they represent identical sequences)
+  vector<double> distances;
+  distances.reserve(mst.size());
+  int zero_count = 0;
+  for(const auto& edge : mst){
+    if(edge.dist > 1e-10){  // Filter out near-zero distances
+      distances.push_back(edge.dist);
+    } else {
+      zero_count++;
+    }
+  }
+  sort(distances.begin(), distances.end());
+  stats.sorted_distances = distances;
+  
+  // Store zero count for reporting (can be added to stats struct if needed)
+  
+  int n = distances.size();
+  
+  if(n == 0){
+    stats.min_dist = stats.max_dist = stats.median_dist = stats.mean_dist = 0.0;
+    stats.q1_dist = stats.q3_dist = stats.std_dev = 0.0;
+    return stats;
+  }
+  
+  // Basic statistics
+  stats.min_dist = distances[0];
+  stats.max_dist = distances[n-1];
+  
+  if(n == 1){
+    stats.median_dist = stats.mean_dist = distances[0];
+    stats.q1_dist = stats.q3_dist = distances[0];
+    stats.std_dev = 0.0;
+    return stats;
+  }
+  
+  stats.median_dist = (n % 2 == 0) ? 
+    (distances[n/2-1] + distances[n/2]) / 2.0 : 
+    distances[n/2];
+  
+  // Quartiles
+  int q1_idx = max(0, n / 4);
+  int q3_idx = min(n-1, (3 * n) / 4);
+  stats.q1_dist = distances[q1_idx];
+  stats.q3_dist = distances[q3_idx];
+  
+  // Mean
+  double sum = 0.0;
+  for(double d : distances){
+    sum += d;
+  }
+  stats.mean_dist = sum / n;
+  
+  // Standard deviation
+  double variance = 0.0;
+  if(n > 1){
+    for(double d : distances){
+      double diff = d - stats.mean_dist;
+      variance += diff * diff;
+    }
+    stats.std_dev = sqrt(variance / n);
+  } else {
+    stats.std_dev = 0.0;
+  }
+  
+  return stats;
+}
+
+// Compute stability score by measuring edge flip rate under small perturbations
+// Improved version: evaluates edges near the threshold (both above and below) to detect
+// both split sensitivity (threshold decreases) and merge sensitivity (threshold increases)
+// 
+// Mathematical interpretation: stability(t') = 1 - flip_rate(t')
+// where flip_rate(t') = (#edges between threshold and t') / |E_near|
+//
+// For MST edges, cluster co-membership is equivalent to edge retention in a tree cut,
+// so we can evaluate stability by checking edge flip events without BFS.
+StabilityResult computeThresholdStability(const vector<EdgeInfo>& mst, 
+                                         double threshold, 
+                                         int num_vertices,
+                                         double epsilon,
+                                         int num_samples,
+                                         int min_near_edges){
+  StabilityResult result;
+  result.overall = 0.5;
+  result.split = 0.5;
+  result.merge = 0.5;
+  result.near_edge_count = 0;
+  
+  if(num_vertices <= 0 || mst.empty()){
+    return result;
+  }
+  
+  // Step 1: Adaptive window selection to ensure sufficient near-edge count
+  // Extract edges near the threshold: E_near = { e in MST | w(e) ∈ [threshold - ε, threshold + ε] }
+  // If too few edges, expand epsilon until we have enough or reach a limit
+  double lo = max(0.0, threshold - epsilon);
+  double hi = threshold + epsilon;
+  double max_epsilon = threshold * 0.5;  // Don't expand beyond 50% of threshold
+  double current_epsilon = epsilon;
+  
+  vector<double> near_edge_weights;
+  near_edge_weights.reserve(mst.size());
+  
+  // Try to collect enough near edges
+  while(near_edge_weights.size() < (size_t)min_near_edges && current_epsilon <= max_epsilon){
+    lo = max(0.0, threshold - current_epsilon);
+    hi = threshold + current_epsilon;
+    near_edge_weights.clear();
+    
+    for(const auto& edge : mst){
+      if(edge.dist >= lo && edge.dist <= hi){
+        near_edge_weights.push_back(edge.dist);
+      }
+    }
+    
+    if(near_edge_weights.size() < (size_t)min_near_edges){
+      current_epsilon *= 1.5;  // Expand window
+    }
+  }
+  
+  result.near_edge_count = near_edge_weights.size();
+  
+  // If still no edges near threshold, consider it stable (but might indicate threshold too extreme)
+  if(near_edge_weights.empty()){
+    result.overall = 1.0;
+    result.split = 1.0;
+    result.merge = 1.0;
+    return result;
+  }
+  
+  // Step 2: Sort edge weights for efficient counting (O(n log n) once, then O(log n) per sample)
+  sort(near_edge_weights.begin(), near_edge_weights.end());
+  
+  // Step 3: Sample thresholds in [threshold - current_epsilon, threshold + current_epsilon]
+  double min_thresh = lo;
+  double max_thresh = hi;
+  double step = (num_samples > 1) ? (max_thresh - min_thresh) / (num_samples - 1) : 0.0;
+  
+  double total_consistency = 0.0;
+  double total_split_consistency = 0.0;
+  double total_merge_consistency = 0.0;
+  int valid_samples = 0;
+  int split_samples = 0;
+  int merge_samples = 0;
+  
+  // Step 4: For each perturbed threshold, compute flip rate efficiently
+  for(int s = 0; s < num_samples; s++){
+    double perturbed_thresh = min_thresh + s * step;
+    if(perturbed_thresh < 0.0) continue;
+    
+    // Sanity check: t' == threshold should give stability = 1 (exactly)
+    if(abs(perturbed_thresh - threshold) < 1e-10){
+      total_consistency += 1.0;
+      valid_samples++;
+      if(perturbed_thresh < threshold){
+        total_split_consistency += 1.0;
+        split_samples++;
+      } else if(perturbed_thresh > threshold){
+        total_merge_consistency += 1.0;
+        merge_samples++;
+      }
+      continue;
+    }
+    
+    // Count edges that would flip: edges between min(threshold, t') and max(threshold, t')
+    double flip_lo = min(threshold, perturbed_thresh);
+    double flip_hi = max(threshold, perturbed_thresh);
+    
+    // Use binary search to count edges in (flip_lo, flip_hi]
+    // Note: edges exactly at threshold don't flip (they're at the boundary)
+    auto lower_it = upper_bound(near_edge_weights.begin(), near_edge_weights.end(), flip_lo);
+    auto upper_it = upper_bound(near_edge_weights.begin(), near_edge_weights.end(), flip_hi);
+    
+    int flip_count = upper_it - lower_it;
+    int consistent_count = near_edge_weights.size() - flip_count;
+    
+    // Stability = 1 - flip_rate
+    double consistency = (double)consistent_count / near_edge_weights.size();
+    total_consistency += consistency;
+    valid_samples++;
+    
+    // Separate split and merge sensitivity
+    if(perturbed_thresh < threshold){
+      total_split_consistency += consistency;
+      split_samples++;
+    } else if(perturbed_thresh > threshold){
+      total_merge_consistency += consistency;
+      merge_samples++;
+    }
+  }
+  
+  // Compute averages
+  if(valid_samples > 0){
+    result.overall = total_consistency / valid_samples;
+  }
+  if(split_samples > 0){
+    result.split = total_split_consistency / split_samples;
+  }
+  if(merge_samples > 0){
+    result.merge = total_merge_consistency / merge_samples;
+  }
+  
+  // Overall stability: use minimum (more conservative) or average
+  // Using minimum is more conservative and ensures both directions are stable
+  result.overall = min(result.split, result.merge);
+  
+  return result;
+}
+
+vector<ThresholdCandidate> findThresholdCandidates(const vector<EdgeInfo>& mst, 
+                                                    int max_candidates,
+                                                    double min_gap_ratio,
+                                                    bool enable_stability,
+                                                    int num_vertices){
+  vector<ThresholdCandidate> candidates;
+  
+  if(mst.size() < 2){
+    return candidates;
+  }
+  
+  // Get sorted edge distances
+  EdgeLengthStats stats = analyzeEdgeLengthDistribution(mst);
+  const vector<double>& distances = stats.sorted_distances;
+  
+  int n = distances.size();
+  double range = stats.max_dist - stats.min_dist;
+  
+  // Handle edge case: all distances are the same (range = 0)
+  if(range <= 1e-10){
+    // Return median as candidate
+    ThresholdCandidate candidate;
+    candidate.threshold = stats.median_dist;
+    candidate.gap_score = 0.0;
+    candidate.edge_index = -1;
+    candidate.confidence = 0.5;
+    candidate.stability_score = 0.5;  // Default stability
+    candidate.stability_split = 0.5;
+    candidate.stability_merge = 0.5;
+    candidate.near_edge_count = 0;
+    candidate.cluster_count = 0;
+    if(candidate.threshold < 0.01){
+      candidate.level = "strain";
+    } else if(candidate.threshold < 0.03){
+      candidate.level = "species";
+    } else if(candidate.threshold < 0.1){
+      candidate.level = "genus";
+    } else {
+      candidate.level = "higher";
+    }
+    
+    // Compute stability and cluster count if enabled
+    if(enable_stability && num_vertices > 0){
+      StabilityResult stability = computeThresholdStability(mst, candidate.threshold, num_vertices, 0.01, 5, 100);
+      candidate.stability_score = stability.overall;
+      candidate.stability_split = stability.split;
+      candidate.stability_merge = stability.merge;
+      candidate.near_edge_count = stability.near_edge_count;
+      vector<EdgeInfo> forest = generateForest(mst, candidate.threshold);
+      vector<vector<int>> clusters = generateClusterWithBfs(forest, num_vertices);
+      candidate.cluster_count = clusters.size();
+    } else if(num_vertices > 0){
+      candidate.stability_score = 0.5;
+      candidate.stability_split = 0.5;
+      candidate.stability_merge = 0.5;
+      candidate.near_edge_count = 0;
+      vector<EdgeInfo> forest = generateForest(mst, candidate.threshold);
+      vector<vector<int>> clusters = generateClusterWithBfs(forest, num_vertices);
+      candidate.cluster_count = clusters.size();
+    }
+    
+    candidates.push_back(candidate);
+    return candidates;
+  }
+  
+  double min_gap = range * min_gap_ratio;  // Minimum gap size to consider
+  
+  // Find gaps between adjacent edge lengths
+  vector<pair<double, int>> gaps;  // (gap_size, index)
+  
+  for(int i = 1; i < n; i++){
+    double gap = distances[i] - distances[i-1];
+    if(gap > min_gap){
+      gaps.push_back({gap, i});
+    }
+  }
+  
+  // Sort gaps by size (largest first)
+  sort(gaps.begin(), gaps.end(), 
+       [](const pair<double, int>& a, const pair<double, int>& b){
+         return a.first > b.first;
+       });
+  
+  // Select top candidates
+  int num_candidates = min(max_candidates, (int)gaps.size());
+  
+  for(int i = 0; i < num_candidates; i++){
+    ThresholdCandidate candidate;
+    int idx = gaps[i].second;
+    candidate.edge_index = idx;
+    candidate.threshold = distances[idx];  // Use the larger edge as threshold
+    candidate.gap_score = gaps[i].first;
+    
+    // Calculate confidence based on gap size relative to range
+    // Avoid division by zero (range should be > 0 at this point)
+    if(range > 1e-10){
+      candidate.confidence = min(1.0, gaps[i].first / range * 10.0);  // Normalize
+    } else {
+      candidate.confidence = 0.5;  // Default confidence when range is too small
+    }
+    
+    // Suggest taxonomic level based on threshold value
+    // These are heuristic thresholds based on typical genomic distance ranges
+    if(candidate.threshold < 0.001){
+      candidate.level = "identical/near-identical";
+    } else if(candidate.threshold < 0.005){
+      candidate.level = "strain/subspecies";
+    } else if(candidate.threshold < 0.01){
+      candidate.level = "strain";
+    } else if(candidate.threshold < 0.03){
+      candidate.level = "species";
+    } else if(candidate.threshold < 0.1){
+      candidate.level = "genus";
+    } else if(candidate.threshold < 0.2){
+      candidate.level = "family";
+    } else {
+      candidate.level = "higher";
+    }
+    
+    // Initialize stability and cluster count
+    candidate.stability_score = 0.5;  // Default, will be computed if enabled
+    candidate.stability_split = 0.5;
+    candidate.stability_merge = 0.5;
+    candidate.near_edge_count = 0;
+    candidate.cluster_count = 0;
+    
+    // Compute stability and cluster count if enabled
+    if(enable_stability && num_vertices > 0){
+      StabilityResult stability = computeThresholdStability(mst, candidate.threshold, num_vertices, 0.01, 5, 100);
+      candidate.stability_score = stability.overall;
+      candidate.stability_split = stability.split;
+      candidate.stability_merge = stability.merge;
+      candidate.near_edge_count = stability.near_edge_count;
+      vector<EdgeInfo> forest = generateForest(mst, candidate.threshold);
+      vector<vector<int>> clusters = generateClusterWithBfs(forest, num_vertices);
+      candidate.cluster_count = clusters.size();
+    } else if(num_vertices > 0){
+      candidate.stability_score = 0.5;
+      candidate.stability_split = 0.5;
+      candidate.stability_merge = 0.5;
+      candidate.near_edge_count = 0;
+      vector<EdgeInfo> forest = generateForest(mst, candidate.threshold);
+      vector<vector<int>> clusters = generateClusterWithBfs(forest, num_vertices);
+      candidate.cluster_count = clusters.size();
+    }
+    
+    candidates.push_back(candidate);
+  }
+  
+  // Also consider median and quartiles as candidates if they are in reasonable range
+  // Skip Q1 if it's too small (< 0.001), as it's likely from identical sequences
+  vector<double> percentile_thresholds;
+  if(stats.q1_dist >= 0.001){
+    percentile_thresholds.push_back(stats.q1_dist);
+  }
+  percentile_thresholds.push_back(stats.median_dist);
+  percentile_thresholds.push_back(stats.q3_dist);
+  
+  for(double thresh : percentile_thresholds){
+    // Only consider reasonable thresholds (>= 0.001)
+    if(thresh < 0.001){
+      continue;
+    }
+    
+    // Check if this threshold is not too close to existing candidates
+    bool too_close = false;
+    for(const auto& cand : candidates){
+      if(abs(cand.threshold - thresh) < min_gap * 0.5){
+        too_close = true;
+        break;
+      }
+    }
+    
+    if(!too_close && thresh > stats.min_dist && thresh < stats.max_dist){
+      ThresholdCandidate candidate;
+      candidate.threshold = thresh;
+      candidate.gap_score = 0.0;  // No gap, but still a candidate
+      candidate.edge_index = -1;
+      candidate.confidence = 0.4;  // Lower confidence for percentile-based (no gap)
+      
+      // More nuanced classification based on typical genomic distance ranges
+      if(thresh < 0.001){
+        candidate.level = "identical/near-identical";
+      } else if(thresh < 0.005){
+        candidate.level = "strain/subspecies";
+      } else if(thresh < 0.01){
+        candidate.level = "strain";
+      } else if(thresh < 0.03){
+        candidate.level = "species";
+      } else if(thresh < 0.1){
+        candidate.level = "genus";
+      } else if(thresh < 0.2){
+        candidate.level = "family";
+      } else {
+        candidate.level = "higher";
+      }
+      
+      // Initialize stability and cluster count
+      candidate.stability_score = 0.5;  // Default, will be computed if enabled
+      candidate.stability_split = 0.5;
+      candidate.stability_merge = 0.5;
+      candidate.near_edge_count = 0;
+      candidate.cluster_count = 0;
+      
+      // Compute stability and cluster count if enabled
+      if(enable_stability && num_vertices > 0){
+        StabilityResult stability = computeThresholdStability(mst, candidate.threshold, num_vertices, 0.01, 5, 100);
+        candidate.stability_score = stability.overall;
+        candidate.stability_split = stability.split;
+        candidate.stability_merge = stability.merge;
+        candidate.near_edge_count = stability.near_edge_count;
+        vector<EdgeInfo> forest = generateForest(mst, candidate.threshold);
+        vector<vector<int>> clusters = generateClusterWithBfs(forest, num_vertices);
+        candidate.cluster_count = clusters.size();
+      } else if(num_vertices > 0){
+        candidate.stability_score = 0.5;
+        candidate.stability_split = 0.5;
+        candidate.stability_merge = 0.5;
+        candidate.near_edge_count = 0;
+        vector<EdgeInfo> forest = generateForest(mst, candidate.threshold);
+        vector<vector<int>> clusters = generateClusterWithBfs(forest, num_vertices);
+        candidate.cluster_count = clusters.size();
+      }
+      
+      candidates.push_back(candidate);
+    }
+  }
+  
+  // Sort all candidates by threshold value
+  sort(candidates.begin(), candidates.end(),
+       [](const ThresholdCandidate& a, const ThresholdCandidate& b){
+         return a.threshold < b.threshold;
+       });
+  
+  return candidates;
+}
+
+ThresholdCandidate selectOptimalThreshold(const vector<ThresholdCandidate>& candidates,
+                                          const vector<EdgeInfo>& mst){
+  if(candidates.empty()){
+    ThresholdCandidate default_cand;
+    default_cand.threshold = 0.05;  // Default threshold
+    default_cand.confidence = 0.0;
+    default_cand.level = "unknown";
+    return default_cand;
+  }
+  
+  // Filter out unreasonably small thresholds (< 0.001)
+  // These are likely from identical or near-identical sequences
+  const double MIN_REASONABLE_THRESHOLD = 0.001;
+  
+  // First, try to find candidates in the reasonable range (0.01-0.1)
+  double best_score = -1.0;
+  ThresholdCandidate optimal;
+  bool found_reasonable = false;
+  
+  for(const auto& cand : candidates){
+    // Skip unreasonably small thresholds
+    if(cand.threshold < MIN_REASONABLE_THRESHOLD){
+      continue;
+    }
+    
+    double score = cand.confidence;
+    
+    // Strongly prefer thresholds in the species-genus range (0.01-0.1)
+    if(cand.threshold >= 0.01 && cand.threshold <= 0.1){
+      score *= 2.0;  // Strong boost
+      found_reasonable = true;
+    } else if(cand.threshold >= 0.001 && cand.threshold < 0.01){
+      // Acceptable but not ideal (strain-species boundary)
+      score *= 1.2;
+    } else if(cand.threshold > 0.1 && cand.threshold <= 0.2){
+      // Family level, acceptable
+      score *= 1.1;
+    }
+    
+    // Boost score based on gap size (prefer candidates with actual gaps)
+    if(cand.gap_score > 0.0){
+      score += cand.gap_score * 20.0;  // Strong boost for gap-based candidates
+    }
+    
+    if(score > best_score){
+      best_score = score;
+      optimal = cand;
+    }
+  }
+  
+  // If no reasonable candidate found, prefer default over very small median
+  if(!found_reasonable && best_score < 0){
+    // Calculate median from MST for fallback
+    EdgeLengthStats stats = analyzeEdgeLengthDistribution(mst);
+    double median_thresh = stats.median_dist;
+    
+    // Prefer default (0.05) if median is too small (< 0.01)
+    // Small median usually indicates many identical/near-identical sequences
+    // which is not suitable for species/genus level clustering
+    if(median_thresh >= 0.01 && median_thresh <= 0.2){
+      // Median is in reasonable range, use it
+      optimal.threshold = median_thresh;
+      optimal.confidence = 0.4;
+      if(median_thresh < 0.03){
+        optimal.level = "species";
+      } else if(median_thresh < 0.1){
+        optimal.level = "genus";
+      } else {
+        optimal.level = "family";
+      }
+      optimal.gap_score = 0.0;
+      optimal.edge_index = -1;
+    } else {
+      // Median is too small or too large, use default threshold
+      // This is more appropriate for typical taxonomic clustering
+      optimal.threshold = 0.05;
+      optimal.confidence = 0.3;
+      optimal.level = "genus";
+      optimal.gap_score = 0.0;
+      optimal.edge_index = -1;
+    }
+  }
+  
+  return optimal;
+}
+
+void printThresholdAnalysis(const vector<EdgeInfo>& mst, 
+                           const EdgeLengthStats& stats,
+                           const vector<ThresholdCandidate>& candidates,
+                           const ThresholdCandidate& optimal,
+                           const string& output_file){
+  FILE* fp = fopen(output_file.c_str(), "w");
+  if(!fp){
+    cerr << "ERROR: printThresholdAnalysis(), cannot write file: " << output_file << endl;
+    return;
+  }
+  
+  fprintf(fp, "# Automatic Threshold Selection Analysis\n");
+  fprintf(fp, "# Based on MST Edge Length Distribution\n");
+  fprintf(fp, "# ===========================================\n\n");
+  
+  fprintf(fp, "## Edge Length Statistics\n");
+  fprintf(fp, "Total edges: %zu\n", mst.size());
+  fprintf(fp, "Min distance: %.6f\n", stats.min_dist);
+  fprintf(fp, "Max distance: %.6f\n", stats.max_dist);
+  fprintf(fp, "Mean distance: %.6f\n", stats.mean_dist);
+  fprintf(fp, "Median distance: %.6f\n", stats.median_dist);
+  fprintf(fp, "Q1 (25%%): %.6f\n", stats.q1_dist);
+  fprintf(fp, "Q3 (75%%): %.6f\n", stats.q3_dist);
+  fprintf(fp, "Standard deviation: %.6f\n", stats.std_dev);
+  fprintf(fp, "Range: %.6f\n\n", stats.max_dist - stats.min_dist);
+  
+  fprintf(fp, "## Optimal Threshold (Recommended)\n");
+  fprintf(fp, "Threshold: %.6f\n", optimal.threshold);
+  fprintf(fp, "Confidence: %.3f\n", optimal.confidence);
+  if(optimal.cluster_count > 0 || optimal.stability_score != 0.5){
+    fprintf(fp, "Stability (overall): %.3f\n", optimal.stability_score);
+    if(optimal.stability_split != 0.5 || optimal.stability_merge != 0.5){
+      fprintf(fp, "  - Split sensitivity: %.3f (stability when threshold decreases)\n", optimal.stability_split);
+      fprintf(fp, "  - Merge sensitivity: %.3f (stability when threshold increases)\n", optimal.stability_merge);
+    }
+    if(optimal.near_edge_count > 0){
+      fprintf(fp, "  - Near edges evaluated: %d\n", optimal.near_edge_count);
+    }
+    fprintf(fp, "Number of clusters: %d\n", optimal.cluster_count);
+  }
+  fprintf(fp, "Suggested level: %s\n", optimal.level.c_str());
+  if(optimal.edge_index >= 0){
+    fprintf(fp, "Edge index: %d\n", optimal.edge_index);
+    fprintf(fp, "Gap score: %.6f\n", optimal.gap_score);
+    fprintf(fp, "Source: gap-based detection (natural breakpoint in edge distribution)\n");
+  } else {
+    fprintf(fp, "Source: percentile-based (median/quartile, no significant gap detected)\n");
+    fprintf(fp, "Note: This threshold is based on distribution statistics, not natural breakpoints.\n");
+    fprintf(fp, "      Consider manual adjustment (e.g., 0.01-0.05 for species/genus level) if needed.\n");
+  }
+  fprintf(fp, "\n");
+  
+  fprintf(fp, "## All Candidate Thresholds\n");
+  // Check if stability scores are available (non-zero cluster_count indicates they were computed)
+  bool has_stability = false;
+  for(const auto& cand : candidates){
+    if(cand.cluster_count > 0 || cand.stability_score != 0.5){
+      has_stability = true;
+      break;
+    }
+  }
+  
+  if(has_stability){
+    fprintf(fp, "# Threshold\tConfidence\tStability_Overall\tStability_Split\tStability_Merge\tNear_Edges\tClusters\tLevel\tGap_Score\tEdge_Index\n");
+    for(size_t i = 0; i < candidates.size(); i++){
+      const auto& cand = candidates[i];
+      fprintf(fp, "%.6f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%s\t%.6f\t%d\n", 
+              cand.threshold, cand.confidence, cand.stability_score, 
+              cand.stability_split, cand.stability_merge, cand.near_edge_count,
+              cand.cluster_count, cand.level.c_str(), cand.gap_score, cand.edge_index);
+    }
+  } else {
+    fprintf(fp, "# Threshold\tConfidence\tLevel\tGap_Score\tEdge_Index\n");
+    for(size_t i = 0; i < candidates.size(); i++){
+      const auto& cand = candidates[i];
+      fprintf(fp, "%.6f\t%.3f\t%s\t%.6f\t%d\n", 
+              cand.threshold, cand.confidence, cand.level.c_str(), 
+              cand.gap_score, cand.edge_index);
+    }
+  }
+  fprintf(fp, "\n");
+  
+  fprintf(fp, "## Edge Length Distribution (sorted)\n");
+  fprintf(fp, "# Index\tDistance\n");
+  for(size_t i = 0; i < stats.sorted_distances.size(); i++){
+    fprintf(fp, "%zu\t%.6f\n", i, stats.sorted_distances[i]);
+  }
+  
+  fclose(fp);
+  cerr << "-----write threshold analysis into: " << output_file << endl;
 }
 
