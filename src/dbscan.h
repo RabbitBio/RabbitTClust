@@ -45,7 +45,8 @@ DBSCANResult KssdDBSCAN(
     int minPts,
     int kmer_size,
     int threads,
-    int knn_k = 0
+    int knn_k = 0,
+    int max_posting = 0
 );
 
 /**

@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <queue>
+#include <functional>
 #include <omp.h>
 #include <algorithm>
 #include <cmath>
@@ -66,247 +67,215 @@ static double calculate_mash_distance(const std::vector<uint32_t>& hashesRef, co
     return dist;
 }
 
+struct InvertedIndexCSR {
+    vector<uint32_t> keys;           // Unique hash keys
+    vector<uint64_t> offsets;        // Offsets into postings (size = keys + 1)
+    vector<int> postings;            // Flat postings array
+    phmap::flat_hash_map<uint32_t, uint32_t> key_to_idx;
+};
+
 /**
- * @brief Build inverted index for all sketches (KSSD, 32-bit hashes)
+ * @brief Build inverted index in CSR format for all sketches (KSSD, 32-bit hashes)
  * Optimization 7: Skip empty sketches and ensure hash uniqueness
  */
-phmap::flat_hash_map<uint32_t, vector<int>> buildInvertedIndex32(
-    const vector<KssdSketchInfo>& sketches
+InvertedIndexCSR buildInvertedIndexCSR32(
+    const vector<KssdSketchInfo>& sketches,
+    int max_posting
 ) {
-    phmap::flat_hash_map<uint32_t, vector<int>> index;
-    index.reserve(10000000);  // Pre-allocate for large datasets
+    InvertedIndexCSR index;
+    phmap::flat_hash_map<uint32_t, uint32_t> counts;
+    counts.reserve(10000000);  // Pre-allocate for large datasets
     
+    // First pass: count postings per hash
     for(size_t i = 0; i < sketches.size(); i++) {
-        if(sketches[i].use64) continue;  // Skip 64-bit hashes for now
-        
-        // Optimization 7: Skip empty sketches
+        if(sketches[i].use64) continue;
         if(sketches[i].hash32_arr.empty()) continue;
-        
-        // Optimization 7: Ensure hash uniqueness (should be done at sketch generation, but double-check)
-        // Note: We assume hash32_arr is already sorted and unique from sketch generation
-        // If not, we would need to sort and unique here, but that's expensive
-        
         for(uint32_t hash : sketches[i].hash32_arr) {
-            index[hash].push_back(i);
+            auto it = counts.find(hash);
+            if(it == counts.end()) {
+                counts.emplace(hash, 1u);
+            } else {
+                it->second++;
+            }
+        }
+    }
+    
+    index.keys.reserve(counts.size());
+    index.offsets.reserve(counts.size() + 1);
+    index.key_to_idx.reserve(counts.size());
+    
+    uint64_t total = 0;
+    for(const auto& kv : counts) {
+        if(max_posting > 0 && (int)kv.second > max_posting) {
+            continue;
+        }
+        index.key_to_idx.emplace(kv.first, (uint32_t)index.keys.size());
+        index.keys.push_back(kv.first);
+        index.offsets.push_back(total);
+        total += kv.second;
+    }
+    index.offsets.push_back(total);
+    index.postings.resize((size_t)total);
+    
+    // Second pass: fill postings
+    vector<uint64_t> cursor(index.keys.size(), 0);
+    for(size_t i = 0; i < sketches.size(); i++) {
+        if(sketches[i].use64) continue;
+        if(sketches[i].hash32_arr.empty()) continue;
+        for(uint32_t hash : sketches[i].hash32_arr) {
+            auto it = index.key_to_idx.find(hash);
+            if(it == index.key_to_idx.end()) continue;
+            uint32_t idx = it->second;
+            uint64_t pos = index.offsets[idx] + cursor[idx]++;
+            index.postings[(size_t)pos] = (int)i;
         }
     }
     
     return index;
 }
 
+inline bool getPostingList(
+    const InvertedIndexCSR& index,
+    uint32_t hash,
+    uint64_t& start,
+    uint64_t& end
+) {
+    auto it = index.key_to_idx.find(hash);
+    if(it == index.key_to_idx.end()) return false;
+    uint32_t idx = it->second;
+    start = index.offsets[idx];
+    end = index.offsets[idx + 1];
+    return start < end;
+}
+
 /**
- * @brief Build k-NN graph for all points (k-NN pre-filtering optimization)
- * For each point, find and store its k nearest neighbors
+ * @brief Build k-NN list for a single point (approximate DBSCAN accelerator)
+ * Find and store the k nearest neighbors with Jaccard scores.
+ *
+ * Note: This is an approximate accelerator for DBSCAN. If eps-neighborhood
+ * size exceeds k, DBSCAN results may be approximate.
  * 
  * @param sketches Input sketches
  * @param inverted_index Inverted index for fast candidate lookup
- * @param jaccard_min Pre-calculated minimum jaccard threshold
+ * @param jaccard_min Minimum Jaccard threshold for filtering candidates
+ * @param point_idx Point index to build k-NN for
  * @param k Number of nearest neighbors to keep
- * @param kmer_size K-mer size for distance calculation
- * @param threads Number of threads
- * @return k-NN graph: point_id -> vector of neighbor IDs
+ * @param max_posting Max posting list size to consider (0 = disabled)
+ * @param knn_graph Output k-NN graph: point_id -> vector of (neighbor_id, jaccard)
+ * @param knn_built Per-point cache flag
+ * @param knn_touched_sizes Stats: touched sizes
+ * @param knn_skipped_postings Stats: skipped postings
+ * @param mark Scratch: epoch marks
+ * @param cnt Scratch: intersection counts
+ * @param touched Scratch: touched candidates
+ * @param cur_mark Scratch: current epoch
  */
-vector<vector<int>> buildKNNGraph(
+void buildKNNForPoint(
     const vector<KssdSketchInfo>& sketches,
-    const phmap::flat_hash_map<uint32_t, vector<int>>& inverted_index,
+    const InvertedIndexCSR& inverted_index,
     double jaccard_min,
+    int point_idx,
     int k,
-    int kmer_size,
-    int threads
+    int max_posting,
+    vector<vector<std::pair<int, float>>>& knn_graph,
+    vector<char>& knn_built,
+    vector<int>& knn_touched_sizes,
+    uint64_t& knn_skipped_postings,
+    vector<uint32_t>& mark,
+    vector<uint32_t>& cnt,
+    vector<int>& touched,
+    uint32_t& cur_mark
 ) {
     int n = sketches.size();
-    vector<vector<int>> knn_graph(n);
-    
+    if(point_idx < 0 || point_idx >= n) return;
+    if(knn_built[point_idx]) return;
     if(k <= 0) {
-        // No k-NN filtering, return empty graph
-        return knn_graph;
+        knn_built[point_idx] = 1;
+        return;
+    }
+    knn_built[point_idx] = 1;
+    
+    if(sketches[point_idx].use64 || sketches[point_idx].hash32_arr.empty()) {
+        return;
     }
     
-    cerr << "-----Building k-NN graph (k=" << k << ")..." << endl;
-    
-    // Global arrays for counting (reused across queries)
-    vector<uint32_t> mark(n, 0);
-    vector<uint32_t> cnt(n, 0);
-    vector<int> touched;
-    touched.reserve(10000);
-    uint32_t cur_mark = 0;
-    
-    // Thread-local buffers
-    vector<vector<int>> thread_neighbors(threads);
-    for(auto& v : thread_neighbors) {
-        v.reserve(256);
+    // Find all candidates using inverted index
+    touched.clear();
+    cur_mark++;
+    if(cur_mark == 0) {
+        std::fill(mark.begin(), mark.end(), 0);
+        cur_mark = 1;
     }
     
-    // Process each point to find its k nearest neighbors
-    for(int i = 0; i < n; i++) {
-        if(sketches[i].use64 || sketches[i].hash32_arr.empty()) {
-            continue;  // Skip 64-bit or empty sketches
-        }
-        
-        // Find all candidates using inverted index
-        cur_mark++;
-        if(cur_mark == 0) {
-            std::fill(mark.begin(), mark.end(), 0);
-            cur_mark = 1;
-        }
-        touched.clear();
-        
-        int sizeRef = sketches[i].hash32_arr.size();
-        
-        // Count intersections
-        for(uint32_t hash : sketches[i].hash32_arr) {
-            auto it = inverted_index.find(hash);
-            if(it != inverted_index.end()) {
-                for(int candidate_id : it->second) {
-                    if(candidate_id == i) continue;
-                    
-                    if(mark[candidate_id] != cur_mark) {
-                        mark[candidate_id] = cur_mark;
-                        cnt[candidate_id] = 1;
-                        touched.push_back(candidate_id);
-                    } else {
-                        cnt[candidate_id]++;
-                    }
-                }
-            }
-        }
-        
-        if(touched.empty()) {
+    int sizeRef = sketches[point_idx].hash32_arr.size();
+    
+    // Count intersections
+    for(uint32_t hash : sketches[point_idx].hash32_arr) {
+        uint64_t start = 0, end = 0;
+        if(!getPostingList(inverted_index, hash, start, end)) continue;
+        uint64_t len = end - start;
+        if(max_posting > 0 && (int)len > max_posting) {
+            knn_skipped_postings += 1;
             continue;
         }
-        
-        // Use max-heap to maintain top-k nearest neighbors
-        // Heap stores (distance, neighbor_id), max-heap so we can pop largest
-        using DistPair = std::pair<double, int>;
-        std::priority_queue<DistPair> topk;  // max-heap
-        
-        // Clear thread buffers
-        for(auto& v : thread_neighbors) v.clear();
-        
-        // Parallel distance calculation
-        const size_t PARALLEL_THRESHOLD = 5000;
-        if(touched.size() < PARALLEL_THRESHOLD || threads <= 1) {
-            // Serial processing
-            for(int candidate_id : touched) {
-                const auto& candidate = sketches[candidate_id];
-                if(candidate.use64) continue;
-                
-                int common = cnt[candidate_id];
-                int sizeQry = candidate.hash32_arr.size();
-                
-                // Filter by common
-                double v = jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min);
-                int min_common_needed = (int)std::ceil(v - 1e-12);
-                if(common < min_common_needed) continue;
-                
-                // Calculate Jaccard
-                uint64_t union_size = sizeRef + sizeQry - common;
-                double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
-                
-                if(jaccard_ >= jaccard_min) {
-                    // Convert jaccard to distance for heap (use kmer_size from parameter)
-                    double dist = (jaccard_ == 1.0) ? 0.0 : -log(2.0 * jaccard_ / (1.0 + jaccard_)) / kmer_size;
-                    if(dist > 1.0) dist = 1.0;
-                    
-                    if((int)topk.size() < k) {
-                        topk.push({dist, candidate_id});
-                    } else if(dist < topk.top().first) {
-                        topk.pop();
-                        topk.push({dist, candidate_id});
-                    }
-                }
-            }
-        } else {
-            // Parallel processing
-            #pragma omp parallel num_threads(threads)
-            {
-                int tid = omp_get_thread_num();
-                auto& local_topk = thread_neighbors[tid];
-                std::priority_queue<DistPair> local_heap;
-                
-                #pragma omp for schedule(guided)
-                for(size_t idx = 0; idx < touched.size(); idx++) {
-                    int candidate_id = touched[idx];
-                    const auto& candidate = sketches[candidate_id];
-                    if(candidate.use64) continue;
-                    
-                    int common = cnt[candidate_id];
-                    int sizeQry = candidate.hash32_arr.size();
-                    
-                    // Filter by common
-                    double v = jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min);
-                    int min_common_needed = (int)std::ceil(v - 1e-12);
-                    if(common < min_common_needed) continue;
-                    
-                    // Calculate Jaccard
-                    uint64_t union_size = sizeRef + sizeQry - common;
-                    double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
-                    
-                    if(jaccard_ >= jaccard_min) {
-                        // Convert jaccard to distance
-                        double dist = (jaccard_ == 1.0) ? 0.0 : -log(2.0 * jaccard_ / (1.0 + jaccard_)) / kmer_size;
-                        if(dist > 1.0) dist = 1.0;
-                        
-                        if((int)local_heap.size() < k) {
-                            local_heap.push({dist, candidate_id});
-                        } else if(dist < local_heap.top().first) {
-                            local_heap.pop();
-                            local_heap.push({dist, candidate_id});
-                        }
-                    }
-                }
-                
-                // Merge local heap to thread buffer
-                while(!local_heap.empty()) {
-                    local_topk.push_back(local_heap.top().second);
-                    local_heap.pop();
-                }
-            }
-            
-            // Merge all thread-local top-k
-            for(int t = 0; t < threads; t++) {
-                for(int neighbor_id : thread_neighbors[t]) {
-                    const auto& candidate = sketches[neighbor_id];
-                    if(candidate.use64) continue;
-                    
-                    int common = cnt[neighbor_id];
-                    int sizeQry = candidate.hash32_arr.size();
-                    uint64_t union_size = sizeRef + sizeQry - common;
-                    double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
-                    double dist = (jaccard_ == 1.0) ? 0.0 : -log(2.0 * jaccard_ / (1.0 + jaccard_)) / kmer_size;
-                    if(dist > 1.0) dist = 1.0;
-                    
-                    if((int)topk.size() < k) {
-                        topk.push({dist, neighbor_id});
-                    } else if(dist < topk.top().first) {
-                        topk.pop();
-                        topk.push({dist, neighbor_id});
-                    }
-                }
+        for(uint64_t p = start; p < end; p++) {
+            int candidate_id = inverted_index.postings[(size_t)p];
+            if(candidate_id == point_idx) continue;
+            if(mark[candidate_id] != cur_mark) {
+                mark[candidate_id] = cur_mark;
+                cnt[candidate_id] = 1;
+                touched.push_back(candidate_id);
+            } else {
+                cnt[candidate_id]++;
             }
         }
+    }
+    
+    knn_touched_sizes.push_back((int)touched.size());
+    if(touched.empty()) {
+        knn_built[point_idx] = 1;
+        return;
+    }
+    
+    // Use min-heap to maintain top-k highest Jaccard
+    using ScorePair = std::pair<float, int>;
+    std::priority_queue<ScorePair, std::vector<ScorePair>, std::greater<ScorePair>> topk;  // min-heap
+    
+    // Serial processing with strong pruning
+    for(int candidate_id : touched) {
+        const auto& candidate = sketches[candidate_id];
+        if(candidate.use64) continue;
         
-        // Extract k-NN neighbors
-        knn_graph[i].reserve(k);
-        while(!topk.empty()) {
-            knn_graph[i].push_back(topk.top().second);
+        int common = cnt[candidate_id];
+        int sizeQry = candidate.hash32_arr.size();
+        
+        // Filter by common
+        double v = jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min);
+        int min_common_needed = (int)std::ceil(v - 1e-12);
+        if(common < min_common_needed) continue;
+        
+        // Calculate Jaccard
+        uint64_t union_size = sizeRef + sizeQry - common;
+        double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
+        if(jaccard_ < jaccard_min) continue;
+        
+        float score = (float)jaccard_;
+        if((int)topk.size() < k) {
+            topk.push({score, candidate_id});
+        } else if(score > topk.top().first) {
             topk.pop();
-        }
-        
-        if((i + 1) % 10000 == 0) {
-            cerr << "-----Built k-NN for " << (i + 1) << " / " << n << " points" << endl;
+            topk.push({score, candidate_id});
         }
     }
     
-    // Count total edges
-    size_t total_edges = 0;
-    for(const auto& neighbors : knn_graph) {
-        total_edges += neighbors.size();
+    // Extract k-NN neighbors
+    knn_graph[point_idx].reserve(k);
+    while(!topk.empty()) {
+        knn_graph[point_idx].push_back({topk.top().second, topk.top().first});
+        topk.pop();
     }
-    cerr << "-----k-NN graph built: " << total_edges << " edges (avg " 
-         << (n > 0 ? total_edges / n : 0) << " neighbors per point)" << endl;
     
-    return knn_graph;
+    knn_built[point_idx] = 1;
 }
 
 /**
@@ -317,8 +286,10 @@ vector<int> findNeighborsKSSDWithIndex(
     const vector<KssdSketchInfo>& sketches,
     int point_idx,
     double jaccard_min,           // Pre-calculated jaccard_min (optimization 5)
-    const phmap::flat_hash_map<uint32_t, vector<int>>& inverted_index,
-    const vector<vector<int>>& knn_graph,  // k-NN graph for pre-filtering
+    double eps,                   // Epsilon threshold for DBSCAN
+    const InvertedIndexCSR& inverted_index,
+    const vector<vector<std::pair<int, float>>>& knn_graph,  // k-NN graph with jaccard
+    int max_posting,              // Max posting list size to consider (0 = disabled)
     vector<uint32_t>& mark,      // Global mark array (epoch-based)
     vector<uint32_t>& cnt,        // Global count array
     vector<int>& touched,         // Global touched list
@@ -327,13 +298,6 @@ vector<int> findNeighborsKSSDWithIndex(
     int threads
 ) {
     const auto& point = sketches[point_idx];
-    
-    // Optimization 6: Handle cur_mark overflow
-    cur_mark++;
-    if(cur_mark == 0) {
-        std::fill(mark.begin(), mark.end(), 0);
-        cur_mark = 1;
-    }
     
     if(point.use64) {
         // Fallback to brute force for 64-bit hashes
@@ -381,81 +345,48 @@ vector<int> findNeighborsKSSDWithIndex(
         return neighbors;
     }
     
+    // If k-NN graph is available, use it directly (approximate DBSCAN)
+    if(!knn_graph.empty()) {
+        vector<int> neighbors;
+        neighbors.reserve(knn_graph[point_idx].size());
+        for(const auto& entry : knn_graph[point_idx]) {
+            if(entry.second >= jaccard_min) {
+                neighbors.push_back(entry.first);
+            }
+        }
+        return neighbors;
+    }
+    
     // Use inverted index for 32-bit hashes with optimized stamp+count arrays
     int sizeRef = point.hash32_arr.size();
     if(sizeRef == 0) return vector<int>();  // Optimization 7: Skip empty sketches
     
-    // k-NN pre-filtering: if k-NN graph is available, only consider k-NN neighbors
-    if(!knn_graph.empty() && !knn_graph[point_idx].empty()) {
-        // Use k-NN graph: only check neighbors in k-NN graph
-        touched.clear();
-        for(int neighbor_id : knn_graph[point_idx]) {
-            if(neighbor_id == point_idx) continue;
-            touched.push_back(neighbor_id);
-        }
-        
-        // Count intersections for k-NN neighbors only
-        cur_mark++;
-        if(cur_mark == 0) {
-            std::fill(mark.begin(), mark.end(), 0);
-            cur_mark = 1;
-        }
-        
-        for(int candidate_id : touched) {
-            mark[candidate_id] = cur_mark;
-            // Calculate intersection for k-NN neighbors
-            const auto& candidate = sketches[candidate_id];
-            if(candidate.use64 || candidate.hash32_arr.empty()) {
-                cnt[candidate_id] = 0;
-                continue;
-            }
-            
-            // Count common hashes
-            int common = 0;
-            size_t i1 = 0, i2 = 0;
-            size_t size1 = point.hash32_arr.size();
-            size_t size2 = candidate.hash32_arr.size();
-            
-            while(i1 < size1 && i2 < size2) {
-                if(point.hash32_arr[i1] < candidate.hash32_arr[i2]) {
-                    i1++;
-                } else if(point.hash32_arr[i1] > candidate.hash32_arr[i2]) {
-                    i2++;
-                } else {
-                    common++;
-                    i1++;
-                    i2++;
-                }
-            }
-            cnt[candidate_id] = common;
-        }
-    } else {
-        // Standard mode: use inverted index to find all candidates
-        touched.clear();
-        
-        // Step 1: Count intersections using inverted index (no hash map allocation)
-        cur_mark++;
-        if(cur_mark == 0) {
-            std::fill(mark.begin(), mark.end(), 0);
-            cur_mark = 1;
-        }
-        
-        for(uint32_t hash : point.hash32_arr) {
-            auto it = inverted_index.find(hash);
-            if(it != inverted_index.end()) {
-                for(int candidate_id : it->second) {
-                    if(candidate_id == point_idx) continue;
-                    
-                    if(mark[candidate_id] != cur_mark) {
-                        // First time seeing this candidate in current query
-                        mark[candidate_id] = cur_mark;
-                        cnt[candidate_id] = 1;
-                        touched.push_back(candidate_id);
-                    } else {
-                        // Already seen, increment count
-                        cnt[candidate_id]++;
-                    }
-                }
+    // Standard mode: use inverted index to find all candidates
+    touched.clear();
+    
+    // Step 1: Count intersections using inverted index (no hash map allocation)
+    cur_mark++;
+    if(cur_mark == 0) {
+        std::fill(mark.begin(), mark.end(), 0);
+        cur_mark = 1;
+    }
+    
+    for(uint32_t hash : point.hash32_arr) {
+        uint64_t start = 0, end = 0;
+        if(!getPostingList(inverted_index, hash, start, end)) continue;
+        uint64_t len = end - start;
+        if(max_posting > 0 && (int)len > max_posting) continue;
+        for(uint64_t p = start; p < end; p++) {
+            int candidate_id = inverted_index.postings[(size_t)p];
+            if(candidate_id == point_idx) continue;
+            if(mark[candidate_id] != cur_mark) {
+                // First time seeing this candidate in current query
+                mark[candidate_id] = cur_mark;
+                cnt[candidate_id] = 1;
+                touched.push_back(candidate_id);
+            } else {
+                // Already seen, increment count
+                cnt[candidate_id]++;
             }
         }
     }
@@ -662,7 +593,8 @@ DBSCANResult KssdDBSCAN(
     int minPts,
     int kmer_size,
     int threads,
-    int knn_k
+    int knn_k,
+    int max_posting
 ) {
     DBSCANResult result;
     int n = sketches.size();
@@ -684,15 +616,30 @@ DBSCANResult KssdDBSCAN(
     double x = std::exp(-eps * kmer_size);
     double jaccard_min = x / (2.0 - x);
     
+    if(knn_k > 0 && knn_k < (minPts - 1)) {
+        cerr << "-----WARNING: knn_k (" << knn_k << ") < minPts-1 (" << (minPts - 1)
+             << "). Adjusting knn_k to " << (minPts - 1) << "." << endl;
+        knn_k = minPts - 1;
+    } else if(knn_k > 0 && knn_k < 5 * (minPts - 1)) {
+        cerr << "-----WARNING: knn_k (" << knn_k << ") may be too small for stable DBSCAN."
+             << " Consider knn_k >= " << (5 * (minPts - 1)) << "." << endl;
+    }
+    
     // Build inverted index for acceleration (only for 32-bit hashes)
     cerr << "-----Building inverted index for acceleration..." << endl;
-    phmap::flat_hash_map<uint32_t, vector<int>> inverted_index = buildInvertedIndex32(sketches);
-    cerr << "-----Inverted index built: " << inverted_index.size() << " unique hashes" << endl;
+    InvertedIndexCSR inverted_index = buildInvertedIndexCSR32(sketches, max_posting);
+    cerr << "-----Inverted index built: " << inverted_index.keys.size() << " unique hashes" << endl;
     
-    // Build k-NN graph for pre-filtering (if enabled)
-    vector<vector<int>> knn_graph;
+    // Build k-NN graph lazily for approximate acceleration (if enabled)
+    vector<vector<std::pair<int, float>>> knn_graph;
+    vector<char> knn_built;
+    vector<int> knn_touched_sizes;
+    uint64_t knn_skipped_postings = 0;
     if(knn_k > 0) {
-        knn_graph = buildKNNGraph(sketches, inverted_index, jaccard_min, knn_k, kmer_size, threads);
+        cerr << "-----WARNING: k-NN acceleration is approximate for DBSCAN (may miss eps neighbors if k is small)." << endl;
+        knn_graph.resize(sketches.size());
+        knn_built.assign(sketches.size(), 0);
+        knn_touched_sizes.reserve(sketches.size() / 4 + 1);
     }
     
     // Initialize global stamp+count arrays (optimization 1: avoid per-query allocation)
@@ -718,6 +665,11 @@ DBSCANResult KssdDBSCAN(
     int last_reported = 0;
     const int REPORT_INTERVAL = std::max(1000, n / 100);  // Report every 1% or 1000 points, whichever is larger
     
+    // RegionQuery stats
+    uint64_t total_region_queries = 0;
+    uint64_t total_neighbors = 0;
+    uint64_t core_points = 0;
+    
     // Process each point
     for(int i = 0; i < n; i++) {
         if(labels[i] != -1) continue;  // Already processed
@@ -725,10 +677,17 @@ DBSCANResult KssdDBSCAN(
         processed_count++;
         
         // Find neighbors using inverted index with optimized arrays (and k-NN graph if available)
+        if(knn_k > 0 && !knn_built[i]) {
+            buildKNNForPoint(sketches, inverted_index, jaccard_min, i, knn_k, max_posting,
+                             knn_graph, knn_built, knn_touched_sizes, knn_skipped_postings,
+                             mark, cnt, touched, cur_mark);
+        }
         vector<int> neighbors = findNeighborsKSSDWithIndex(
-            sketches, i, jaccard_min, inverted_index, knn_graph,
+            sketches, i, jaccard_min, eps, inverted_index, knn_graph, max_posting,
             mark, cnt, touched, cur_mark, thread_neighbors, threads
         );
+        total_region_queries++;
+        total_neighbors += neighbors.size();
         
         // Optimization 4: minPts includes the point itself
         if((int)neighbors.size() + 1 < minPts) {
@@ -737,6 +696,7 @@ DBSCANResult KssdDBSCAN(
             noise_count++;
             continue;
         }
+        core_points++;
         
         // Core point found, start a new cluster
         labels[i] = cluster_id;
@@ -780,14 +740,22 @@ DBSCANResult KssdDBSCAN(
             processed_count++;
             
             // Find neighbors of q using inverted index (and k-NN graph if available)
+            if(knn_k > 0 && !knn_built[q]) {
+                buildKNNForPoint(sketches, inverted_index, jaccard_min, q, knn_k, max_posting,
+                                 knn_graph, knn_built, knn_touched_sizes, knn_skipped_postings,
+                                 mark, cnt, touched, cur_mark);
+            }
             vector<int> q_neighbors = findNeighborsKSSDWithIndex(
-                sketches, q, jaccard_min, inverted_index, knn_graph,
+                sketches, q, jaccard_min, eps, inverted_index, knn_graph, max_posting,
                 mark, cnt, touched, cur_mark, thread_neighbors, threads
             );
+            total_region_queries++;
+            total_neighbors += q_neighbors.size();
             
             // Optimization 4: minPts includes the point itself
             if((int)q_neighbors.size() + 1 >= minPts) {
                 // q is also a core point, add its neighbors to seed set (with deduplication)
+                core_points++;
                 for(int neighbor : q_neighbors) {
                     if((labels[neighbor] == -1 || labels[neighbor] == -2) && !inq(neighbor)) {
                         seed_set.push(neighbor);
@@ -842,6 +810,28 @@ DBSCANResult KssdDBSCAN(
     cerr << "-----DBSCAN clustering complete!" << endl;
     cerr << "-----Found " << result.num_clusters << " clusters" << endl;
     cerr << "-----Found " << result.num_noise << " noise points (outliers)" << endl;
+    if(total_region_queries > 0) {
+        double avg_neighbors = (double)total_neighbors / (double)total_region_queries;
+        cerr << "-----RegionQuery stats: queries=" << total_region_queries
+             << ", avg_neighbors=" << avg_neighbors << endl;
+    }
+    if(core_points > 0) {
+        cerr << "-----Core points: " << core_points << " (" 
+             << (100.0 * core_points / n) << "%)" << endl;
+    }
+    if(knn_k > 0 && !knn_touched_sizes.empty()) {
+        std::vector<int> tmp = knn_touched_sizes;
+        std::sort(tmp.begin(), tmp.end());
+        size_t idx95 = (size_t)std::ceil(0.95 * tmp.size()) - 1;
+        if(idx95 >= tmp.size()) idx95 = tmp.size() - 1;
+        double avg_touched = 0.0;
+        for(int v : knn_touched_sizes) avg_touched += v;
+        avg_touched /= knn_touched_sizes.size();
+        cerr << "-----k-NN stats: built=" << knn_touched_sizes.size()
+             << ", avg_touched=" << avg_touched
+             << ", p95_touched=" << tmp[idx95]
+             << ", skipped_postings=" << knn_skipped_postings << endl;
+    }
     
     return result;
 }

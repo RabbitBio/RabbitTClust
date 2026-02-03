@@ -7,7 +7,7 @@ option(USE_RABBITFX "parse input fasta file with RabbitFX" OFF)
 option(USE_DEBUG "print the debug information" ON)
 option(USE_Timer "print the time information" ON)
 option(USE_GREEDY "use greedy incremental cluster" ON)
-option(USE_LEIDEN "use Leiden community detection cluster" OFF)
+# option(USE_LEIDEN "use Leiden community detection cluster" OFF)  # DISABLED
 option(USE_DBSCAN "use DBSCAN density-based clustering" OFF)
 
 
@@ -41,17 +41,17 @@ if(USE_GREEDY)
 	set(CMAKE_CXX_FLAGS "-D GREEDY_CLUST ${CMAKE_CXX_FLAGS}")
 endif()
 
-if(USE_LEIDEN)
-	set(CMAKE_CXX_FLAGS "-D LEIDEN_CLUST ${CMAKE_CXX_FLAGS}")
-	
-	# Find igraph library (only dependency needed)
-	find_package(PkgConfig REQUIRED)
-	pkg_check_modules(IGRAPH REQUIRED igraph)
-	
-	# Add igraph include directories
-	include_directories(${IGRAPH_INCLUDE_DIRS})
-	link_directories(${IGRAPH_LIBRARY_DIRS})
-endif()
+# if(USE_LEIDEN)  # DISABLED
+# 	set(CMAKE_CXX_FLAGS "-D LEIDEN_CLUST ${CMAKE_CXX_FLAGS}")
+# 	
+# 	# Find igraph library (only dependency needed)
+# 	find_package(PkgConfig REQUIRED)
+# 	pkg_check_modules(IGRAPH REQUIRED igraph)
+# 	
+# 	# Add igraph include directories
+# 	include_directories(${IGRAPH_INCLUDE_DIRS})
+# 	link_directories(${IGRAPH_LIBRARY_DIRS})
+# endif()
 
 if(USE_DBSCAN)
 	set(CMAKE_CXX_FLAGS "-D DBSCAN_CLUST ${CMAKE_CXX_FLAGS}")
@@ -67,11 +67,11 @@ else()
 	link_directories(RabbitSketch/build/lib)
 endif()
 
-# Add igraph include directories for Leiden
-if(USE_LEIDEN)
-	include_directories(${IGRAPH_INCLUDE_DIRS})
-	link_directories(${IGRAPH_LIBRARY_DIRS})
-endif()
+# Add igraph include directories for Leiden (DISABLED)
+# if(USE_LEIDEN)
+# 	include_directories(${IGRAPH_INCLUDE_DIRS})
+# 	link_directories(${IGRAPH_LIBRARY_DIRS})
+# endif()
 
 ##include_directories(src RabbitSketch/build/include RabbitFX/build/include)
 #include_directories(src RabbitSketch/build/include)
@@ -81,12 +81,10 @@ endif()
 
 aux_source_directory(src DIR_SRCS)
 
-# Exclude leiden.cpp from compilation if not using Leiden
-if(NOT USE_LEIDEN)
-	list(REMOVE_ITEM DIR_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/leiden.cpp")
-	# Also try relative path
-	list(REMOVE_ITEM DIR_SRCS "src/leiden.cpp")
-endif()
+# Exclude leiden.cpp from compilation (always exclude since Leiden is disabled)
+list(REMOVE_ITEM DIR_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/leiden.cpp")
+# Also try relative path
+list(REMOVE_ITEM DIR_SRCS "src/leiden.cpp")
 
 if(USE_GREEDY)
 add_executable(clust-greedy ${DIR_SRCS})
@@ -96,13 +94,13 @@ else()
 	target_link_libraries(clust-greedy rabbitsketch_static z)
 endif()
 
-elseif(USE_LEIDEN)
-add_executable(clust-leiden ${DIR_SRCS})
-if(USE_RABBITFX)
-	target_link_libraries(clust-leiden rabbitsketch_static rabbitfx z ${IGRAPH_LIBRARIES} openblas gfortran)
-else()
-	target_link_libraries(clust-leiden rabbitsketch_static z ${IGRAPH_LIBRARIES} openblas gfortran)
-endif()
+# elseif(USE_LEIDEN)  # DISABLED
+# add_executable(clust-leiden ${DIR_SRCS})
+# if(USE_RABBITFX)
+# 	target_link_libraries(clust-leiden rabbitsketch_static rabbitfx z ${IGRAPH_LIBRARIES} openblas gfortran)
+# else()
+# 	target_link_libraries(clust-leiden rabbitsketch_static z ${IGRAPH_LIBRARIES} openblas gfortran)
+# endif()
 
 elseif(USE_DBSCAN)
 add_executable(clust-dbscan ${DIR_SRCS})
@@ -125,8 +123,8 @@ endif()
 
 if(USE_GREEDY)
 install(TARGETS clust-greedy DESTINATION ./)
-elseif(USE_LEIDEN)
-install(TARGETS clust-leiden DESTINATION ./)
+# elseif(USE_LEIDEN)  # DISABLED
+# install(TARGETS clust-leiden DESTINATION ./)
 elseif(USE_DBSCAN)
 install(TARGETS clust-dbscan DESTINATION ./)
 else()
