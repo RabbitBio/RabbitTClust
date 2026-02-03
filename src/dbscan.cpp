@@ -1,6 +1,7 @@
 #include "dbscan.h"
 #include "phmap.h"   // For phmap::flat_hash_map
 #include <iostream>
+#include <iomanip>   // For std::setprecision, std::fixed
 #include <unordered_set>
 #include <unordered_map>
 #include <queue>
@@ -435,9 +436,17 @@ DBSCANResult KssdDBSCAN(
         v.reserve(256);
     }
     
+    // Statistics for progress reporting
+    int processed_count = 0;
+    int noise_count = 0;
+    int last_reported = 0;
+    const int REPORT_INTERVAL = std::max(1000, n / 100);  // Report every 1% or 1000 points, whichever is larger
+    
     // Process each point
     for(int i = 0; i < n; i++) {
         if(labels[i] != -1) continue;  // Already processed
+        
+        processed_count++;
         
         // Find neighbors using inverted index with optimized arrays
         vector<int> neighbors = findNeighborsKSSDWithIndex(
@@ -449,6 +458,7 @@ DBSCANResult KssdDBSCAN(
         if((int)neighbors.size() + 1 < minPts) {
             // Not a core point, mark as noise (may be reassigned later)
             labels[i] = -2;
+            noise_count++;
             continue;
         }
         
@@ -474,6 +484,7 @@ DBSCANResult KssdDBSCAN(
         }
         
         // Expand cluster using seed set
+        int cluster_size = 1;  // Count cluster size for progress
         while(!seed_set.empty()) {
             int q = seed_set.front();
             seed_set.pop();
@@ -481,12 +492,16 @@ DBSCANResult KssdDBSCAN(
             if(labels[q] == -2) {
                 // Reassign noise point to cluster
                 labels[q] = cluster_id;
+                noise_count--;  // Adjust noise count
+                cluster_size++;
             } else if(labels[q] != -1) {
                 // Already processed
                 continue;
             }
             
             labels[q] = cluster_id;
+            cluster_size++;
+            processed_count++;
             
             // Find neighbors of q using inverted index
             vector<int> q_neighbors = findNeighborsKSSDWithIndex(
@@ -508,8 +523,19 @@ DBSCANResult KssdDBSCAN(
         
         cluster_id++;
         
-        if((i + 1) % 1000 == 0) {
-            cerr << "-----Processed " << (i + 1) << " / " << n << " points" << endl;
+        // Progress report (similar to greedy style)
+        if(processed_count - last_reported >= REPORT_INTERVAL || processed_count == n) {
+            double progress_pct = 100.0 * processed_count / n;
+            double clustering_rate = (n > 0) ? 100.0 * (n - noise_count) / n : 0.0;
+            
+            cerr << "Progress: " << processed_count << "/" << n 
+                 << " (" << std::fixed << std::setprecision(1) << progress_pct << "%)"
+                 << " | Clusters: " << cluster_id
+                 << " | Noise: " << noise_count
+                 << " | Clustered: " << std::fixed << std::setprecision(1) << clustering_rate << "%"
+                 << endl;
+            
+            last_reported = processed_count;
         }
     }
     
