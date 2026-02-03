@@ -73,11 +73,6 @@ if(USE_LEIDEN)
 	link_directories(${IGRAPH_LIBRARY_DIRS})
 endif()
 
-# Exclude leiden.cpp from compilation if not using Leiden
-if(NOT USE_LEIDEN)
-	list(REMOVE_ITEM DIR_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/leiden.cpp")
-endif()
-	
 ##include_directories(src RabbitSketch/build/include RabbitFX/build/include)
 #include_directories(src RabbitSketch/build/include)
 #
@@ -85,6 +80,13 @@ endif()
 #link_directories(RabbitSketch/build/lib)
 
 aux_source_directory(src DIR_SRCS)
+
+# Exclude leiden.cpp from compilation if not using Leiden
+if(NOT USE_LEIDEN)
+	list(REMOVE_ITEM DIR_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/leiden.cpp")
+	# Also try relative path
+	list(REMOVE_ITEM DIR_SRCS "src/leiden.cpp")
+endif()
 
 if(USE_GREEDY)
 add_executable(clust-greedy ${DIR_SRCS})

@@ -26,6 +26,12 @@ cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF -DUSE_LEIDEN=OFF .. &&
 make -j8 && make install &&
 cd ../ &&
 
+#compile the clust-dbscan
+cd build &&
+cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF -DUSE_LEIDEN=OFF -DUSE_DBSCAN=ON .. &&
+make -j8 && make install &&
+cd ../ &&
+
 #compile the clust-leiden (requires igraph to be installed)
 # Check if igraph is available (system-wide or in common locations)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
