@@ -282,7 +282,7 @@ void buildKNNForPoint(
  * @brief Find all points within epsilon distance using inverted index (KSSD, 32-bit)
  * Optimized version using global stamp+count arrays and direct Jaccard calculation
  */
-vector<int> findNeighborsKSSDWithIndex(
+void findNeighborsKSSDWithIndex(
     const vector<KssdSketchInfo>& sketches,
     int point_idx,
     double jaccard_min,           // Pre-calculated jaccard_min (optimization 5)
@@ -295,7 +295,8 @@ vector<int> findNeighborsKSSDWithIndex(
     vector<int>& touched,         // Global touched list
     uint32_t& cur_mark,          // Current epoch marker
     vector<vector<int>>& thread_neighbors,  // Optimization 2: Reuse thread-local buffers
-    int threads
+    int threads,
+    vector<int>& out
 ) {
     const auto& point = sketches[point_idx];
     
@@ -316,6 +317,14 @@ vector<int> findNeighborsKSSDWithIndex(
             size_t i1 = 0, i2 = 0;
             size_t size1 = point.hash64_arr.size();
             size_t size2 = sketches[i].hash64_arr.size();
+            
+            if(jaccard_min > 0.0) {
+                size_t min_size = (size_t)std::floor(jaccard_min * size1);
+                size_t max_size = (size_t)std::ceil(size1 / jaccard_min);
+                if(size2 < min_size || size2 > max_size) {
+                    continue;
+                }
+            }
             
             while(i1 < size1 && i2 < size2) {
                 if(point.hash64_arr[i1] < sketches[i].hash64_arr[i2]) {
@@ -338,28 +347,31 @@ vector<int> findNeighborsKSSDWithIndex(
         }
         
         // Merge thread-local results
-        vector<int> neighbors;
+        out.clear();
         for(int t = 0; t < threads; t++) {
-            neighbors.insert(neighbors.end(), thread_neighbors[t].begin(), thread_neighbors[t].end());
+            out.insert(out.end(), thread_neighbors[t].begin(), thread_neighbors[t].end());
         }
-        return neighbors;
+        return;
     }
     
     // If k-NN graph is available, use it directly (approximate DBSCAN)
     if(!knn_graph.empty()) {
-        vector<int> neighbors;
-        neighbors.reserve(knn_graph[point_idx].size());
+        out.clear();
+        out.reserve(knn_graph[point_idx].size());
         for(const auto& entry : knn_graph[point_idx]) {
             if(entry.second >= jaccard_min) {
-                neighbors.push_back(entry.first);
+                out.push_back(entry.first);
             }
         }
-        return neighbors;
+        return;
     }
     
     // Use inverted index for 32-bit hashes with optimized stamp+count arrays
     int sizeRef = point.hash32_arr.size();
-    if(sizeRef == 0) return vector<int>();  // Optimization 7: Skip empty sketches
+    if(sizeRef == 0) {
+        out.clear();
+        return;  // Optimization 7: Skip empty sketches
+    }
     
     // Standard mode: use inverted index to find all candidates
     touched.clear();
@@ -393,7 +405,8 @@ vector<int> findNeighborsKSSDWithIndex(
     
     // Optimization 3: Skip OpenMP for small touched sets
     if(touched.empty()) {
-        return vector<int>();
+        out.clear();
+        return;
     }
     
     // Step 2: Parallel evaluation using thread-local vectors (no critical section)
@@ -407,8 +420,8 @@ vector<int> findNeighborsKSSDWithIndex(
     const size_t PARALLEL_THRESHOLD = 5000;
     if(touched.size() < PARALLEL_THRESHOLD || threads <= 1) {
         // Serial processing for small sets
-        vector<int> neighbors;
-        neighbors.reserve(touched.size());
+        out.clear();
+        out.reserve(touched.size());
         
         for(int candidate_id : touched) {
             const auto& candidate = sketches[candidate_id];
@@ -416,6 +429,14 @@ vector<int> findNeighborsKSSDWithIndex(
             
             int common = cnt[candidate_id];
             int sizeQry = candidate.hash32_arr.size();
+
+            if(jaccard_min > 0.0) {
+                int min_size = (int)std::floor(jaccard_min * sizeRef);
+                int max_size = (int)std::ceil(sizeRef / jaccard_min);
+                if(sizeQry < min_size || sizeQry > max_size) {
+                    continue;
+                }
+            }
             
             // Optimization 4: Use ceil for min_common_needed
             double v = jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min);
@@ -429,10 +450,10 @@ vector<int> findNeighborsKSSDWithIndex(
             double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
             
             if(jaccard_ >= jaccard_min) {
-                neighbors.push_back(candidate_id);
+                out.push_back(candidate_id);
             }
         }
-        return neighbors;
+        return;
     }
     
     // Parallel processing for large sets
@@ -450,6 +471,14 @@ vector<int> findNeighborsKSSDWithIndex(
             
             int common = cnt[candidate_id];
             int sizeQry = candidate.hash32_arr.size();
+
+            if(jaccard_min > 0.0) {
+                int min_size = (int)std::floor(jaccard_min * sizeRef);
+                int max_size = (int)std::ceil(sizeRef / jaccard_min);
+                if(sizeQry < min_size || sizeQry > max_size) {
+                    continue;
+                }
+            }
             
             // Optimization 4: Use ceil for min_common_needed
             double v = jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min);
@@ -469,13 +498,13 @@ vector<int> findNeighborsKSSDWithIndex(
     }
     
     // Merge thread-local results
-    vector<int> neighbors;
-    neighbors.reserve(touched.size());
+    out.clear();
+    out.reserve(touched.size());
     for(int t = 0; t < threads; t++) {
-        neighbors.insert(neighbors.end(), thread_neighbors[t].begin(), thread_neighbors[t].end());
+        out.insert(out.end(), thread_neighbors[t].begin(), thread_neighbors[t].end());
     }
     
-    return neighbors;
+    return;
 }
 
 /**
@@ -670,6 +699,10 @@ DBSCANResult KssdDBSCAN(
     uint64_t total_neighbors = 0;
     uint64_t core_points = 0;
     
+    // Reusable neighbor buffers to avoid per-query allocations
+    vector<int> neighbors_buf;
+    vector<int> q_neighbors_buf;
+    
     // Process each point
     for(int i = 0; i < n; i++) {
         if(labels[i] != -1) continue;  // Already processed
@@ -682,15 +715,15 @@ DBSCANResult KssdDBSCAN(
                              knn_graph, knn_built, knn_touched_sizes, knn_skipped_postings,
                              mark, cnt, touched, cur_mark);
         }
-        vector<int> neighbors = findNeighborsKSSDWithIndex(
+        findNeighborsKSSDWithIndex(
             sketches, i, jaccard_min, eps, inverted_index, knn_graph, max_posting,
-            mark, cnt, touched, cur_mark, thread_neighbors, threads
+            mark, cnt, touched, cur_mark, thread_neighbors, threads, neighbors_buf
         );
         total_region_queries++;
-        total_neighbors += neighbors.size();
+        total_neighbors += neighbors_buf.size();
         
         // Optimization 4: minPts includes the point itself
-        if((int)neighbors.size() + 1 < minPts) {
+        if((int)neighbors_buf.size() + 1 < minPts) {
             // Not a core point, mark as noise (may be reassigned later)
             labels[i] = -2;
             noise_count++;
@@ -712,7 +745,7 @@ DBSCANResult KssdDBSCAN(
         auto inq = [&](int v) { return qmark[v] == qepoch; };
         auto set_inq = [&](int v) { qmark[v] = qepoch; };
         
-        for(int neighbor : neighbors) {
+        for(int neighbor : neighbors_buf) {
             if(!inq(neighbor)) {
                 seed_set.push(neighbor);
                 set_inq(neighbor);
@@ -748,18 +781,18 @@ DBSCANResult KssdDBSCAN(
                                  knn_graph, knn_built, knn_touched_sizes, knn_skipped_postings,
                                  mark, cnt, touched, cur_mark);
             }
-            vector<int> q_neighbors = findNeighborsKSSDWithIndex(
+            findNeighborsKSSDWithIndex(
                 sketches, q, jaccard_min, eps, inverted_index, knn_graph, max_posting,
-                mark, cnt, touched, cur_mark, thread_neighbors, threads
+                mark, cnt, touched, cur_mark, thread_neighbors, threads, q_neighbors_buf
             );
             total_region_queries++;
-            total_neighbors += q_neighbors.size();
+            total_neighbors += q_neighbors_buf.size();
             
             // Optimization 4: minPts includes the point itself
-            if((int)q_neighbors.size() + 1 >= minPts) {
+            if((int)q_neighbors_buf.size() + 1 >= minPts) {
                 // q is also a core point, add its neighbors to seed set (with deduplication)
                 core_points++;
-                for(int neighbor : q_neighbors) {
+                for(int neighbor : q_neighbors_buf) {
                     if((labels[neighbor] == -1 || labels[neighbor] == -2) && !inq(neighbor)) {
                         seed_set.push(neighbor);
                         set_inq(neighbor);
