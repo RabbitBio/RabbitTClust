@@ -72,13 +72,16 @@ static double calculate_mash_distance(const std::vector<uint32_t>& hashesRef, co
 struct InvertedIndexCSR {
     vector<uint32_t> keys;           // Unique hash keys
     vector<uint64_t> offsets;        // Offsets into postings (size = keys + 1)
-    vector<int> postings;            // Flat postings array
-    phmap::flat_hash_map<uint32_t, uint32_t> key_to_idx;
+    vector<uint32_t> postings;       // Flat postings array (uint32_t for better bandwidth)
+    // Pre-computed posting list indices per sketch in CSR format (avoids hash lookup + fewer allocations)
+    vector<uint64_t> plist_off;      // Offsets into plist_data (size = n + 1)
+    vector<uint32_t> plist_data;     // Flat array of posting list indices
+    vector<uint32_t> sketch_size32;  // Pre-stored sketch sizes for fast access
 };
 
 /**
  * @brief Build inverted index in CSR format for all sketches (KSSD, 32-bit hashes)
- * Optimization 7: Skip empty sketches and ensure hash uniqueness
+ * Optimization: Pre-compute plist_idx to avoid hash lookup during query
  */
 InvertedIndexCSR buildInvertedIndexCSR32(
     const vector<KssdSketchInfo>& sketches,
@@ -102,16 +105,19 @@ InvertedIndexCSR buildInvertedIndexCSR32(
         }
     }
     
+    // Build key_to_idx mapping (temporary, will be discarded after plist_idx is built)
+    phmap::flat_hash_map<uint32_t, uint32_t> key_to_idx;
+    key_to_idx.reserve(counts.size());
+    
     index.keys.reserve(counts.size());
     index.offsets.reserve(counts.size() + 1);
-    index.key_to_idx.reserve(counts.size());
     
     uint64_t total = 0;
     for(const auto& kv : counts) {
         if(max_posting > 0 && (int)kv.second > max_posting) {
             continue;
         }
-        index.key_to_idx.emplace(kv.first, (uint32_t)index.keys.size());
+        key_to_idx.emplace(kv.first, (uint32_t)index.keys.size());
         index.keys.push_back(kv.first);
         index.offsets.push_back(total);
         total += kv.second;
@@ -125,29 +131,50 @@ InvertedIndexCSR buildInvertedIndexCSR32(
         if(sketches[i].use64) continue;
         if(sketches[i].hash32_arr.empty()) continue;
         for(uint32_t hash : sketches[i].hash32_arr) {
-            auto it = index.key_to_idx.find(hash);
-            if(it == index.key_to_idx.end()) continue;
+            auto it = key_to_idx.find(hash);
+            if(it == key_to_idx.end()) continue;
             uint32_t idx = it->second;
             uint64_t pos = index.offsets[idx] + cursor[idx]++;
-            index.postings[(size_t)pos] = (int)i;
+            index.postings[(size_t)pos] = (uint32_t)i;
         }
     }
     
+    // Third pass: build plist_idx in CSR format (fewer allocations, better cache)
+    // Also build sketch_size32 for fast access during evaluation
+    size_t n = sketches.size();
+    index.plist_off.resize(n + 1);
+    index.sketch_size32.resize(n);
+    
+    // Count plist sizes and store sketch sizes
+    uint64_t plist_total = 0;
+    for(size_t i = 0; i < n; i++) {
+        index.plist_off[i] = plist_total;
+        index.sketch_size32[i] = (uint32_t)sketches[i].hash32_arr.size();
+        if(sketches[i].use64 || sketches[i].hash32_arr.empty()) continue;
+        for(uint32_t hash : sketches[i].hash32_arr) {
+            if(key_to_idx.find(hash) != key_to_idx.end()) {
+                plist_total++;
+            }
+        }
+    }
+    index.plist_off[n] = plist_total;
+    index.plist_data.resize((size_t)plist_total);
+    
+    // Fill plist_data
+    vector<uint64_t> plist_cursor(n, 0);
+    for(size_t i = 0; i < n; i++) {
+        if(sketches[i].use64 || sketches[i].hash32_arr.empty()) continue;
+        uint64_t base = index.plist_off[i];
+        for(uint32_t hash : sketches[i].hash32_arr) {
+            auto it = key_to_idx.find(hash);
+            if(it != key_to_idx.end()) {
+                index.plist_data[(size_t)(base + plist_cursor[i]++)] = it->second;
+            }
+        }
+    }
+    
+    // key_to_idx is no longer needed after this point (goes out of scope)
     return index;
-}
-
-inline bool getPostingList(
-    const InvertedIndexCSR& index,
-    uint32_t hash,
-    uint64_t& start,
-    uint64_t& end
-) {
-    auto it = index.key_to_idx.find(hash);
-    if(it == index.key_to_idx.end()) return false;
-    uint32_t idx = it->second;
-    start = index.offsets[idx];
-    end = index.offsets[idx + 1];
-    return start < end;
 }
 
 /**
@@ -209,21 +236,29 @@ void buildKNNForPoint(
         cur_mark = 1;
     }
     
-    int sizeRef = sketches[point_idx].hash32_arr.size();
+    int sizeRef = inverted_index.sketch_size32[point_idx];  // Use pre-stored size
     uint16_t sizeRef16 = (sizeRef > 65535) ? 65535 : (uint16_t)sizeRef;  // Saturate at uint16_t max
     
-    // Count intersections with saturation
-    for(uint32_t hash : sketches[point_idx].hash32_arr) {
-        uint64_t start = 0, end = 0;
-        if(!getPostingList(inverted_index, hash, start, end)) continue;
-        uint64_t len = end - start;
-        if(max_posting > 0 && (int)len > max_posting) {
-            knn_skipped_postings += 1;
-            continue;
-        }
+    // Count intersections using pre-computed plist in CSR format (no hash lookup, contiguous memory!)
+    uint64_t plist_start = inverted_index.plist_off[point_idx];
+    uint64_t plist_end = inverted_index.plist_off[point_idx + 1];
+    
+    for(uint64_t hi = plist_start; hi < plist_end; hi++) {
+        uint32_t idx = inverted_index.plist_data[(size_t)hi];
+        uint64_t start = inverted_index.offsets[idx];
+        uint64_t end = inverted_index.offsets[idx + 1];
+        
         for(uint64_t p = start; p < end; p++) {
-            int candidate_id = inverted_index.postings[(size_t)p];
-            if(candidate_id == point_idx) continue;
+            uint32_t candidate_id = inverted_index.postings[(size_t)p];
+            if(candidate_id == (uint32_t)point_idx) continue;
+            
+            // Prefetch next candidate's mark and cnt entries
+            if(p + 4 < end) {
+                uint32_t cid_next = inverted_index.postings[(size_t)(p + 4)];
+                __builtin_prefetch(&mark[cid_next], 0, 1);
+                __builtin_prefetch(&cnt[cid_next], 1, 1);
+            }
+            
             if(mark[candidate_id] != cur_mark) {
                 mark[candidate_id] = cur_mark;
                 cnt[candidate_id] = 1;
@@ -254,11 +289,11 @@ void buildKNNForPoint(
     
     // Serial processing with strong pruning
     for(int candidate_id : touched) {
-        const auto& candidate = sketches[candidate_id];
-        if(candidate.use64) continue;
+        // Use pre-stored sketch size (contiguous array, better cache)
+        int sizeQry = inverted_index.sketch_size32[candidate_id];
+        if(sizeQry == 0) continue;  // Skip 64-bit or empty sketches
         
         int common = cnt[candidate_id];
-        int sizeQry = candidate.hash32_arr.size();
         
         // Size ratio filter
         if(sizeQry < min_size || sizeQry > max_size) continue;
@@ -385,7 +420,7 @@ void findNeighborsKSSDWithIndex(
     }
     
     // Use inverted index for 32-bit hashes with optimized stamp+count arrays
-    int sizeRef = point.hash32_arr.size();
+    int sizeRef = inverted_index.sketch_size32[point_idx];  // Use pre-stored size
     if(sizeRef == 0) {
         out.clear();
         return;  // Optimization 7: Skip empty sketches
@@ -395,21 +430,32 @@ void findNeighborsKSSDWithIndex(
     // Standard mode: use inverted index to find all candidates
     touched.clear();
     
-    // Step 1: Count intersections using inverted index (no hash map allocation)
+    // Step 1: Count intersections using pre-computed plist in CSR format (no hash lookup, contiguous memory!)
     cur_mark++;
     if(cur_mark == 0) {
         std::fill(mark.begin(), mark.end(), 0);
         cur_mark = 1;
     }
     
-    for(uint32_t hash : point.hash32_arr) {
-        uint64_t start = 0, end = 0;
-        if(!getPostingList(inverted_index, hash, start, end)) continue;
-        uint64_t len = end - start;
-        if(max_posting > 0 && (int)len > max_posting) continue;
+    uint64_t plist_start = inverted_index.plist_off[point_idx];
+    uint64_t plist_end = inverted_index.plist_off[point_idx + 1];
+    
+    for(uint64_t hi = plist_start; hi < plist_end; hi++) {
+        uint32_t idx = inverted_index.plist_data[(size_t)hi];
+        uint64_t start = inverted_index.offsets[idx];
+        uint64_t end = inverted_index.offsets[idx + 1];
+        
         for(uint64_t p = start; p < end; p++) {
-            int candidate_id = inverted_index.postings[(size_t)p];
-            if(candidate_id == point_idx) continue;
+            uint32_t candidate_id = inverted_index.postings[(size_t)p];
+            if(candidate_id == (uint32_t)point_idx) continue;
+            
+            // Prefetch next candidate's mark and cnt entries
+            if(p + 4 < end) {
+                uint32_t cid_next = inverted_index.postings[(size_t)(p + 4)];
+                __builtin_prefetch(&mark[cid_next], 0, 1);
+                __builtin_prefetch(&cnt[cid_next], 1, 1);
+            }
+            
             if(mark[candidate_id] != cur_mark) {
                 // First time seeing this candidate in current query
                 mark[candidate_id] = cur_mark;
@@ -442,19 +488,22 @@ void findNeighborsKSSDWithIndex(
     const int min_size = (t > 0.0) ? (int)std::floor(t * sizeRef) : 0;
     const int max_size = (t > 0.0) ? (int)std::ceil((double)sizeRef / t) : INT_MAX;
     
-    // Optimization 3: Threshold-based parallelization
-    const size_t PARALLEL_THRESHOLD = 5000;
+    // Optimization: Threshold-based parallelization (higher threshold reduces OMP overhead)
+    // Since evaluation is now very fast (just multiplications), serial is often better
+    const size_t PARALLEL_THRESHOLD = 10000;
     if(touched.size() < PARALLEL_THRESHOLD || threads <= 1) {
         // Serial processing for small sets
         out.clear();
         out.reserve(touched.size());
         
-        for(int candidate_id : touched) {
-            const auto& candidate = sketches[candidate_id];
-            if(candidate.use64) continue;
+        for(size_t ti = 0; ti < touched.size(); ti++) {
+            int candidate_id = touched[ti];
+            
+            // Use pre-stored sketch size (contiguous array, better cache)
+            int sizeQry = inverted_index.sketch_size32[candidate_id];
+            if(sizeQry == 0) continue;  // Skip 64-bit or empty sketches
             
             int common = cnt[candidate_id];
-            int sizeQry = candidate.hash32_arr.size();
 
             // Size ratio filter (necessary condition)
             if(sizeQry < min_size || sizeQry > max_size) {
@@ -475,21 +524,21 @@ void findNeighborsKSSDWithIndex(
         return;
     }
     
-    // Parallel processing for large sets
+    // Parallel processing for large sets (static schedule to reduce overhead)
     #pragma omp parallel num_threads(threads)
     {
         int tid = omp_get_thread_num();
         auto& buf = thread_neighbors[tid];
         
-        #pragma omp for schedule(guided)
+        #pragma omp for schedule(static)
         for(size_t i = 0; i < touched.size(); i++) {
             int candidate_id = touched[i];
             
-            const auto& candidate = sketches[candidate_id];
-            if(candidate.use64) continue;
+            // Use pre-stored sketch size (contiguous array, better cache)
+            int sizeQry = inverted_index.sketch_size32[candidate_id];
+            if(sizeQry == 0) continue;  // Skip 64-bit or empty sketches
             
             int common = cnt[candidate_id];
-            int sizeQry = candidate.hash32_arr.size();
 
             // Size ratio filter (necessary condition)
             if(sizeQry < min_size || sizeQry > max_size) {
