@@ -69,11 +69,13 @@ static double calculate_mash_distance(const std::vector<uint32_t>& hashesRef, co
     return dist;
 }
 
-// AoS structure for mark/pos (8-byte aligned, better cache locality)
-// pos stores the index in touched[] array, common_buf[pos] stores the actual count
-struct alignas(8) MarkPos {
+// AoS structure for mark/cnt (8-byte aligned, better cache locality)
+// Posting scan uses cnt directly (same cache line as mark)
+// Evaluation stage copies to sequential common_buf for better cache
+struct alignas(8) MarkCnt {
     uint32_t mark;  // Epoch marker
-    uint32_t pos;   // Index in touched[] array (for sequential common_buf access)
+    uint16_t cnt;   // Intersection count
+    uint16_t _pad;  // Padding to 8 bytes
 };
 
 struct InvertedIndexCSR {
@@ -227,9 +229,9 @@ void buildKNNForPoint(
     vector<char>& knn_built,
     vector<int>& knn_touched_sizes,
     uint64_t& knn_skipped_postings,
-    vector<MarkPos>& mark_pos,   // AoS: mark + position in touched[]
+    vector<MarkCnt>& mark_cnt,   // AoS: mark/cnt for posting scan
     vector<int>& touched,
-    vector<uint16_t>& common_buf, // Sequential common counts (aligned with touched)
+    vector<uint16_t>& common_buf, // Sequential common counts for evaluation
     uint32_t& cur_mark
 ) {
     int n = sketches.size();
@@ -250,7 +252,7 @@ void buildKNNForPoint(
     cur_mark++;
     if(cur_mark == 0) {
         // Reset all marks when epoch overflows
-        for(auto& mp : mark_pos) mp.mark = 0;
+        for(auto& mc : mark_cnt) mc.mark = 0;
         cur_mark = 1;
     }
     
@@ -262,10 +264,9 @@ void buildKNNForPoint(
     const int min_size = (t > 0.0) ? (int)std::floor(t * sizeRef) : 0;
     const int max_size = (t > 0.0) ? (int)std::ceil((double)sizeRef / t) : INT_MAX;
     
-    // Count intersections with sequential common_buf (much better cache than random mark_cnt.cnt access)
+    // Count intersections using AoS mark_cnt (mark and cnt in same cache line)
     uint64_t plist_start = inverted_index.plist_off[point_idx];
     uint64_t plist_end = inverted_index.plist_off[point_idx + 1];
-    uint32_t touched_sz = 0;
     
     for(uint64_t hi = plist_start; hi < plist_end; hi++) {
         uint32_t idx = inverted_index.plist_data[(size_t)hi];
@@ -280,31 +281,34 @@ void buildKNNForPoint(
             int sizeQry = inverted_index.sketch_size32[candidate_id];
             if(sizeQry < min_size || sizeQry > max_size) continue;
             
-            // Prefetch next candidate's mark_pos entry
+            // Prefetch next candidate's mark_cnt entry (AoS: single prefetch for both)
             if(p + 4 < end) {
                 uint32_t cid_next = inverted_index.postings[(size_t)(p + 4)];
-                __builtin_prefetch(&mark_pos[cid_next], 1, 1);
+                __builtin_prefetch(&mark_cnt[cid_next], 1, 1);
             }
             
-            MarkPos& mp = mark_pos[candidate_id];
-            if(mp.mark != cur_mark) {
-                // First time seeing this candidate: record position, init common
-                mp.mark = cur_mark;
-                mp.pos = touched_sz;
+            MarkCnt& mc = mark_cnt[candidate_id];
+            if(mc.mark != cur_mark) {
+                mc.mark = cur_mark;
+                mc.cnt = 1;
                 touched.push_back(candidate_id);
-                common_buf[touched_sz] = 1;
-                touched_sz++;
             } else {
-                // Already seen: increment common_buf at recorded position (sequential write pattern)
-                if(common_buf[mp.pos] < sizeRef16) common_buf[mp.pos]++;
+                // Saturating count (AoS: cnt in same cache line as mark)
+                if(mc.cnt < sizeRef16) mc.cnt++;
             }
         }
     }
     
+    size_t touched_sz = touched.size();
     knn_touched_sizes.push_back((int)touched_sz);
     if(touched_sz == 0) {
         knn_built[point_idx] = 1;
         return;
+    }
+    
+    // Copy cnt to sequential common_buf for evaluation (better cache for evaluation stage)
+    for(size_t ti = 0; ti < touched_sz; ti++) {
+        common_buf[ti] = mark_cnt[touched[ti]].cnt;
     }
     
     // Pre-computed constants for evaluation
@@ -316,7 +320,7 @@ void buildKNNForPoint(
     std::priority_queue<ScorePair, std::vector<ScorePair>, std::greater<ScorePair>> topk;  // min-heap
     
     // Serial processing: common_buf is now sequential!
-    for(uint32_t ti = 0; ti < touched_sz; ti++) {
+    for(size_t ti = 0; ti < touched_sz; ti++) {
         int candidate_id = touched[ti];
         
         // Use pre-stored sketch size (contiguous array, better cache)
@@ -367,9 +371,9 @@ void findNeighborsKSSDWithIndex(
     const InvertedIndexCSR& inverted_index,
     const vector<vector<std::pair<int, float>>>& knn_graph,  // k-NN graph with jaccard
     int max_posting,              // Max posting list size to consider (0 = disabled)
-    vector<MarkPos>& mark_pos,   // AoS: mark + position in touched[]
+    vector<MarkCnt>& mark_cnt,   // AoS: mark/cnt for posting scan
     vector<int>& touched,         // Global touched list
-    vector<uint16_t>& common_buf, // Sequential common counts (aligned with touched)
+    vector<uint16_t>& common_buf, // Sequential common counts for evaluation
     uint32_t& cur_mark,          // Current epoch marker
     vector<vector<int>>& thread_neighbors,  // Optimization 2: Reuse thread-local buffers
     int threads,
@@ -465,17 +469,16 @@ void findNeighborsKSSDWithIndex(
     // Standard mode: use inverted index to find all candidates
     touched.clear();
     
-    // Step 1: Count intersections with sequential common_buf (much better cache)
+    // Step 1: Count intersections using AoS mark_cnt (mark and cnt in same cache line)
     cur_mark++;
     if(cur_mark == 0) {
         // Reset all marks when epoch overflows
-        for(auto& mp : mark_pos) mp.mark = 0;
+        for(auto& mc : mark_cnt) mc.mark = 0;
         cur_mark = 1;
     }
     
     uint64_t plist_start = inverted_index.plist_off[point_idx];
     uint64_t plist_end = inverted_index.plist_off[point_idx + 1];
-    uint32_t touched_sz = 0;
     
     for(uint64_t hi = plist_start; hi < plist_end; hi++) {
         uint32_t idx = inverted_index.plist_data[(size_t)hi];
@@ -490,31 +493,35 @@ void findNeighborsKSSDWithIndex(
             int sizeQry = inverted_index.sketch_size32[candidate_id];
             if(sizeQry < min_size || sizeQry > max_size) continue;
             
-            // Prefetch next candidate's mark_pos entry
+            // Prefetch next candidate's mark_cnt entry (AoS: single prefetch for both)
             if(p + 4 < end) {
                 uint32_t cid_next = inverted_index.postings[(size_t)(p + 4)];
-                __builtin_prefetch(&mark_pos[cid_next], 1, 1);
+                __builtin_prefetch(&mark_cnt[cid_next], 1, 1);
             }
             
-            MarkPos& mp = mark_pos[candidate_id];
-            if(mp.mark != cur_mark) {
-                // First time seeing this candidate: record position, init common
-                mp.mark = cur_mark;
-                mp.pos = touched_sz;
+            MarkCnt& mc = mark_cnt[candidate_id];
+            if(mc.mark != cur_mark) {
+                mc.mark = cur_mark;
+                mc.cnt = 1;
                 touched.push_back(candidate_id);
-                common_buf[touched_sz] = 1;
-                touched_sz++;
             } else {
-                // Already seen: increment common_buf at recorded position (sequential write)
-                if(common_buf[mp.pos] < sizeRef16) common_buf[mp.pos]++;
+                // Saturating count (AoS: cnt in same cache line as mark)
+                if(mc.cnt < sizeRef16) mc.cnt++;
             }
         }
     }
+    
+    size_t touched_sz = touched.size();
     
     // Optimization 3: Skip OpenMP for small touched sets
     if(touched_sz == 0) {
         out.clear();
         return;
+    }
+    
+    // Copy cnt to sequential common_buf for evaluation (better cache for evaluation stage)
+    for(size_t ti = 0; ti < touched_sz; ti++) {
+        common_buf[ti] = mark_cnt[touched[ti]].cnt;
     }
     
     // Step 2: Parallel evaluation using thread-local vectors (no critical section)
@@ -536,7 +543,7 @@ void findNeighborsKSSDWithIndex(
         out.clear();
         out.reserve(touched_sz);
         
-        for(uint32_t ti = 0; ti < touched_sz; ti++) {
+        for(size_t ti = 0; ti < touched_sz; ti++) {
             int candidate_id = touched[ti];      // Sequential
             int common = common_buf[ti];         // Sequential!
             
@@ -570,7 +577,7 @@ void findNeighborsKSSDWithIndex(
         auto& buf = thread_neighbors[tid];
         
         #pragma omp for schedule(static)
-        for(uint32_t i = 0; i < touched_sz; i++) {
+        for(size_t i = 0; i < touched_sz; i++) {
             int candidate_id = touched[i];       // Sequential
             int common = common_buf[i];          // Sequential!
             
@@ -771,7 +778,7 @@ DBSCANResult KssdDBSCAN(
     }
     
     // Initialize global stamp+position arrays (optimization: sequential common_buf access)
-    vector<MarkPos> mark_pos(n);       // AoS: mark + position in touched[]
+    vector<MarkCnt> mark_cnt(n);       // AoS: mark/cnt for posting scan
     vector<int> touched;               // Touched candidates list
     touched.reserve(n);                // Reserve full capacity to avoid reallocation during queries
     vector<uint16_t> common_buf(n);    // Sequential common counts (aligned with touched)
@@ -812,11 +819,11 @@ DBSCANResult KssdDBSCAN(
         if(knn_k > 0 && !knn_built[i]) {
             buildKNNForPoint(sketches, inverted_index, jaccard_min, i, knn_k, max_posting,
                              knn_graph, knn_built, knn_touched_sizes, knn_skipped_postings,
-                             mark_pos, touched, common_buf, cur_mark);
+                             mark_cnt, touched, common_buf, cur_mark);
         }
         findNeighborsKSSDWithIndex(
             sketches, i, jaccard_min, eps, inverted_index, knn_graph, max_posting,
-            mark_pos, touched, common_buf, cur_mark, thread_neighbors, threads, neighbors_buf
+            mark_cnt, touched, common_buf, cur_mark, thread_neighbors, threads, neighbors_buf
         );
         total_region_queries++;
         total_neighbors += neighbors_buf.size();
@@ -881,11 +888,11 @@ DBSCANResult KssdDBSCAN(
             if(knn_k > 0 && !knn_built[q]) {
                 buildKNNForPoint(sketches, inverted_index, jaccard_min, q, knn_k, max_posting,
                                  knn_graph, knn_built, knn_touched_sizes, knn_skipped_postings,
-                                 mark_pos, touched, common_buf, cur_mark);
+                                 mark_cnt, touched, common_buf, cur_mark);
             }
             findNeighborsKSSDWithIndex(
                 sketches, q, jaccard_min, eps, inverted_index, knn_graph, max_posting,
-                mark_pos, touched, common_buf, cur_mark, thread_neighbors, threads, q_neighbors_buf
+                mark_cnt, touched, common_buf, cur_mark, thread_neighbors, threads, q_neighbors_buf
             );
             total_region_queries++;
             total_neighbors += q_neighbors_buf.size();
