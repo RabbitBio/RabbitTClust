@@ -69,6 +69,13 @@ static double calculate_mash_distance(const std::vector<uint32_t>& hashesRef, co
     return dist;
 }
 
+// AoS structure for mark/pos (8-byte aligned, better cache locality)
+// pos stores the index in touched[] array, common_buf[pos] stores the actual count
+struct alignas(8) MarkPos {
+    uint32_t mark;  // Epoch marker
+    uint32_t pos;   // Index in touched[] array (for sequential common_buf access)
+};
+
 struct InvertedIndexCSR {
     vector<uint32_t> keys;           // Unique hash keys
     vector<uint64_t> offsets;        // Offsets into postings (size = keys + 1)
@@ -145,30 +152,40 @@ InvertedIndexCSR buildInvertedIndexCSR32(
     index.plist_off.resize(n + 1);
     index.sketch_size32.resize(n);
     
-    // Count plist sizes and store sketch sizes
+    // Count plist sizes and store sketch sizes (parallel-safe: each i writes to unique location)
+    vector<uint64_t> plist_sizes(n, 0);
+    #pragma omp parallel for schedule(static)
+    for(size_t i = 0; i < n; i++) {
+        index.sketch_size32[i] = (uint32_t)sketches[i].hash32_arr.size();
+        if(sketches[i].use64 || sketches[i].hash32_arr.empty()) continue;
+        uint64_t cnt = 0;
+        for(uint32_t hash : sketches[i].hash32_arr) {
+            if(key_to_idx.find(hash) != key_to_idx.end()) {
+                cnt++;
+            }
+        }
+        plist_sizes[i] = cnt;
+    }
+    
+    // Compute prefix sum for plist_off (serial, but O(n) is fast)
     uint64_t plist_total = 0;
     for(size_t i = 0; i < n; i++) {
         index.plist_off[i] = plist_total;
-        index.sketch_size32[i] = (uint32_t)sketches[i].hash32_arr.size();
-        if(sketches[i].use64 || sketches[i].hash32_arr.empty()) continue;
-        for(uint32_t hash : sketches[i].hash32_arr) {
-            if(key_to_idx.find(hash) != key_to_idx.end()) {
-                plist_total++;
-            }
-        }
+        plist_total += plist_sizes[i];
     }
     index.plist_off[n] = plist_total;
     index.plist_data.resize((size_t)plist_total);
     
-    // Fill plist_data
-    vector<uint64_t> plist_cursor(n, 0);
+    // Fill plist_data (parallel-safe: each i writes to disjoint range)
+    #pragma omp parallel for schedule(static)
     for(size_t i = 0; i < n; i++) {
         if(sketches[i].use64 || sketches[i].hash32_arr.empty()) continue;
         uint64_t base = index.plist_off[i];
+        uint64_t cursor = 0;
         for(uint32_t hash : sketches[i].hash32_arr) {
             auto it = key_to_idx.find(hash);
             if(it != key_to_idx.end()) {
-                index.plist_data[(size_t)(base + plist_cursor[i]++)] = it->second;
+                index.plist_data[(size_t)(base + cursor++)] = it->second;
             }
         }
     }
@@ -210,9 +227,9 @@ void buildKNNForPoint(
     vector<char>& knn_built,
     vector<int>& knn_touched_sizes,
     uint64_t& knn_skipped_postings,
-    vector<uint32_t>& mark,
-    vector<uint16_t>& cnt,      // Use uint16_t for better cache (sketch size < 65535)
+    vector<MarkPos>& mark_pos,   // AoS: mark + position in touched[]
     vector<int>& touched,
+    vector<uint16_t>& common_buf, // Sequential common counts (aligned with touched)
     uint32_t& cur_mark
 ) {
     int n = sketches.size();
@@ -232,16 +249,23 @@ void buildKNNForPoint(
     touched.clear();
     cur_mark++;
     if(cur_mark == 0) {
-        std::fill(mark.begin(), mark.end(), 0);
+        // Reset all marks when epoch overflows
+        for(auto& mp : mark_pos) mp.mark = 0;
         cur_mark = 1;
     }
     
     int sizeRef = inverted_index.sketch_size32[point_idx];  // Use pre-stored size
     uint16_t sizeRef16 = (sizeRef > 65535) ? 65535 : (uint16_t)sizeRef;  // Saturate at uint16_t max
     
-    // Count intersections using pre-computed plist in CSR format (no hash lookup, contiguous memory!)
+    // Pre-compute size filter bounds BEFORE posting scan (for early filtering)
+    const double t = jaccard_min;
+    const int min_size = (t > 0.0) ? (int)std::floor(t * sizeRef) : 0;
+    const int max_size = (t > 0.0) ? (int)std::ceil((double)sizeRef / t) : INT_MAX;
+    
+    // Count intersections with sequential common_buf (much better cache than random mark_cnt.cnt access)
     uint64_t plist_start = inverted_index.plist_off[point_idx];
     uint64_t plist_end = inverted_index.plist_off[point_idx + 1];
+    uint32_t touched_sz = 0;
     
     for(uint64_t hi = plist_start; hi < plist_end; hi++) {
         uint32_t idx = inverted_index.plist_data[(size_t)hi];
@@ -252,48 +276,54 @@ void buildKNNForPoint(
             uint32_t candidate_id = inverted_index.postings[(size_t)p];
             if(candidate_id == (uint32_t)point_idx) continue;
             
-            // Prefetch next candidate's mark and cnt entries
+            // EARLY size filter: skip candidates that can't possibly pass Jaccard threshold
+            int sizeQry = inverted_index.sketch_size32[candidate_id];
+            if(sizeQry < min_size || sizeQry > max_size) continue;
+            
+            // Prefetch next candidate's mark_pos entry
             if(p + 4 < end) {
                 uint32_t cid_next = inverted_index.postings[(size_t)(p + 4)];
-                __builtin_prefetch(&mark[cid_next], 0, 1);
-                __builtin_prefetch(&cnt[cid_next], 1, 1);
+                __builtin_prefetch(&mark_pos[cid_next], 1, 1);
             }
             
-            if(mark[candidate_id] != cur_mark) {
-                mark[candidate_id] = cur_mark;
-                cnt[candidate_id] = 1;
+            MarkPos& mp = mark_pos[candidate_id];
+            if(mp.mark != cur_mark) {
+                // First time seeing this candidate: record position, init common
+                mp.mark = cur_mark;
+                mp.pos = touched_sz;
                 touched.push_back(candidate_id);
+                common_buf[touched_sz] = 1;
+                touched_sz++;
             } else {
-                // Saturating count: no need to count beyond sizeRef (common <= sizeRef always)
-                if(cnt[candidate_id] < sizeRef16) cnt[candidate_id]++;
+                // Already seen: increment common_buf at recorded position (sequential write pattern)
+                if(common_buf[mp.pos] < sizeRef16) common_buf[mp.pos]++;
             }
         }
     }
     
-    knn_touched_sizes.push_back((int)touched.size());
-    if(touched.empty()) {
+    knn_touched_sizes.push_back((int)touched_sz);
+    if(touched_sz == 0) {
         knn_built[point_idx] = 1;
         return;
     }
     
-    // Pre-compute constants for filtering
-    const double t = jaccard_min;
+    // Pre-computed constants for evaluation
     const double one_plus_t = 1.0 + t;
     const double t_times_sizeRef = t * (double)sizeRef;
-    const int min_size = (t > 0.0) ? (int)std::floor(t * sizeRef) : 0;
-    const int max_size = (t > 0.0) ? (int)std::ceil((double)sizeRef / t) : INT_MAX;
     
     // Use min-heap to maintain top-k highest Jaccard
     using ScorePair = std::pair<float, int>;
     std::priority_queue<ScorePair, std::vector<ScorePair>, std::greater<ScorePair>> topk;  // min-heap
     
-    // Serial processing with strong pruning
-    for(int candidate_id : touched) {
+    // Serial processing: common_buf is now sequential!
+    for(uint32_t ti = 0; ti < touched_sz; ti++) {
+        int candidate_id = touched[ti];
+        
         // Use pre-stored sketch size (contiguous array, better cache)
         int sizeQry = inverted_index.sketch_size32[candidate_id];
         if(sizeQry == 0) continue;  // Skip 64-bit or empty sketches
         
-        int common = cnt[candidate_id];
+        int common = common_buf[ti];  // Sequential read!
         
         // Size ratio filter
         if(sizeQry < min_size || sizeQry > max_size) continue;
@@ -337,9 +367,9 @@ void findNeighborsKSSDWithIndex(
     const InvertedIndexCSR& inverted_index,
     const vector<vector<std::pair<int, float>>>& knn_graph,  // k-NN graph with jaccard
     int max_posting,              // Max posting list size to consider (0 = disabled)
-    vector<uint32_t>& mark,      // Global mark array (epoch-based)
-    vector<uint16_t>& cnt,        // Global count array (uint16_t for better cache)
+    vector<MarkPos>& mark_pos,   // AoS: mark + position in touched[]
     vector<int>& touched,         // Global touched list
+    vector<uint16_t>& common_buf, // Sequential common counts (aligned with touched)
     uint32_t& cur_mark,          // Current epoch marker
     vector<vector<int>>& thread_neighbors,  // Optimization 2: Reuse thread-local buffers
     int threads,
@@ -427,18 +457,25 @@ void findNeighborsKSSDWithIndex(
     }
     uint16_t sizeRef16 = (sizeRef > 65535) ? 65535 : (uint16_t)sizeRef;  // Saturate at uint16_t max
     
+    // Pre-compute size filter bounds BEFORE posting scan (for early filtering)
+    const double t = jaccard_min;
+    const int min_size = (t > 0.0) ? (int)std::floor(t * sizeRef) : 0;
+    const int max_size = (t > 0.0) ? (int)std::ceil((double)sizeRef / t) : INT_MAX;
+    
     // Standard mode: use inverted index to find all candidates
     touched.clear();
     
-    // Step 1: Count intersections using pre-computed plist in CSR format (no hash lookup, contiguous memory!)
+    // Step 1: Count intersections with sequential common_buf (much better cache)
     cur_mark++;
     if(cur_mark == 0) {
-        std::fill(mark.begin(), mark.end(), 0);
+        // Reset all marks when epoch overflows
+        for(auto& mp : mark_pos) mp.mark = 0;
         cur_mark = 1;
     }
     
     uint64_t plist_start = inverted_index.plist_off[point_idx];
     uint64_t plist_end = inverted_index.plist_off[point_idx + 1];
+    uint32_t touched_sz = 0;
     
     for(uint64_t hi = plist_start; hi < plist_end; hi++) {
         uint32_t idx = inverted_index.plist_data[(size_t)hi];
@@ -449,27 +486,33 @@ void findNeighborsKSSDWithIndex(
             uint32_t candidate_id = inverted_index.postings[(size_t)p];
             if(candidate_id == (uint32_t)point_idx) continue;
             
-            // Prefetch next candidate's mark and cnt entries
+            // EARLY size filter: skip candidates that can't possibly pass Jaccard threshold
+            int sizeQry = inverted_index.sketch_size32[candidate_id];
+            if(sizeQry < min_size || sizeQry > max_size) continue;
+            
+            // Prefetch next candidate's mark_pos entry
             if(p + 4 < end) {
                 uint32_t cid_next = inverted_index.postings[(size_t)(p + 4)];
-                __builtin_prefetch(&mark[cid_next], 0, 1);
-                __builtin_prefetch(&cnt[cid_next], 1, 1);
+                __builtin_prefetch(&mark_pos[cid_next], 1, 1);
             }
             
-            if(mark[candidate_id] != cur_mark) {
-                // First time seeing this candidate in current query
-                mark[candidate_id] = cur_mark;
-                cnt[candidate_id] = 1;
+            MarkPos& mp = mark_pos[candidate_id];
+            if(mp.mark != cur_mark) {
+                // First time seeing this candidate: record position, init common
+                mp.mark = cur_mark;
+                mp.pos = touched_sz;
                 touched.push_back(candidate_id);
+                common_buf[touched_sz] = 1;
+                touched_sz++;
             } else {
-                // Saturating count (common <= sizeRef always)
-                if(cnt[candidate_id] < sizeRef16) cnt[candidate_id]++;
+                // Already seen: increment common_buf at recorded position (sequential write)
+                if(common_buf[mp.pos] < sizeRef16) common_buf[mp.pos]++;
             }
         }
     }
     
     // Optimization 3: Skip OpenMP for small touched sets
-    if(touched.empty()) {
+    if(touched_sz == 0) {
         out.clear();
         return;
     }
@@ -481,31 +524,27 @@ void findNeighborsKSSDWithIndex(
         v.reserve(256);  // Pre-reserve
     }
     
-    // Optimization: Pre-compute constants outside loop
-    const double t = jaccard_min;
+    // Pre-computed constants for evaluation
     const double one_plus_t = 1.0 + t;
     const double t_times_sizeRef = t * (double)sizeRef;
-    const int min_size = (t > 0.0) ? (int)std::floor(t * sizeRef) : 0;
-    const int max_size = (t > 0.0) ? (int)std::ceil((double)sizeRef / t) : INT_MAX;
     
     // Optimization: Threshold-based parallelization (higher threshold reduces OMP overhead)
     // Since evaluation is now very fast (just multiplications), serial is often better
     const size_t PARALLEL_THRESHOLD = 10000;
-    if(touched.size() < PARALLEL_THRESHOLD || threads <= 1) {
-        // Serial processing for small sets
+    if(touched_sz < PARALLEL_THRESHOLD || threads <= 1) {
+        // Serial processing: all arrays are now sequential!
         out.clear();
-        out.reserve(touched.size());
+        out.reserve(touched_sz);
         
-        for(size_t ti = 0; ti < touched.size(); ti++) {
-            int candidate_id = touched[ti];
+        for(uint32_t ti = 0; ti < touched_sz; ti++) {
+            int candidate_id = touched[ti];      // Sequential
+            int common = common_buf[ti];         // Sequential!
             
             // Use pre-stored sketch size (contiguous array, better cache)
             int sizeQry = inverted_index.sketch_size32[candidate_id];
             if(sizeQry == 0) continue;  // Skip 64-bit or empty sketches
-            
-            int common = cnt[candidate_id];
 
-            // Size ratio filter (necessary condition)
+            // Size ratio filter (already done in posting scan, but keep for safety)
             if(sizeQry < min_size || sizeQry > max_size) {
                 continue;
             }
@@ -531,16 +570,15 @@ void findNeighborsKSSDWithIndex(
         auto& buf = thread_neighbors[tid];
         
         #pragma omp for schedule(static)
-        for(size_t i = 0; i < touched.size(); i++) {
-            int candidate_id = touched[i];
+        for(uint32_t i = 0; i < touched_sz; i++) {
+            int candidate_id = touched[i];       // Sequential
+            int common = common_buf[i];          // Sequential!
             
             // Use pre-stored sketch size (contiguous array, better cache)
             int sizeQry = inverted_index.sketch_size32[candidate_id];
             if(sizeQry == 0) continue;  // Skip 64-bit or empty sketches
-            
-            int common = cnt[candidate_id];
 
-            // Size ratio filter (necessary condition)
+            // Size ratio filter (already done in posting scan, but keep for safety)
             if(sizeQry < min_size || sizeQry > max_size) {
                 continue;
             }
@@ -560,7 +598,7 @@ void findNeighborsKSSDWithIndex(
     
     // Merge thread-local results
     out.clear();
-    out.reserve(touched.size());
+    out.reserve(touched_sz);
     for(int t = 0; t < threads; t++) {
         out.insert(out.end(), thread_neighbors[t].begin(), thread_neighbors[t].end());
     }
@@ -732,11 +770,11 @@ DBSCANResult KssdDBSCAN(
         knn_touched_sizes.reserve(sketches.size() / 4 + 1);
     }
     
-    // Initialize global stamp+count arrays (optimization 1: avoid per-query allocation)
-    vector<uint32_t> mark(n, 0);      // Epoch-based marking
-    vector<uint16_t> cnt(n, 0);       // Intersection counts (uint16_t for better cache)
+    // Initialize global stamp+position arrays (optimization: sequential common_buf access)
+    vector<MarkPos> mark_pos(n);       // AoS: mark + position in touched[]
     vector<int> touched;               // Touched candidates list
-    touched.reserve(10000);            // Pre-allocate
+    touched.reserve(n);                // Reserve full capacity to avoid reallocation during queries
+    vector<uint16_t> common_buf(n);    // Sequential common counts (aligned with touched)
     uint32_t cur_mark = 0;            // Current epoch marker
     
     // Optimization 1: Use stamp array for queue tracking (instead of vector<bool>)
@@ -774,11 +812,11 @@ DBSCANResult KssdDBSCAN(
         if(knn_k > 0 && !knn_built[i]) {
             buildKNNForPoint(sketches, inverted_index, jaccard_min, i, knn_k, max_posting,
                              knn_graph, knn_built, knn_touched_sizes, knn_skipped_postings,
-                             mark, cnt, touched, cur_mark);
+                             mark_pos, touched, common_buf, cur_mark);
         }
         findNeighborsKSSDWithIndex(
             sketches, i, jaccard_min, eps, inverted_index, knn_graph, max_posting,
-            mark, cnt, touched, cur_mark, thread_neighbors, threads, neighbors_buf
+            mark_pos, touched, common_buf, cur_mark, thread_neighbors, threads, neighbors_buf
         );
         total_region_queries++;
         total_neighbors += neighbors_buf.size();
@@ -843,11 +881,11 @@ DBSCANResult KssdDBSCAN(
             if(knn_k > 0 && !knn_built[q]) {
                 buildKNNForPoint(sketches, inverted_index, jaccard_min, q, knn_k, max_posting,
                                  knn_graph, knn_built, knn_touched_sizes, knn_skipped_postings,
-                                 mark, cnt, touched, cur_mark);
+                                 mark_pos, touched, common_buf, cur_mark);
             }
             findNeighborsKSSDWithIndex(
                 sketches, q, jaccard_min, eps, inverted_index, knn_graph, max_posting,
-                mark, cnt, touched, cur_mark, thread_neighbors, threads, q_neighbors_buf
+                mark_pos, touched, common_buf, cur_mark, thread_neighbors, threads, q_neighbors_buf
             );
             total_region_queries++;
             total_neighbors += q_neighbors_buf.size();
