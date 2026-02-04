@@ -726,15 +726,18 @@ DBSCANResult KssdDBSCAN(
             seed_set.pop();
             
             if(labels[q] == -2) {
-                // Reassign noise point to cluster
+                // Reassign noise point to cluster, but do not expand from it
                 labels[q] = cluster_id;
                 noise_count--;  // Adjust noise count
                 cluster_size++;
-            } else if(labels[q] != -1) {
+                continue;
+            }
+            if(labels[q] != -1) {
                 // Already processed
                 continue;
             }
             
+            // First time visiting q
             labels[q] = cluster_id;
             cluster_size++;
             processed_count++;
@@ -888,9 +891,11 @@ DBSCANResult MinHashDBSCAN(
             seed_set.pop();
             
             if(labels[q] == -2) {
-                // Reassign noise point to cluster
+                // Reassign noise point to cluster, but do not expand from it
                 labels[q] = cluster_id;
-            } else if(labels[q] != -1) {
+                continue;
+            }
+            if(labels[q] != -1) {
                 // Already processed
                 continue;
             }
