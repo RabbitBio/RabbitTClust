@@ -9,6 +9,8 @@
 #include <omp.h>
 #include <algorithm>
 #include <cmath>
+#include <climits>   // For INT_MAX
+#include <cstdint>   // For uint16_t, SIZE_MAX
 
 using std::cerr;
 using std::endl;
@@ -182,7 +184,7 @@ void buildKNNForPoint(
     vector<int>& knn_touched_sizes,
     uint64_t& knn_skipped_postings,
     vector<uint32_t>& mark,
-    vector<uint32_t>& cnt,
+    vector<uint16_t>& cnt,      // Use uint16_t for better cache (sketch size < 65535)
     vector<int>& touched,
     uint32_t& cur_mark
 ) {
@@ -208,8 +210,9 @@ void buildKNNForPoint(
     }
     
     int sizeRef = sketches[point_idx].hash32_arr.size();
+    uint16_t sizeRef16 = (sizeRef > 65535) ? 65535 : (uint16_t)sizeRef;  // Saturate at uint16_t max
     
-    // Count intersections
+    // Count intersections with saturation
     for(uint32_t hash : sketches[point_idx].hash32_arr) {
         uint64_t start = 0, end = 0;
         if(!getPostingList(inverted_index, hash, start, end)) continue;
@@ -226,7 +229,8 @@ void buildKNNForPoint(
                 cnt[candidate_id] = 1;
                 touched.push_back(candidate_id);
             } else {
-                cnt[candidate_id]++;
+                // Saturating count: no need to count beyond sizeRef (common <= sizeRef always)
+                if(cnt[candidate_id] < sizeRef16) cnt[candidate_id]++;
             }
         }
     }
@@ -236,6 +240,13 @@ void buildKNNForPoint(
         knn_built[point_idx] = 1;
         return;
     }
+    
+    // Pre-compute constants for filtering
+    const double t = jaccard_min;
+    const double one_plus_t = 1.0 + t;
+    const double t_times_sizeRef = t * (double)sizeRef;
+    const int min_size = (t > 0.0) ? (int)std::floor(t * sizeRef) : 0;
+    const int max_size = (t > 0.0) ? (int)std::ceil((double)sizeRef / t) : INT_MAX;
     
     // Use min-heap to maintain top-k highest Jaccard
     using ScorePair = std::pair<float, int>;
@@ -249,17 +260,18 @@ void buildKNNForPoint(
         int common = cnt[candidate_id];
         int sizeQry = candidate.hash32_arr.size();
         
-        // Filter by common
-        double v = jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min);
-        int min_common_needed = (int)std::ceil(v - 1e-12);
-        if(common < min_common_needed) continue;
+        // Size ratio filter
+        if(sizeQry < min_size || sizeQry > max_size) continue;
         
-        // Calculate Jaccard
+        // Multiplication-based threshold check: c*(1+t) >= t*(a+b)
+        double lhs = (double)common * one_plus_t;
+        double rhs = t_times_sizeRef + t * (double)sizeQry;
+        if(lhs + 1e-12 < rhs) continue;
+        
+        // Calculate actual Jaccard for heap sorting (need exact value for top-k)
         uint64_t union_size = sizeRef + sizeQry - common;
-        double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
-        if(jaccard_ < jaccard_min) continue;
+        float score = (union_size == 0) ? 0.0f : (float)common / (float)union_size;
         
-        float score = (float)jaccard_;
         if((int)topk.size() < k) {
             topk.push({score, candidate_id});
         } else if(score > topk.top().first) {
@@ -291,7 +303,7 @@ void findNeighborsKSSDWithIndex(
     const vector<vector<std::pair<int, float>>>& knn_graph,  // k-NN graph with jaccard
     int max_posting,              // Max posting list size to consider (0 = disabled)
     vector<uint32_t>& mark,      // Global mark array (epoch-based)
-    vector<uint32_t>& cnt,        // Global count array
+    vector<uint16_t>& cnt,        // Global count array (uint16_t for better cache)
     vector<int>& touched,         // Global touched list
     uint32_t& cur_mark,          // Current epoch marker
     vector<vector<int>>& thread_neighbors,  // Optimization 2: Reuse thread-local buffers
@@ -305,26 +317,30 @@ void findNeighborsKSSDWithIndex(
         // Clear and reuse thread_neighbors
         for(auto& v : thread_neighbors) v.clear();
         
+        const double t = jaccard_min;
+        const double one_plus_t = 1.0 + t;
+        const size_t size1 = point.hash64_arr.size();
+        const double t_times_size1 = t * (double)size1;
+        const size_t min_size_64 = (t > 0.0) ? (size_t)std::floor(t * size1) : 0;
+        const size_t max_size_64 = (t > 0.0) ? (size_t)std::ceil((double)size1 / t) : SIZE_MAX;
+        
         #pragma omp parallel for schedule(dynamic, 100) num_threads(threads)
         for(size_t i = 0; i < sketches.size(); i++) {
-            if(i == point_idx || !sketches[i].use64) continue;
+            if(i == (size_t)point_idx || !sketches[i].use64) continue;
             
             int tid = omp_get_thread_num();
             auto& buf = thread_neighbors[tid];
             
-            // Compute distance for 64-bit hashes
-            uint64_t common = 0;
-            size_t i1 = 0, i2 = 0;
-            size_t size1 = point.hash64_arr.size();
             size_t size2 = sketches[i].hash64_arr.size();
             
-            if(jaccard_min > 0.0) {
-                size_t min_size = (size_t)std::floor(jaccard_min * size1);
-                size_t max_size = (size_t)std::ceil(size1 / jaccard_min);
-                if(size2 < min_size || size2 > max_size) {
-                    continue;
-                }
+            // Size ratio filter
+            if(size2 < min_size_64 || size2 > max_size_64) {
+                continue;
             }
+            
+            // Compute intersection for 64-bit hashes
+            uint64_t common = 0;
+            size_t i1 = 0, i2 = 0;
             
             while(i1 < size1 && i2 < size2) {
                 if(point.hash64_arr[i1] < sketches[i].hash64_arr[i2]) {
@@ -338,12 +354,14 @@ void findNeighborsKSSDWithIndex(
                 }
             }
             
-            uint64_t union_size = size1 + size2 - common;
-            double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
-            
-            if(jaccard_ >= jaccard_min) {
-                buf.push_back(i);
+            // Optimization: Use multiplication instead of division
+            double lhs = (double)common * one_plus_t;
+            double rhs = t_times_size1 + t * (double)size2;
+            if(lhs + 1e-12 < rhs) {
+                continue;
             }
+            
+            buf.push_back(i);
         }
         
         // Merge thread-local results
@@ -372,6 +390,7 @@ void findNeighborsKSSDWithIndex(
         out.clear();
         return;  // Optimization 7: Skip empty sketches
     }
+    uint16_t sizeRef16 = (sizeRef > 65535) ? 65535 : (uint16_t)sizeRef;  // Saturate at uint16_t max
     
     // Standard mode: use inverted index to find all candidates
     touched.clear();
@@ -397,8 +416,8 @@ void findNeighborsKSSDWithIndex(
                 cnt[candidate_id] = 1;
                 touched.push_back(candidate_id);
             } else {
-                // Already seen, increment count
-                cnt[candidate_id]++;
+                // Saturating count (common <= sizeRef always)
+                if(cnt[candidate_id] < sizeRef16) cnt[candidate_id]++;
             }
         }
     }
@@ -416,6 +435,13 @@ void findNeighborsKSSDWithIndex(
         v.reserve(256);  // Pre-reserve
     }
     
+    // Optimization: Pre-compute constants outside loop
+    const double t = jaccard_min;
+    const double one_plus_t = 1.0 + t;
+    const double t_times_sizeRef = t * (double)sizeRef;
+    const int min_size = (t > 0.0) ? (int)std::floor(t * sizeRef) : 0;
+    const int max_size = (t > 0.0) ? (int)std::ceil((double)sizeRef / t) : INT_MAX;
+    
     // Optimization 3: Threshold-based parallelization
     const size_t PARALLEL_THRESHOLD = 5000;
     if(touched.size() < PARALLEL_THRESHOLD || threads <= 1) {
@@ -430,28 +456,21 @@ void findNeighborsKSSDWithIndex(
             int common = cnt[candidate_id];
             int sizeQry = candidate.hash32_arr.size();
 
-            if(jaccard_min > 0.0) {
-                int min_size = (int)std::floor(jaccard_min * sizeRef);
-                int max_size = (int)std::ceil(sizeRef / jaccard_min);
-                if(sizeQry < min_size || sizeQry > max_size) {
-                    continue;
-                }
-            }
-            
-            // Optimization 4: Use ceil for min_common_needed
-            double v = jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min);
-            int min_common_needed = (int)std::ceil(v - 1e-12);
-            if(common < min_common_needed) {
+            // Size ratio filter (necessary condition)
+            if(sizeQry < min_size || sizeQry > max_size) {
                 continue;
             }
             
-            // Direct Jaccard calculation from common
-            uint64_t union_size = sizeRef + sizeQry - common;
-            double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
-            
-            if(jaccard_ >= jaccard_min) {
-                out.push_back(candidate_id);
+            // Optimization: Use multiplication instead of division
+            // J = c/(a+b-c) >= t  <=>  c*(1+t) >= t*(a+b)
+            double lhs = (double)common * one_plus_t;
+            double rhs = t_times_sizeRef + t * (double)sizeQry;
+            if(lhs + 1e-12 < rhs) {
+                continue;
             }
+            
+            // Passed threshold => definitely a neighbor (no need to compute jaccard_)
+            out.push_back(candidate_id);
         }
         return;
     }
@@ -472,28 +491,21 @@ void findNeighborsKSSDWithIndex(
             int common = cnt[candidate_id];
             int sizeQry = candidate.hash32_arr.size();
 
-            if(jaccard_min > 0.0) {
-                int min_size = (int)std::floor(jaccard_min * sizeRef);
-                int max_size = (int)std::ceil(sizeRef / jaccard_min);
-                if(sizeQry < min_size || sizeQry > max_size) {
-                    continue;
-                }
-            }
-            
-            // Optimization 4: Use ceil for min_common_needed
-            double v = jaccard_min * (sizeRef + sizeQry) / (1.0 + jaccard_min);
-            int min_common_needed = (int)std::ceil(v - 1e-12);
-            if(common < min_common_needed) {
+            // Size ratio filter (necessary condition)
+            if(sizeQry < min_size || sizeQry > max_size) {
                 continue;
             }
             
-            // Direct Jaccard calculation from common
-            uint64_t union_size = sizeRef + sizeQry - common;
-            double jaccard_ = (union_size == 0) ? 0.0 : (double)common / union_size;
-            
-            if(jaccard_ >= jaccard_min) {
-                buf.push_back(candidate_id);
+            // Optimization: Use multiplication instead of division
+            // J = c/(a+b-c) >= t  <=>  c*(1+t) >= t*(a+b)
+            double lhs = (double)common * one_plus_t;
+            double rhs = t_times_sizeRef + t * (double)sizeQry;
+            if(lhs + 1e-12 < rhs) {
+                continue;
             }
+            
+            // Passed threshold => definitely a neighbor
+            buf.push_back(candidate_id);
         }
     }
     
@@ -673,7 +685,7 @@ DBSCANResult KssdDBSCAN(
     
     // Initialize global stamp+count arrays (optimization 1: avoid per-query allocation)
     vector<uint32_t> mark(n, 0);      // Epoch-based marking
-    vector<uint32_t> cnt(n, 0);       // Intersection counts
+    vector<uint16_t> cnt(n, 0);       // Intersection counts (uint16_t for better cache)
     vector<int> touched;               // Touched candidates list
     touched.reserve(10000);            // Pre-allocate
     uint32_t cur_mark = 0;            // Current epoch marker
@@ -733,7 +745,11 @@ DBSCANResult KssdDBSCAN(
         
         // Core point found, start a new cluster
         labels[i] = cluster_id;
-        queue<int> seed_set;
+        
+        // Optimization: Use vector + head instead of queue (better cache, fewer allocations)
+        vector<int> seed;
+        seed.reserve(neighbors_buf.size());
+        size_t seed_head = 0;
         
         // Optimization 1: Use stamp array for queue tracking
         qepoch++;
@@ -747,16 +763,15 @@ DBSCANResult KssdDBSCAN(
         
         for(int neighbor : neighbors_buf) {
             if(!inq(neighbor)) {
-                seed_set.push(neighbor);
+                seed.push_back(neighbor);
                 set_inq(neighbor);
             }
         }
         
         // Expand cluster using seed set
         int cluster_size = 1;  // Count cluster size for progress
-        while(!seed_set.empty()) {
-            int q = seed_set.front();
-            seed_set.pop();
+        while(seed_head < seed.size()) {
+            int q = seed[seed_head++];
             
             if(labels[q] == -2) {
                 // Reassign noise point to cluster, but do not expand from it
@@ -794,7 +809,7 @@ DBSCANResult KssdDBSCAN(
                 core_points++;
                 for(int neighbor : q_neighbors_buf) {
                     if((labels[neighbor] == -1 || labels[neighbor] == -2) && !inq(neighbor)) {
-                        seed_set.push(neighbor);
+                        seed.push_back(neighbor);
                         set_inq(neighbor);
                     }
                 }
