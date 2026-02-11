@@ -14,7 +14,7 @@
 using namespace std;
 
 #ifdef GREEDY_CLUST
-void append_clust_greedy(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
+void append_clust_greedy(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads, bool save_rep_index){
 	bool isSave = !no_save;
 	
 	// Check for existing cluster state (MinHash incremental update)
@@ -172,7 +172,7 @@ void append_clust_greedy(string folder_path, string input_file, string output_fi
 		vector<vector<int>> cluster = MinHashIncrementalCluster(minhash_state, new_sketches, threads);
 		cerr << "Incremental clustering completed" << endl;
 		
-		if (!no_save) {
+		if (!no_save && save_rep_index) {
 			minhash_state.save(folder_path + "/cluster_state.bin");
 		}
 		
@@ -183,7 +183,7 @@ void append_clust_greedy(string folder_path, string input_file, string output_fi
 	}
 }
 
-void append_clust_greedy_fast(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
+void append_clust_greedy_fast(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads, bool save_rep_index){
 	bool isSave = !no_save;
 	
 	// --fast means KSSD, so we only handle KSSD here
@@ -226,13 +226,13 @@ void append_clust_greedy_fast(string folder_path, string input_file, string outp
 			
 			kssd_state = KssdInitialClusterWithState(pre_sketches, pre_info, threshold, threads, kmer_size);
 			
-			if (!no_save) {
+			if (!no_save && save_rep_index) {
 				kssd_state.save(folder_path + "/cluster_state.bin");
 			}
 			
 			vector<vector<int>> cluster = KssdIncrementalCluster(kssd_state, append_sketches, threads);
 			
-			if (!no_save) {
+			if (!no_save && save_rep_index) {
 				kssd_state.save(folder_path + "/cluster_state.bin");
 			}
 			
@@ -254,7 +254,7 @@ void append_clust_greedy_fast(string folder_path, string input_file, string outp
 			
 			vector<vector<int>> cluster = KssdIncrementalCluster(kssd_state, new_sketches, threads);
 			
-			if (!no_save) {
+			if (!no_save && save_rep_index) {
 				kssd_state.save(folder_path + "/cluster_state.bin");
 			}
 			

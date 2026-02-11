@@ -216,9 +216,9 @@ int main(int argc, char * argv[]){
 	}
 	if(*option_append && *option_presketched){
 		if(is_fast){
-			append_clust_greedy_fast(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
+			append_clust_greedy_fast(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads, save_rep_index);
 		} else {
-			append_clust_greedy(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads);
+			append_clust_greedy(folder_path, inputFile, outputFile, sketchByFile, minLen, noSave, threshold, threads, save_rep_index);
 		}
 		return 0;
 	}
