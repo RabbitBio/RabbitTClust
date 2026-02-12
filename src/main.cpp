@@ -425,7 +425,7 @@ int main(int argc, char * argv[]){
   if(is_fast){
   
     clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, is_auto_threshold, is_stability, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster, save_rep_index);
-    return 1;
+    return 0;
 
   }
 	
