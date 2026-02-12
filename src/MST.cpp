@@ -1339,6 +1339,15 @@ vector<EdgeInfo> compute_minhash_mst(vector<SketchInfo>& sketches, int start_ind
   }
   cerr << "-----MinHash sketches cached" << endl;
 
+  // Get sketchSize once from the first valid sketch (constant for all non-containment sketches)
+  int sketch_size = 1000; // default
+  for(size_t i = 0; i < sketches.size(); i++){
+    if(sketches[i].minHash != nullptr){
+      sketch_size = (int)sketches[i].minHash->getMaxSketchSize();
+      break;
+    }
+  }
+
   //int denseSpan = 10;
   double step = 1.0 / denseSpan;
 
@@ -1498,7 +1507,9 @@ vector<EdgeInfo> compute_minhash_mst(vector<SketchInfo>& sketches, int start_ind
         }
     
         if(!isContainment){
+          // Use bottom-k MinHash Jaccard: cap denom at sketch_size to match MinHash::jaccard()
           int denom = size0 + size1 - common;
+          if(denom > sketch_size) denom = sketch_size;
           double jaccard;
           if(__builtin_expect(denom == 0, 0)) jaccard = 0.0;
           else jaccard = (double)common / denom;
@@ -1659,7 +1670,9 @@ vector<EdgeInfo> compute_minhash_mst(vector<SketchInfo>& sketches, int start_ind
         }
       
         if(!isContainment){
+          // Use bottom-k MinHash Jaccard: cap denom at sketch_size to match MinHash::jaccard()
           int denom = size0 + size1 - common;
+          if(denom > sketch_size) denom = sketch_size;
           double jaccard;
           if(__builtin_expect(denom == 0, 0)) jaccard = 0.0;
           else jaccard = (double)common / denom;
