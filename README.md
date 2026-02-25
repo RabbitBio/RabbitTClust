@@ -254,4 +254,7 @@ We highly appreciate all bug reports, comments, and suggestions from our users.
 Please feel free to raise any concerns or feedback with us without hesitation by `issue`. 
 
 ## Cite
-Xu, X., Yin, Z., Yan, L. et al. RabbitTClust: enabling fast clustering analysis of millions of bacteria genomes with MinHash sketches. Genome Biol 24, 121 (2023). https://doi.org/10.1186/s13059-023-02961-6
+
+- Zhang T, Xu X, Yin Z, et al. RabbitTClust2: Fast, Scalable, and Versatile Clustering for Massive Genomic Datasets. In: *2025 IEEE International Conference on Bioinformatics and Biomedicine (BIBM)*. IEEE; 2025:1495-1502. https://doi.org/10.1109/BIBM66473.2025.11356063
+
+- Xu X, Yin Z, Yan L, et al. RabbitTClust: enabling fast clustering analysis of millions of bacteria genomes with MinHash sketches. *Genome Biology*. 2023;24:121. https://doi.org/10.1186/s13059-023-02961-6
