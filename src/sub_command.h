@@ -61,3 +61,9 @@ void clust_from_pregraph_leiden(string folder_path, string outputFile, double re
 void clust_from_genome_dbscan(const string inputFile, string outputFile, string folder_path, bool sketchByFile, const int kmerSize, const int drlevel, const int minLen, bool noSave, double eps, int minPts, int threads, int knn_k = 0, int max_posting = 0);
 void clust_from_sketch_dbscan(string folder_path, string outputFile, bool sketchByFile, double eps, int minPts, int threads, int knn_k = 0, int max_posting = 0);
 
+#ifdef USE_MPI
+void clust_from_genomes_fast_MPI(int my_rank, int comm_sz, const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads);
+void clust_from_sketches_fast_MPI(int my_rank, int comm_sz, int half_k, int drlevel, string outputFile, string folder_path, bool is_newick_tree, bool no_dense, bool sketchByFile, bool isContainment, const double threshold, bool noSave, int threads);
+void clust_from_genomes_MPI(int my_rank, int comm_sz, const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const int sketchSize, const double threshold, string sketchFunc, int containCompress, const int minLen, bool noSave, int threads);
+void clust_from_sketches_MPI(int my_rank, int comm_sz, string outputFile, string folder_path, bool is_newick_tree, bool no_dense, bool isContainment, const double threshold, bool noSave, int threads);
+#endif

@@ -563,6 +563,100 @@ bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketch
 	return sketch_by_file;
 }
 
+#ifdef USE_MPI
+void append_binary_hash_data(FILE* fp_hash, const vector<KssdSketchInfo>& sketches) {
+	if (sketches.empty()) return;
+	bool use64 = sketches[0].use64;
+	if (use64) {
+		for (const auto& sketch : sketches) {
+			size_t cur_sketch_size = sketch.hash64_arr.size();
+			fwrite(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
+			fwrite(sketch.hash64_arr.data(), sizeof(uint64_t), cur_sketch_size, fp_hash);
+		}
+	} else {
+		for (const auto& sketch : sketches) {
+			size_t cur_sketch_size = sketch.hash32_arr.size();
+			fwrite(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
+			fwrite(sketch.hash32_arr.data(), sizeof(uint32_t), cur_sketch_size, fp_hash);
+		}
+	}
+}
+
+void append_binary_genome_info(FILE* fp_info, const vector<KssdSketchInfo>& sketches, bool sketchByFile) {
+	if (sketches.empty()) return;
+	if (sketchByFile) {
+		for (size_t i = 0; i < sketches.size(); i++) {
+			const Vec_SeqInfo& curFileSeqs = sketches[i].fileSeqs;
+			int file_name_length = (int)sketches[i].fileName.length();
+			int seq0_name_length = (int)curFileSeqs[0].name.length();
+			int seq0_comment_length = (int)curFileSeqs[0].comment.length();
+			fwrite(&file_name_length, sizeof(int), 1, fp_info);
+			fwrite(&seq0_name_length, sizeof(int), 1, fp_info);
+			fwrite(&seq0_comment_length, sizeof(int), 1, fp_info);
+			fwrite(&curFileSeqs[0].strand, sizeof(int), 1, fp_info);
+			fwrite(&sketches[i].totalSeqLength, sizeof(uint64_t), 1, fp_info);
+			fwrite(sketches[i].fileName.c_str(), sizeof(char), file_name_length, fp_info);
+			fwrite(curFileSeqs[0].name.c_str(), sizeof(char), seq0_name_length, fp_info);
+			fwrite(curFileSeqs[0].comment.c_str(), sizeof(char), seq0_comment_length, fp_info);
+			fwrite(&sketches[i].use64, sizeof(bool), 1, fp_info);
+		}
+	} else {
+		for (size_t i = 0; i < sketches.size(); i++) {
+			const SequenceInfo& curSeq = sketches[i].seqInfo;
+			int seq_name_length = (int)curSeq.name.length();
+			int seq_comment_length = (int)curSeq.comment.length();
+			fwrite(&seq_name_length, sizeof(int), 1, fp_info);
+			fwrite(&seq_comment_length, sizeof(int), 1, fp_info);
+			fwrite(&curSeq.strand, sizeof(int), 1, fp_info);
+			fwrite(&curSeq.length, sizeof(int), 1, fp_info);
+			fwrite(curSeq.name.c_str(), sizeof(char), seq_name_length, fp_info);
+			fwrite(curSeq.comment.c_str(), sizeof(char), seq_comment_length, fp_info);
+			fwrite(&sketches[i].use64, sizeof(bool), 1, fp_info);
+		}
+	}
+}
+
+void append_minhash_genome_info(FILE* fp, const vector<SketchInfo>& sketches, bool sketchByFile) {
+	if (sketches.empty()) return;
+	if (sketchByFile) {
+		for (size_t i = 0; i < sketches.size(); i++) {
+			const Vec_SeqInfo& curFileSeqs = sketches[i].fileSeqs;
+			int file_name_length = (int)sketches[i].fileName.length();
+			int seq0_name_length = (int)curFileSeqs[0].name.length();
+			int seq0_comment_length = (int)curFileSeqs[0].comment.length();
+			fwrite(&file_name_length, sizeof(int), 1, fp);
+			fwrite(&seq0_name_length, sizeof(int), 1, fp);
+			fwrite(&seq0_comment_length, sizeof(int), 1, fp);
+			fwrite(&curFileSeqs[0].strand, sizeof(int), 1, fp);
+			fwrite(&sketches[i].totalSeqLength, sizeof(uint64_t), 1, fp);
+			fwrite(sketches[i].fileName.c_str(), sizeof(char), file_name_length, fp);
+			fwrite(curFileSeqs[0].name.c_str(), sizeof(char), seq0_name_length, fp);
+			fwrite(curFileSeqs[0].comment.c_str(), sizeof(char), seq0_comment_length, fp);
+		}
+	} else {
+		for (size_t i = 0; i < sketches.size(); i++) {
+			SequenceInfo curSeq = sketches[i].seqInfo;
+			int seq_name_length = (int)curSeq.name.length();
+			int seq_comment_length = (int)curSeq.comment.length();
+			fwrite(&seq_name_length, sizeof(int), 1, fp);
+			fwrite(&seq_comment_length, sizeof(int), 1, fp);
+			fwrite(&curSeq.strand, sizeof(int), 1, fp);
+			fwrite(&curSeq.length, sizeof(int), 1, fp);
+			fwrite(curSeq.name.c_str(), sizeof(char), seq_name_length, fp);
+			fwrite(curSeq.comment.c_str(), sizeof(char), seq_comment_length, fp);
+		}
+	}
+}
+
+void append_minhash_hash_data(FILE* fp, const vector<SketchInfo>& sketches) {
+	for (size_t i = 0; i < sketches.size(); i++) {
+		vector<uint64_t> hashArr = sketches[i].minHash->storeMinHashes();
+		size_t cur_sketch_size = hashArr.size();
+		fwrite(&cur_sketch_size, sizeof(size_t), 1, fp);
+		fwrite(hashArr.data(), sizeof(uint64_t), cur_sketch_size, fp);
+	}
+}
+#endif
 
 
 

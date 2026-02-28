@@ -48,6 +48,10 @@ vector<EdgeInfo> append_MST(vector<SketchInfo>& pre_sketches, vector<SketchInfo>
 vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sketch_func_id, int threads, bool no_dense, int** &denseArr, int denseSpan, uint64_t* &aniArr);
 
 vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold, KssdInvertedIndex* inverted_index = nullptr);
+#ifdef USE_MPI
+vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketchInfo>& sketches, KssdParameters info, const string folder_path, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold, char* index_buffer, size_t index_size, char* dict_buffer, size_t dict_size);
+vector<EdgeInfo> compute_minhash_mst_mpi(int my_rank, int comm_sz, vector<SketchInfo>& sketches, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold, int kmerSize, MinHashInvertedIndex* inverted_index = nullptr);
+#endif
 vector<EdgeInfo> compute_minhash_mst(vector<SketchInfo>& sketches, int start_index, bool no_dense, bool isContainment, int threads, int** &denseArr, int denseSpan, uint64_t* &aniArr, double threshold, int kmerSize, MinHashInvertedIndex* inverted_index = nullptr);
 
 std::vector<EdgeInfo> generateForest(std::vector <EdgeInfo> mst, double threshhold);

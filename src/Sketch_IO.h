@@ -13,4 +13,11 @@ bool loadSketches(string folderPath, int threads, vector<SketchInfo>& sketches, 
 bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketches);
 bool load_kssd_genome_info(string folderPath, string type, vector<KssdSketchInfo>& sketches);
 bool loadKssdSketches(string folderPath, int threads, vector<KssdSketchInfo>& sketches, KssdParameters& info);
+
+#ifdef USE_MPI
+void append_binary_genome_info(FILE* fp_info, const vector<KssdSketchInfo>& sketches, bool sketchByFile);
+void append_binary_hash_data(FILE* fp_hash, const vector<KssdSketchInfo>& sketches);
+void append_minhash_genome_info(FILE* fp, const vector<SketchInfo>& sketches, bool sketchByFile);
+void append_minhash_hash_data(FILE* fp, const vector<SketchInfo>& sketches);
+#endif
 #endif

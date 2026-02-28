@@ -48,6 +48,10 @@
 
 #include "CLI11.hpp"
 #include "sub_command.h"
+#ifdef USE_MPI
+#include <mpi.h>
+#include <sched.h>
+#endif
 
 #ifdef GREEDY_CLUST
 #else
@@ -117,6 +121,10 @@ int main(int argc, char * argv[]){
 	auto option_input = app.add_option("-i, --input", inputFile, "set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)");
 	auto option_presketched = app.add_option("--presketched", folder_path, "clustering by the pre-generated sketch files rather than genomes");
 	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing");
+#ifdef USE_MPI
+	bool is_mpi = false;
+	auto flag_mpi = app.add_flag("--mpi", is_mpi, "use MPI for distributed sketching and MST (clust-mst, works with both MinHash and KSSD/--fast)");
+#endif
 	auto flag_inverted_index = app.add_flag("--inverted-index", use_inverted_index, "use inverted index optimization for greedy clustering (MinHash only)");
 	
 #ifdef DBSCAN_CLUST
@@ -163,6 +171,41 @@ int main(int argc, char * argv[]){
 
 	CLI11_PARSE(app, argc, argv);
 
+#ifdef USE_MPI
+	int my_rank = 0, comm_sz = 1;
+	if (is_mpi) {
+		int provided;
+		MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
+		MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
+		MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+		// mpirun often binds each rank to 1 core. When threads > 1, detect
+		// this and expand the affinity so OpenMP threads can use multiple cores.
+		// On clusters, prefer: mpirun --bind-to none, or
+		//   srun --cpu-bind=none, or --map-by slot:PE=<threads> --bind-to core
+		{
+			cpu_set_t current;
+			CPU_ZERO(&current);
+			sched_getaffinity(0, sizeof(current), &current);
+			int allowed = CPU_COUNT(&current);
+			if (allowed < threads) {
+				cpu_set_t all;
+				CPU_ZERO(&all);
+				long ncpus = sysconf(_SC_NPROCESSORS_ONLN);
+				for (long i = 0; i < ncpus; i++)
+					CPU_SET(i, &all);
+				sched_setaffinity(0, sizeof(all), &all);
+				#pragma omp parallel
+				{
+					sched_setaffinity(0, sizeof(all), &all);
+				}
+				if (my_rank == 0)
+					fprintf(stderr, "-----MPI: rank was bound to %d core(s) but needs %d threads, "
+							"reset affinity to all %ld cores\n", allowed, threads, ncpus);
+			}
+		}
+	}
+#endif
+
 	// Manual validation: output is required unless we're in --buildDB mode.
 	if(buildDB_folder.empty() && option_output->count() == 0){
 		cerr << "ERROR: option -o/--output is required (unless --buildDB is used)" << endl;
@@ -176,6 +219,9 @@ int main(int argc, char * argv[]){
 	if(option_threads){
 		fprintf(stderr, "-----set the thread number %d\n", threads);
 	}
+#ifdef _OPENMP
+	omp_set_num_threads(threads);
+#endif
 	if(*option_min_len){
 		fprintf(stderr, "-----set the filter minimum length: %ld\n", minLen);
 	}
@@ -362,6 +408,36 @@ int main(int argc, char * argv[]){
 		threshold = 0.05;  // Default threshold for MST clustering
 		cerr << "-----use default threshold: " << threshold << endl;
 	}
+
+#ifdef USE_MPI
+	if (is_mpi) {
+		if (is_fast) {
+			if (*option_presketched && !*option_append) {
+				clust_from_sketches_fast_MPI(my_rank, comm_sz, 10, drlevel, outputFile, folder_path, is_newick_tree, no_dense, true, isContainment, threshold, noSave, threads);
+			} else if (!*option_append) {
+				if (!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)) { MPI_Finalize(); return 1; }
+				clust_from_genomes_fast_MPI(my_rank, comm_sz, inputFile, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
+			} else {
+				cerr << "ERROR: --mpi does not support --append" << endl;
+				MPI_Finalize();
+				return 1;
+			}
+		} else {
+			if (*option_presketched && !*option_append) {
+				clust_from_sketches_MPI(my_rank, comm_sz, outputFile, folder_path, is_newick_tree, no_dense, isContainment, threshold, noSave, threads);
+			} else if (!*option_append) {
+				if (!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, isJaccard, kmerSize, threshold, containCompress, sketchSize)) { MPI_Finalize(); return 1; }
+				clust_from_genomes_MPI(my_rank, comm_sz, inputFile, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, kmerSize, sketchSize, threshold, sketchFunc, containCompress, minLen, noSave, threads);
+			} else {
+				cerr << "ERROR: --mpi does not support --append" << endl;
+				MPI_Finalize();
+				return 1;
+			}
+		}
+		MPI_Finalize();
+		return 0;
+	}
+#endif
 	
 	if(is_fast){
 		if(!buildDB_folder.empty()){

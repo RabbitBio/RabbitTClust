@@ -9,7 +9,7 @@ option(USE_Timer "print the time information" ON)
 option(USE_GREEDY "use greedy incremental cluster" ON)
 # option(USE_LEIDEN "use Leiden community detection cluster" OFF)  # DISABLED
 option(USE_DBSCAN "use DBSCAN density-based clustering" OFF)
-
+option(USE_MPI "build MPI version of clust-mst (MinHash and KSSD)" ON)
 
 
 find_package(OpenMP REQUIRED)
@@ -57,6 +57,12 @@ if(USE_DBSCAN)
 	set(CMAKE_CXX_FLAGS "-D DBSCAN_CLUST ${CMAKE_CXX_FLAGS}")
 endif()
 
+if(USE_MPI)
+	find_package(MPI REQUIRED)
+	add_definitions(-DUSE_MPI)
+	include_directories(${MPI_CXX_INCLUDE_PATH})
+endif()
+
 if(USE_RABBITFX)
 	set(CMAKE_CXX_FLAGS "-D RABBIT_FX ${CMAKE_CXX_FLAGS}")
 	include_directories(src RabbitSketch/build/include RabbitFX/build/include)
@@ -93,6 +99,9 @@ if(USE_RABBITFX)
 else()
 	target_link_libraries(clust-greedy rabbitsketch_static z)
 endif()
+if(USE_MPI)
+	target_link_libraries(clust-greedy ${MPI_CXX_LIBRARIES})
+endif()
 
 # elseif(USE_LEIDEN)  # DISABLED
 # add_executable(clust-leiden ${DIR_SRCS})
@@ -109,6 +118,9 @@ if(USE_RABBITFX)
 else()
 	target_link_libraries(clust-dbscan rabbitsketch_static z)
 endif()
+if(USE_MPI)
+	target_link_libraries(clust-dbscan ${MPI_CXX_LIBRARIES})
+endif()
 
 else()
 add_executable(clust-mst ${DIR_SRCS})
@@ -116,6 +128,9 @@ if(USE_RABBITFX)
 	target_link_libraries(clust-mst rabbitsketch_static rabbitfx z)
 else()
 	target_link_libraries(clust-mst rabbitsketch_static z)
+endif()
+if(USE_MPI)
+	target_link_libraries(clust-mst ${MPI_CXX_LIBRARIES})
 endif()
 endif()
 

@@ -1463,6 +1463,278 @@ void transSketchesFromIndex(const KssdInvertedIndex& inverted_index, const KssdP
 	#endif
 }
 
+#ifdef USE_MPI
+#include <mpi.h>
+
+bool sketchFileWithKssd_mpi(const vector<string>& fileList, int my_rank, int comm_sz, uint64_t minLen, int kmerSize, int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads) {
+	if (fileList.empty()) return true;
+	static const int BaseMap[128] = {
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,0,-1,1,-1,-1,-1,2,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,3,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,0,-1,1,-1,-1,-1,2,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,3,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
+	};
+	int half_k = (kmerSize + 1) / 2;
+	kmerSize = half_k * 2;
+	bool use64 = (half_k - drlevel) > 8;
+	int half_subk = (6 - drlevel >= 2) ? 6 : (drlevel + 2);
+	int dim_size = 1 << (4 * half_subk);
+	int dim_start = 0;
+	int dim_end = 1 << (4 * (half_subk - drlevel));
+	int* shuffled_dim = generate_shuffle_dim(half_subk);
+	info.half_k = half_k;
+	info.half_subk = half_subk;
+	info.drlevel = drlevel;
+	info.id = (half_k << 8) + (half_subk << 4) + drlevel;
+	info.genomeNumber = (int)fileList.size();
+
+	int comp_bittl = 64 - 4 * half_k;
+	int half_outctx_len = half_k - half_subk;
+	int rev_add_move = 4 * half_k - 2;
+	uint64_t tupmask = _64MASK >> comp_bittl;
+	uint64_t domask = (tupmask >> (4 * half_outctx_len)) << (2 * half_outctx_len);
+	uint64_t undomask = (tupmask ^ domask) & tupmask;
+	uint64_t undomask1 = undomask & (tupmask >> ((half_k + half_subk) * 2));
+	uint64_t undomask0 = undomask ^ undomask1;
+
+	phmap::flat_hash_map<uint32_t, int> shuffled_map;
+	shuffled_map.reserve(dim_end - dim_start);
+	for (int t = 0; t < dim_size; t++) {
+		if (shuffled_dim[t] < dim_end && shuffled_dim[t] >= dim_start)
+			shuffled_map.emplace(t, shuffled_dim[t]);
+	}
+	const int kmerSize_x2 = kmerSize * 2;
+	const int drlevel_x4 = drlevel * 4;
+	const int half_outctx_len_x2 = half_outctx_len * 2;
+	const int half_outctx_len_x4 = half_outctx_len * 4;
+	const int kmerSize_x2_minus_half_outctx_len_x4 = kmerSize_x2 - half_outctx_len_x4;
+
+	#pragma omp parallel for num_threads(threads) schedule(dynamic)
+	for (int i = my_rank; i < (int)fileList.size(); i += comm_sz) {
+		gzFile fp1 = gzopen(fileList[i].c_str(), "r");
+		if (!fp1) {
+			fprintf(stderr, "cannot open genome file: %s\n", fileList[i].c_str());
+			exit(1);
+		}
+		kseq_t* ks1 = kseq_init(fp1);
+		uint64_t totalLength = 0;
+		Vec_SeqInfo curFileSeqs;
+		phmap::flat_hash_set<uint32_t> hashValueSet;
+		phmap::flat_hash_set<uint64_t> hashValueSet64;
+		vector<uint32_t> hashArr32;
+		vector<uint64_t> hashArr64;
+
+		while (1) {
+			int length = kseq_read(ks1);
+			if (length < 0) break;
+			totalLength += length;
+			const char* name_ptr = (ks1->name.s != NULL) ? ks1->name.s : "noName";
+			const char* comment_ptr = (ks1->comment.s != NULL) ? ks1->comment.s : "noName";
+			uint64_t tuple = 0LLU, rvs_tuple = 0LLU;
+			int base = 1;
+			const char* seq_ptr = ks1->seq.s;
+
+			for (int j = 0; j < length; j++) {
+				char ch = seq_ptr[j];
+				int basenum = BaseMap[(unsigned char)ch];
+				if (basenum != -1) {
+					tuple = ((tuple << 2) | basenum) & tupmask;
+					rvs_tuple = (rvs_tuple >> 2) + (((uint64_t)basenum ^ 3LLU) << rev_add_move);
+					base++;
+					if (base > kmerSize) {
+						uint64_t uni_tuple = tuple < rvs_tuple ? tuple : rvs_tuple;
+						uint32_t dim_id = (uint32_t)((uni_tuple & domask) >> half_outctx_len_x2);
+						auto it = shuffled_map.find(dim_id);
+						if (it == shuffled_map.end()) continue;
+						int pfilter = it->second - dim_start;
+						uint64_t dr_tuple = (((uni_tuple & undomask0) | ((uni_tuple & undomask1) << kmerSize_x2_minus_half_outctx_len_x4)) >> drlevel_x4) | (uint64_t)pfilter;
+						if (use64) hashValueSet64.emplace(dr_tuple);
+						else hashValueSet.emplace(dr_tuple);
+					}
+				} else {
+					base = 1;
+					tuple = 0LLU;
+					rvs_tuple = 0LLU;
+				}
+			}
+			if (curFileSeqs.empty()) {
+				curFileSeqs.push_back(SequenceInfo{string(name_ptr), string(comment_ptr), 0, length});
+			}
+		}
+
+		hashArr32.clear();
+		hashArr64.clear();
+		if (use64) {
+			hashArr64.assign(hashValueSet64.begin(), hashValueSet64.end());
+			std::sort(hashArr64.begin(), hashArr64.end());
+		} else {
+			hashArr32.assign(hashValueSet.begin(), hashValueSet.end());
+			std::sort(hashArr32.begin(), hashArr32.end());
+		}
+
+		if (totalLength >= minLen) {
+			KssdSketchInfo tmp;
+			tmp.id = i;
+			tmp.fileName = fileList[i];
+			tmp.totalSeqLength = totalLength;
+			tmp.fileSeqs = curFileSeqs;
+			tmp.use64 = use64;
+			tmp.hash32_arr = std::move(hashArr32);
+			tmp.hash64_arr = std::move(hashArr64);
+			tmp.sketchsize = use64 ? (uint32_t)tmp.hash64_arr.size() : (uint32_t)tmp.hash32_arr.size();
+			#pragma omp critical
+			{ sketches.push_back(std::move(tmp)); }
+		}
+		gzclose(fp1);
+		kseq_destroy(ks1);
+	}
+	return true;
+}
+
+bool sketchFiles_mpi(const vector<string>& fileList, int my_rank, int comm_sz, uint64_t minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads) {
+	if (fileList.empty()) return true;
+
+	#pragma omp parallel for num_threads(threads) schedule(dynamic)
+	for (int i = my_rank; i < (int)fileList.size(); i += comm_sz) {
+		gzFile fp1 = gzopen(fileList[i].c_str(), "r");
+		if (!fp1) {
+			fprintf(stderr, "cannot open genome file: %s\n", fileList[i].c_str());
+			exit(1);
+		}
+		kseq_t* ks1 = kseq_init(fp1);
+		uint64_t totalLength = 0;
+		int fileLength = 0;
+		Vec_SeqInfo curFileSeqs;
+
+		if (isContainment) {
+			FILE* fp = fopen(fileList[i].c_str(), "r");
+			if (fp) {
+				string fileSuffix = fileList[i].substr(fileList[i].length() - 2);
+				if (fileSuffix == "gz") {
+					fseek(fp, -4, SEEK_END);
+					int nUnCompress = 0;
+					fread(&nUnCompress, sizeof(int), 1, fp);
+					fileLength = nUnCompress;
+				} else {
+					fseek(fp, 0, SEEK_END);
+					fileLength = ftell(fp);
+				}
+				fclose(fp);
+			}
+		}
+
+		Sketch::MinHash* mh1;
+		if (isContainment) {
+			int curSketchSize = std::max(fileLength / containCompress, 100);
+			mh1 = new Sketch::MinHash(kmerSize, curSketchSize);
+		} else {
+			mh1 = new Sketch::MinHash(kmerSize, sketchSize);
+		}
+
+		while (1) {
+			int length = kseq_read(ks1);
+			if (length < 0) break;
+			totalLength += length;
+			string name("noName");
+			string comment("noName");
+			if (ks1->name.s != NULL) name = ks1->name.s;
+			if (ks1->comment.s != NULL) comment = ks1->comment.s;
+			mh1->update(ks1->seq.s);
+			if (curFileSeqs.empty())
+				curFileSeqs.push_back(SequenceInfo{name, comment, 0, length});
+		}
+
+		if (totalLength >= minLen) {
+			SketchInfo tmp;
+			if (isContainment) tmp.isContainment = true;
+			tmp.minHash = mh1;
+			tmp.id = i;
+			tmp.fileName = fileList[i];
+			tmp.totalSeqLength = totalLength;
+			tmp.fileSeqs = curFileSeqs;
+			#pragma omp critical
+			{ sketches.push_back(std::move(tmp)); }
+		} else {
+			delete mh1;
+		}
+
+		gzclose(fp1);
+		kseq_destroy(ks1);
+	}
+	return true;
+}
+
+void transSketches_in_memory(const vector<KssdSketchInfo>& sketches, const KssdParameters& info, int numThreads,
+	char*& sum_info_buffer_out, size_t& sum_info_size_out,
+	char*& sum_hash_buffer_out, size_t& sum_hash_size_out,
+	char*& sum_index_buffer_out, size_t& sum_index_size_out,
+	char*& sum_dict_buffer_out, size_t& sum_dict_size_out)
+{
+	sum_info_buffer_out = nullptr;
+	sum_info_size_out = 0;
+	sum_hash_buffer_out = nullptr;
+	sum_hash_size_out = 0;
+	sum_index_buffer_out = nullptr;
+	sum_index_size_out = 0;
+	sum_dict_buffer_out = nullptr;
+	sum_dict_size_out = 0;
+	int half_k = info.half_k;
+	int drlevel = info.drlevel;
+	bool use64 = (half_k - drlevel) > 8;
+	if (use64) return;
+	vector<phmap::flat_hash_map<uint32_t, vector<uint32_t>>> local_maps(numThreads);
+	#pragma omp parallel num_threads(numThreads)
+	{
+		int thread_id = omp_get_thread_num();
+		#pragma omp for schedule(dynamic)
+		for (size_t i = 0; i < sketches.size(); i++) {
+			for (size_t j = 0; j < sketches[i].hash32_arr.size(); j++) {
+				uint32_t hash = sketches[i].hash32_arr[j];
+				local_maps[thread_id][hash].push_back((uint32_t)i);
+			}
+		}
+	}
+	phmap::flat_hash_map<uint32_t, vector<uint32_t>> hashMapId;
+	for (int t = 0; t < numThreads; t++) {
+		for (const auto& p : local_maps[t]) {
+			hashMapId[p.first].insert(hashMapId[p.first].end(), p.second.begin(), p.second.end());
+		}
+	}
+	vector<uint32_t> sorted_hashes;
+	sorted_hashes.reserve(hashMapId.size());
+	for (const auto& p : hashMapId) sorted_hashes.push_back(p.first);
+	std::sort(sorted_hashes.begin(), sorted_hashes.end());
+	size_t total_index_count = 0;
+	for (uint32_t h : sorted_hashes) total_index_count += hashMapId.at(h).size();
+
+	sum_dict_size_out = total_index_count * sizeof(uint32_t);
+	sum_dict_buffer_out = new char[sum_dict_size_out];
+	char* dict_ptr = sum_dict_buffer_out;
+	size_t hashSize = 1LLU << (4 * (half_k - drlevel));
+	uint64_t totalIndex = total_index_count;
+	sum_index_size_out = sizeof(size_t) + sizeof(uint64_t) + hashSize * sizeof(uint32_t);
+	sum_index_buffer_out = new char[sum_index_size_out];
+	char* idx_ptr = sum_index_buffer_out;
+	memcpy(idx_ptr, &hashSize, sizeof(size_t));
+	idx_ptr += sizeof(size_t);
+	memcpy(idx_ptr, &totalIndex, sizeof(uint64_t));
+	idx_ptr += sizeof(uint64_t);
+	uint32_t* sizeArr = (uint32_t*)idx_ptr;
+	memset(sizeArr, 0, (size_t)(hashSize * sizeof(uint32_t)));
+	for (uint32_t h : sorted_hashes) {
+		const auto& id_list = hashMapId.at(h);
+		size_t list_size = id_list.size();
+		memcpy(dict_ptr, id_list.data(), list_size * sizeof(uint32_t));
+		dict_ptr += list_size * sizeof(uint32_t);
+		sizeArr[h] = (uint32_t)list_size;
+	}
+}
+#endif
+
 
 
 

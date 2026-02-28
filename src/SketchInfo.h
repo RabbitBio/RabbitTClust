@@ -126,6 +126,14 @@ bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int
 void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters& info, const string folder_path, int numThreads);
 void transSketchesFromIndex(const KssdInvertedIndex& inverted_index, const KssdParameters& info, const string folder_path);
 
-
+#ifdef USE_MPI
+bool sketchFileWithKssd_mpi(const vector<string>& fileList, int my_rank, int comm_sz, uint64_t minLen, int kmerSize, int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads);
+bool sketchFiles_mpi(const vector<string>& fileList, int my_rank, int comm_sz, uint64_t minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, vector<SketchInfo>& sketches, int threads);
+void transSketches_in_memory(const vector<KssdSketchInfo>& sketches, const KssdParameters& info, int numThreads,
+	char*& sum_info_buffer_out, size_t& sum_info_size_out,
+	char*& sum_hash_buffer_out, size_t& sum_hash_size_out,
+	char*& sum_index_buffer_out, size_t& sum_index_size_out,
+	char*& sum_dict_buffer_out, size_t& sum_dict_size_out);
+#endif
 
 #endif //H_SKETCH_INFO
