@@ -271,6 +271,78 @@ void print_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo
 	fclose(fp_tree);
 }
 
+// PHYLIP tree format: first line = number of trees (1), second line = Newick tree
+void print_phylip_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
+	string res_newick_tree = get_newick_tree(sketches, mst, sketch_by_file);
+	FILE* fp_tree = fopen(output.c_str(), "w");
+	if(!fp_tree){
+		cerr << "ERROR: print_phylip_tree(), cannot write file: " << output << endl;
+		exit(1);
+	}
+	fprintf(fp_tree, "1\n%s\n", res_newick_tree.c_str());
+	fclose(fp_tree);
+}
+
+void print_kssd_phylip_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
+	string res_newick_tree = get_kssd_newick_tree(sketches, mst, sketch_by_file);
+	FILE* fp_tree = fopen(output.c_str(), "w");
+	if(!fp_tree){
+		cerr << "ERROR: print_kssd_phylip_tree(), cannot write file: " << output << endl;
+		exit(1);
+	}
+	fprintf(fp_tree, "1\n%s\n", res_newick_tree.c_str());
+	fclose(fp_tree);
+}
+
+// NEXUS format: TAXA block with TAXLABELS + TREES block with one Newick tree
+static void write_nexus_tree(const string& newick_tree, const vector<string>& taxlabels, const string& output){
+	FILE* fp = fopen(output.c_str(), "w");
+	if(!fp){
+		cerr << "ERROR: print_nexus_tree(), cannot write file: " << output << endl;
+		exit(1);
+	}
+	fprintf(fp, "#NEXUS\n");
+	fprintf(fp, "BEGIN TAXA;\n");
+	fprintf(fp, "  DIMENSIONS NTAX=%zu;\n", taxlabels.size());
+	fprintf(fp, "  TAXLABELS");
+	for(size_t i = 0; i < taxlabels.size(); ++i){
+		// NEXUS TAXLABELS: escape single quotes in names by doubling them
+		string lab = taxlabels[i];
+		size_t pos = 0;
+		while((pos = lab.find('\'', pos)) != string::npos){
+			lab.insert(pos, "'");
+			pos += 2;
+		}
+		fprintf(fp, " '%s'", lab.c_str());
+	}
+	fprintf(fp, ";\n");
+	fprintf(fp, "END;\n");
+	fprintf(fp, "BEGIN TREES;\n");
+	fprintf(fp, "  TREE tree_1 = [&R] %s\n", newick_tree.c_str());
+	fprintf(fp, "END;\n");
+	fclose(fp);
+}
+
+void print_nexus_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
+	string res_newick_tree = get_newick_tree(sketches, mst, sketch_by_file);
+	vector<string> taxlabels;
+	taxlabels.reserve(sketches.size());
+	for(size_t i = 0; i < sketches.size(); ++i){
+		taxlabels.push_back(sketch_by_file ? sketches[i].fileName : sketches[i].seqInfo.name);
+	}
+	write_nexus_tree(res_newick_tree, taxlabels, output);
+}
+
+void print_kssd_nexus_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
+	string res_newick_tree = get_kssd_newick_tree(sketches, mst, sketch_by_file);
+	vector<string> taxlabels;
+	taxlabels.reserve(sketches.size());
+	for(size_t i = 0; i < sketches.size(); ++i){
+		taxlabels.push_back(sketch_by_file ? sketches[i].fileName : sketches[i].seqInfo.name);
+	}
+	write_nexus_tree(res_newick_tree, taxlabels, output);
+}
+
 void print_kssd_linkage_matrix(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, string output){
 	int N = sketches.size();
 	vector<LinkageRow> Z = get_linkage_from_mst(N, mst);

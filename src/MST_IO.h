@@ -13,9 +13,13 @@ struct ClusterInfo{
 };
 
 void print_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output);
+void print_phylip_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output);
+void print_nexus_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output);
 void printResult(std::vector<std::vector<int>>& clusterOrigin, std::vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, double threshold = -1.0);
 void printKssdResult(vector<vector<int>>& cluster, vector<KssdSketchInfo>& sketches, bool sketchByFile, string outputFile, double threshold = -1.0);
 void print_kssd_newick_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output);
+void print_kssd_phylip_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output);
+void print_kssd_nexus_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output);
 void print_kssd_linkage_matrix(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, string output);
 void print_linkage_matrix(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, string output);
 

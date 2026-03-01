@@ -267,7 +267,7 @@ void append_clust_greedy_fast(string folder_path, string input_file, string outp
 #endif
 
 #ifndef GREEDY_CLUST
-void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads){
+void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads){
 	bool isSave = !no_save;
 	int sketch_func_id_0; 
 	vector<KssdSketchInfo> pre_sketches; 
@@ -329,7 +329,16 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 		print_kssd_newick_tree(final_sketches, final_mst, pre_sketch_by_file, output_newick_file);
 		cerr << "-----write the newick tree into: " << output_newick_file << endl;
 	}
-
+	if(is_phylip_tree){
+		string output_phylip_file = output_file + ".phylip.tree";
+		print_kssd_phylip_tree(final_sketches, final_mst, pre_sketch_by_file, output_phylip_file);
+		cerr << "-----write the PHYLIP tree into: " << output_phylip_file << endl;
+	}
+	if(is_nexus_tree){
+		string output_nexus_file = output_file + ".nexus.tree";
+		print_kssd_nexus_tree(final_sketches, final_mst, pre_sketch_by_file, output_nexus_file);
+		cerr << "-----write the NEXUS tree into: " << output_nexus_file << endl;
+	}
 	if(is_linkage_matrix){
 		string output_linkage_file = output_file + ".linkage.txt";
 		print_kssd_linkage_matrix(final_sketches, final_mst, output_linkage_file);
@@ -387,7 +396,7 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 
 }
 
-void append_clust_mst(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
+void append_clust_mst(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
 	int sketch_func_id_0; 
 	vector<SketchInfo> pre_sketches; 
 	bool pre_sketch_by_file = loadSketches(folder_path, threads, pre_sketches, sketch_func_id_0); 
@@ -511,9 +520,17 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 		string output_newick_file = output_file + ".newick.tree";
 		print_newick_tree(final_sketches, final_mst, pre_sketch_by_file, output_newick_file);
 		cerr << "-----write the newick tree into: " << output_newick_file << endl;
-
 	}
-
+	if(is_phylip_tree){
+		string output_phylip_file = output_file + ".phylip.tree";
+		print_phylip_tree(final_sketches, final_mst, pre_sketch_by_file, output_phylip_file);
+		cerr << "-----write the PHYLIP tree into: " << output_phylip_file << endl;
+	}
+	if(is_nexus_tree){
+		string output_nexus_file = output_file + ".nexus.tree";
+		print_nexus_tree(final_sketches, final_mst, pre_sketch_by_file, output_nexus_file);
+		cerr << "-----write the NEXUS tree into: " << output_nexus_file << endl;
+	}
 	if(is_linkage_matrix){
 		string output_linkage_file = output_file + ".linkage.txt";
 		print_linkage_matrix(final_sketches, final_mst, output_linkage_file);
@@ -569,7 +586,7 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 	}
 
 }
-void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, double threshold, int threads){
+void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, double threshold, int threads){
 	vector<KssdSketchInfo> sketches;
 	vector<EdgeInfo> mst;
 	vector<vector<int>> cluster;
@@ -581,7 +598,16 @@ void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_t
 		print_kssd_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 		cerr << "-----write the newick tree into: " << output_newick_file << endl;
 	}
-
+	if(is_phylip_tree){
+		string output_phylip_file = outputFile + ".phylip.tree";
+		print_kssd_phylip_tree(sketches, mst, sketchByFile, output_phylip_file);
+		cerr << "-----write the PHYLIP tree into: " << output_phylip_file << endl;
+	}
+	if(is_nexus_tree){
+		string output_nexus_file = outputFile + ".nexus.tree";
+		print_kssd_nexus_tree(sketches, mst, sketchByFile, output_nexus_file);
+		cerr << "-----write the NEXUS tree into: " << output_nexus_file << endl;
+	}
 	if(is_linkage_matrix){
 		string output_linkage_file = outputFile + ".linkage.txt";
 		print_kssd_linkage_matrix(sketches, mst, output_linkage_file);
@@ -624,7 +650,7 @@ void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_t
 	}
 }
 
-void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, double threshold, int threads){
+void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, double threshold, int threads){
 	vector<SketchInfo> sketches;
 	vector<EdgeInfo> mst;
 	vector<vector<int>> cluster;
@@ -636,7 +662,16 @@ void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, 
 		print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 		cerr << "-----write the newick tree into: " << output_newick_file << endl;
 	}
-
+	if(is_phylip_tree){
+		string output_phylip_file = outputFile + ".phylip.tree";
+		print_phylip_tree(sketches, mst, sketchByFile, output_phylip_file);
+		cerr << "-----write the PHYLIP tree into: " << output_phylip_file << endl;
+	}
+	if(is_nexus_tree){
+		string output_nexus_file = outputFile + ".nexus.tree";
+		print_nexus_tree(sketches, mst, sketchByFile, output_nexus_file);
+		cerr << "-----write the NEXUS tree into: " << output_nexus_file << endl;
+	}
 	if(is_linkage_matrix){
 		string output_linkage_file = outputFile + ".linkage.txt";
 		print_linkage_matrix(sketches, mst, output_linkage_file);
@@ -725,7 +760,7 @@ void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, 
 }
 #endif
 
-void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads, double dedup_dist, int reps_per_cluster, bool save_rep_index){
+void clust_from_genome_fast(const string inputFile, string outputFile, string folder_path, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, bool sketchByFile, bool isContainment, const int kmerSize, const double threshold, const int drlevel, const int minLen, bool noSave, int threads, double dedup_dist, int reps_per_cluster, bool save_rep_index){
 	bool isSave = !noSave;
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
@@ -740,11 +775,11 @@ void clust_from_genome_fast(const string inputFile, string outputFile, string fo
 #else
 #endif
 	// Pass memory index to compute_kssd_clusters, which will pass it to compute_kssd_mst
-	compute_kssd_clusters(sketches, info, sketchByFile, no_dense, isContainment, folder_path, outputFile, is_newick_tree, is_linkage_matrix, is_auto_threshold, is_stability, threshold, isSave, threads, dedup_dist, reps_per_cluster, save_rep_index, &inverted_index);
+	compute_kssd_clusters(sketches, info, sketchByFile, no_dense, isContainment, folder_path, outputFile, is_newick_tree, is_phylip_tree, is_nexus_tree, is_linkage_matrix, is_auto_threshold, is_stability, threshold, isSave, threads, dedup_dist, reps_per_cluster, save_rep_index, &inverted_index);
 
 }
 
-void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, double threshold, bool isSave, int threads, double dedup_dist, int reps_per_cluster, bool save_rep_index, KssdInvertedIndex* inverted_index){
+void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameters info, bool sketchByFile, bool no_dense, bool isContainment, const string folder_path, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, double threshold, bool isSave, int threads, double dedup_dist, int reps_per_cluster, bool save_rep_index, KssdInvertedIndex* inverted_index){
 	vector<vector<int>> cluster;
 	double t2 = get_sec();
 
@@ -807,7 +842,16 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 		print_kssd_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 		cerr << "-----write the newick tree into: " << output_newick_file << endl;
 	}
-
+	if(is_phylip_tree){
+		string output_phylip_file = outputFile + ".phylip.tree";
+		print_kssd_phylip_tree(sketches, mst, sketchByFile, output_phylip_file);
+		cerr << "-----write the PHYLIP tree into: " << output_phylip_file << endl;
+	}
+	if(is_nexus_tree){
+		string output_nexus_file = outputFile + ".nexus.tree";
+		print_kssd_nexus_tree(sketches, mst, sketchByFile, output_nexus_file);
+		cerr << "-----write the NEXUS tree into: " << output_nexus_file << endl;
+	}
 	if(is_linkage_matrix){
 		string output_linkage_file = outputFile + ".linkage.txt";
 		print_kssd_linkage_matrix(sketches, mst, output_linkage_file);
@@ -1077,7 +1121,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		cerr << "-----buildDB: finished building KSSD DB at: " << folder_path << endl;
 	}
 
-	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads, bool use_inverted_index, bool save_rep_index){
+	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads, bool use_inverted_index, bool save_rep_index){
 		bool isSave = !noSave;
 		vector<SketchInfo> sketches;
 		int sketch_func_id;
@@ -1086,7 +1130,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 
 		compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, isSave, threads, nullptr);
 
-		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_linkage_matrix, is_auto_threshold, is_stability, no_dense, folder_path, sketch_func_id, threshold, isSave, threads, use_inverted_index, save_rep_index);
+		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_phylip_tree, is_nexus_tree, is_linkage_matrix, is_auto_threshold, is_stability, no_dense, folder_path, sketch_func_id, threshold, isSave, threads, use_inverted_index, save_rep_index);
 	}
 
 	bool tune_kssd_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, int& kmerSize, double& threshold, int &drlevel){
@@ -1241,7 +1285,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		return true;
 	}
 
-	void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool no_dense, bool isContainment, double threshold, int threads, double dedup_dist, int reps_per_cluster, bool use_inverted_index, bool save_rep_index){
+	void clust_from_sketch_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool no_dense, bool isContainment, double threshold, int threads, double dedup_dist, int reps_per_cluster, bool use_inverted_index, bool save_rep_index){
 		vector<KssdSketchInfo> sketches;
 		vector<vector<int>> cluster;
 		bool sketchByFile;
@@ -1305,7 +1349,16 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			print_kssd_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 			cerr << "-----write the newick tree into: " << output_newick_file << endl;
 		}
-
+		if(is_phylip_tree){
+			string output_phylip_file = outputFile + ".phylip.tree";
+			print_kssd_phylip_tree(sketches, mst, sketchByFile, output_phylip_file);
+			cerr << "-----write the PHYLIP tree into: " << output_phylip_file << endl;
+		}
+		if(is_nexus_tree){
+			string output_nexus_file = outputFile + ".nexus.tree";
+			print_kssd_nexus_tree(sketches, mst, sketchByFile, output_nexus_file);
+			cerr << "-----write the NEXUS tree into: " << output_nexus_file << endl;
+		}
 		if(is_linkage_matrix){
 			string output_linkage_file = outputFile + ".linkage.txt";
 			print_kssd_linkage_matrix(sketches, mst, output_linkage_file);
@@ -1403,7 +1456,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 #endif
 }
 
-	void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, bool is_auto_threshold, bool is_stability, bool no_dense, double threshold, int threads, bool use_inverted_index, bool save_rep_index){
+	void clust_from_sketches(string folder_path, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_auto_threshold, bool is_stability, bool no_dense, double threshold, int threads, bool use_inverted_index, bool save_rep_index){
 		vector<SketchInfo> sketches;
 		vector<vector<int>> cluster;
 		int sketch_func_id;
@@ -1530,6 +1583,16 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 			cerr << "-----write the newick tree into: " << output_newick_file << endl;
 		}
+		if(is_phylip_tree){
+			string output_phylip_file = outputFile + ".phylip.tree";
+			print_phylip_tree(sketches, mst, sketchByFile, output_phylip_file);
+			cerr << "-----write the PHYLIP tree into: " << output_phylip_file << endl;
+		}
+		if(is_nexus_tree){
+			string output_nexus_file = outputFile + ".nexus.tree";
+			print_nexus_tree(sketches, mst, sketchByFile, output_nexus_file);
+			cerr << "-----write the NEXUS tree into: " << output_nexus_file << endl;
+		}
 		
 		// Automatic threshold selection based on MST edge length distribution
 		if(is_auto_threshold){
@@ -1622,7 +1685,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		}
 	}
 
-	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index, bool save_rep_index){
+	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index, bool save_rep_index){
 		vector<vector<int>> cluster;
 		double t2 = get_sec();
 #ifdef GREEDY_CLUST
@@ -1742,7 +1805,16 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			print_newick_tree(sketches, mst, sketchByFile, output_newick_file);
 			cerr << "-----write the newick tree into: " << output_newick_file << endl;
 		}
-
+		if(is_phylip_tree){
+			string output_phylip_file = outputFile + ".phylip.tree";
+			print_phylip_tree(sketches, mst, sketchByFile, output_phylip_file);
+			cerr << "-----write the PHYLIP tree into: " << output_phylip_file << endl;
+		}
+		if(is_nexus_tree){
+			string output_nexus_file = outputFile + ".nexus.tree";
+			print_nexus_tree(sketches, mst, sketchByFile, output_nexus_file);
+			cerr << "-----write the NEXUS tree into: " << output_nexus_file << endl;
+		}
 		if(is_linkage_matrix){
 			string output_linkage_file = outputFile + ".linkage.txt";
 			print_linkage_matrix(sketches, mst, output_linkage_file);
