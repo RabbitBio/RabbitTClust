@@ -228,31 +228,14 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
   
   // Use memory index if available, otherwise load from file
   const phmap::flat_hash_map<uint64_t, vector<uint32_t>>* hash_map_ptr = nullptr;
+  const phmap::flat_hash_map<uint32_t, vector<uint32_t>>* hash_map_32_ptr = nullptr;
+  phmap::flat_hash_map<uint32_t, vector<uint32_t>> hash_map_32_loaded;  // when loading 32-bit from file
   if(inverted_index != nullptr && inverted_index->use64 == use64) {
     // Use memory index directly
     if(use64) {
       hash_map_ptr = &(inverted_index->hash_map_64);  // Use pointer to avoid copy
     } else {
-      // For non-use64, need to build sketchSizeArr, offset, and indexArr from memory index
-      size_t hashSize = inverted_index->hashSize;
-      sketchSizeArr = new uint32_t[hashSize];
-      offset = new size_t[hashSize];
-      uint64_t totalHashNumber = 0;
-      
-      for(size_t i = 0; i < hashSize; i++){
-        sketchSizeArr[i] = inverted_index->hash_map_32[i].size();
-        totalHashNumber += sketchSizeArr[i];
-        offset[i] = sketchSizeArr[i];
-        if(i > 0) offset[i] += offset[i-1];
-      }
-      
-      indexArr = new uint32_t[totalHashNumber];
-      size_t idx = 0;
-      for(size_t i = 0; i < hashSize; i++){
-        for(size_t j = 0; j < inverted_index->hash_map_32[i].size(); j++){
-          indexArr[idx++] = inverted_index->hash_map_32[i][j];
-        }
-      }
+      hash_map_32_ptr = &(inverted_index->hash_map_32);  // 32-bit phmap, use pointer
     }
     cerr << "-----using memory inverted index in compute_kssd_mst()" << endl;
   } else if(use64) {
@@ -305,55 +288,51 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
     fclose(fp_dict);
   }
   else{
-    // Load from file for non-use64 (original code)
+    // Load from file for non-use64 (sparse format: same layout as 64-bit, uint32_t keys)
     cerr << "-----not use hash64 in compute_kssd_mst() " << endl;
-    size_t hashSize;
-    uint64_t totalIndex;
+    size_t hash_number;
     string cur_index_file = folder_path + '/' + "kssd.sketch.index";
-    FILE * fp_index = fopen(cur_index_file.c_str(), "rb");
+    FILE* fp_index = fopen(cur_index_file.c_str(), "rb");
     if(!fp_index){
       cerr << "ERROR: compute_kssd_mst(), cannot open the index sketch file: " << cur_index_file << endl;
       exit(1);
     }
-    int read_hash_size = fread(&hashSize, sizeof(size_t), 1, fp_index);
-    int read_total_index = fread(&totalIndex, sizeof(uint64_t), 1, fp_index);
-    //sketchSizeArr = (uint32_t*)malloc(hashSize * sizeof(uint32_t));
-    sketchSizeArr = new uint32_t[hashSize];
-    size_t read_sketch_size_arr = fread(sketchSizeArr, sizeof(uint32_t), hashSize, fp_index);
-
-    //offset = (size_t*)malloc(hashSize * sizeof(size_t));
-    offset = new size_t[hashSize];
-    uint64_t totalHashNumber = 0;
-    for(size_t i = 0; i < hashSize; i++){
-      totalHashNumber += sketchSizeArr[i];
-      offset[i] = sketchSizeArr[i];
-      if(i > 0) offset[i] += offset[i-1];
-    }
-    if(totalHashNumber != totalIndex){
-      cerr << "ERROR: compute_kssd_mst(), mismatched total hash number" << endl;
+    size_t read_hash_num = fread(&hash_number, sizeof(size_t), 1, fp_index);
+    uint32_t* hash_arr = new uint32_t[hash_number];
+    uint32_t* hash_size_arr = new uint32_t[hash_number];
+    size_t read_hash_arr = fread(hash_arr, sizeof(uint32_t), hash_number, fp_index);
+    size_t read_hash_size_arr = fread(hash_size_arr, sizeof(uint32_t), hash_number, fp_index);
+    if(read_hash_num != 1 || read_hash_arr != hash_number || read_hash_size_arr != hash_number){
+      cerr << "ERROR: compute_kssd_mst(), error read hash_number, hash_arr, hash_size_arr (32-bit)" << endl;
       exit(1);
     }
     fclose(fp_index);
 
-    //cerr << "the hashSize is: " << hashSize << endl;
-    //cerr << "totalIndex is: " << totalIndex << endl;
-    //cerr << "totalHashNumber is: " << totalHashNumber << endl;
-    //cerr << "offset[n-1] is: " << offset[hashSize-1] << endl;;
-
-    //indexArr = (uint32_t*)malloc(totalHashNumber * sizeof(uint32_t));
-    indexArr = new uint32_t[totalHashNumber];
     string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
-    FILE * fp_dict = fopen(cur_dict_file.c_str(), "rb");
+    FILE* fp_dict = fopen(cur_dict_file.c_str(), "rb");
     if(!fp_dict){
       cerr << "ERROR: compute_kssd_mst(), cannot open the dictionary sketch file: " << cur_dict_file << endl;
       exit(1);
     }
-    size_t read_index_arr = fread(indexArr, sizeof(uint32_t), totalHashNumber, fp_dict);
-    if(read_hash_size != 1 || read_total_index != 1 || read_sketch_size_arr != hashSize || read_index_arr != totalHashNumber){
-      cerr << "ERROR: compute_kssd_mst(), error read hash_size, total_index, sketch_size_arr, index_arr" << endl;
+    uint64_t total_size = 0;
+    for(size_t i = 0; i < hash_number; i++) total_size += hash_size_arr[i];
+    uint32_t* dict_buf = new uint32_t[total_size];
+    size_t read_dict = fread(dict_buf, sizeof(uint32_t), total_size, fp_dict);
+    fclose(fp_dict);
+    if(read_dict != total_size){
+      cerr << "ERROR: compute_kssd_mst(), dict read size mismatch (32-bit)" << endl;
       exit(1);
     }
-    fclose(fp_dict);
+    size_t off = 0;
+    for(size_t i = 0; i < hash_number; i++){
+      size_t len = hash_size_arr[i];
+      hash_map_32_loaded[hash_arr[i]] = vector<uint32_t>(dict_buf + off, dict_buf + off + len);
+      off += len;
+    }
+    delete[] dict_buf;
+    delete[] hash_arr;
+    delete[] hash_size_arr;
+    hash_map_32_ptr = &hash_map_32_loaded;
   }
 
   //int denseSpan = 10;
@@ -482,18 +461,15 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
             __builtin_prefetch(&hash_arr_i[j + 1], 0, 1);
           }
           
-          if(__builtin_expect(sketchSizeArr[hash] <= 1, 0)) continue;
+          if(__builtin_expect(hash_map_32_ptr == nullptr, 0)) continue;
+          auto it = hash_map_32_ptr->find(hash);
+          if(__builtin_expect(it == hash_map_32_ptr->end(), 1)) continue;
+          if(__builtin_expect(it->second.size() <= 1, 0)) continue;
     
-          size_t start = (hash > 0) ? offset[hash-1] : 0;
-          size_t end   = offset[hash];
-          
-          // Prefetch index array region
-          if(__builtin_expect(end > start, 1)){
-            __builtin_prefetch(&indexArr[start], 0, 1);
-          }
-    
-          for(size_t k = start; k < end; k++){
-            int cur = (int)indexArr[k];
+          const auto& vec = it->second;
+          const size_t vec_size = vec.size();
+          for(size_t k = 0; k < vec_size; k++){
+            int cur = (int)vec[k];
             if(__builtin_expect(stamp[cur] != ep, 1)){
               stamp[cur] = ep;
               inter[cur] = 1;
@@ -685,17 +661,15 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
             __builtin_prefetch(&hash_arr_i[jj + 1], 0, 1);
           }
           
-          if(__builtin_expect(sketchSizeArr[hash] <= 1, 0)) continue;
+          if(__builtin_expect(hash_map_32_ptr == nullptr, 0)) continue;
+          auto it = hash_map_32_ptr->find(hash);
+          if(__builtin_expect(it == hash_map_32_ptr->end(), 1)) continue;
+          if(__builtin_expect(it->second.size() <= 1, 0)) continue;
       
-          size_t start = (hash > 0) ? offset[hash-1] : 0;
-          size_t end   = offset[hash];
-          
-          if(__builtin_expect(end > start, 1)){
-            __builtin_prefetch(&indexArr[start], 0, 1);
-          }
-      
-          for(size_t k = start; k < end; k++){
-            int cur = (int)indexArr[k];
+          const auto& vec = it->second;
+          const size_t vec_size = vec.size();
+          for(size_t k = 0; k < vec_size; k++){
+            int cur = (int)vec[k];
             if(__builtin_expect(stamp[cur] != ep, 1)){
               stamp[cur] = ep;
               inter[cur] = 1;

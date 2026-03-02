@@ -60,19 +60,17 @@ struct KssdInvertedIndex{
 	bool use64;
 	// For use64 case: hash_map from hash value to list of genome IDs
 	phmap::flat_hash_map<uint64_t, vector<uint32_t>> hash_map_64;
-	// For non-use64 case: vector of vectors indexed by hash value
-	vector<vector<uint32_t>> hash_map_32;
-	size_t hashSize;  // Only used for non-use64 case
+	// For non-use64 case: phmap (sparse, same as use64) to save memory
+	phmap::flat_hash_map<uint32_t, vector<uint32_t>> hash_map_32;
 	
-	KssdInvertedIndex() : use64(false), hashSize(0) {}
+	KssdInvertedIndex() : use64(false) {}
 	
-	void init(bool use64_val, size_t hashSize_val = 0) {
+	void init(bool use64_val, size_t /* hashSize_val unused for phmap */ = 0) {
 		use64 = use64_val;
 		if(use64) {
 			hash_map_64.reserve(1000000);  // Pre-allocate
 		} else {
-			hashSize = hashSize_val;
-			hash_map_32.resize(hashSize);
+			hash_map_32.reserve(1000000);  // Pre-allocate, sparse
 		}
 	}
 	
@@ -85,11 +83,9 @@ struct KssdInvertedIndex{
 			}
 		} else {
 			uint32_t hash = (uint32_t)hash_val;
-			if(hash < hash_map_32.size()) {
-				#pragma omp critical
-				{
-					hash_map_32[hash].push_back(genome_id);
-				}
+			#pragma omp critical
+			{
+				hash_map_32[hash].push_back(genome_id);
 			}
 		}
 	}

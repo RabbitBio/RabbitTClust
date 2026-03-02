@@ -1225,9 +1225,7 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 					} else {
 						for(size_t j = 0; j < sketches[actual_id].hash32_arr.size(); j++){
 							uint32_t hash = sketches[actual_id].hash32_arr[j];
-							if(hash < inverted_index->hash_map_32.size()) {
-								inverted_index->hash_map_32[hash].push_back(actual_id);
-							}
+							inverted_index->hash_map_32[hash].push_back(actual_id);
 						}
 					}
 				}
@@ -1324,53 +1322,54 @@ void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters&
 		#endif
 	}
 	else{
-		size_t hashSize = 1LLU << (4 * (half_k - drlevel));
-		vector<vector<uint32_t>> hashMapId;
-		for(size_t i = 0; i < hashSize; i++){
-			hashMapId.push_back(vector<uint32_t>());
-		}
-		uint32_t* offsetArr = (uint32_t*)calloc(hashSize, sizeof(uint32_t));
-
-		cerr << "the hashSize is: " << hashSize << endl;
+		// 32-bit: use phmap (sparse) and write same format as transSketchesFromIndex
+		phmap::flat_hash_map<uint32_t, vector<uint32_t>> hash_map_arr;
 		for(size_t i = 0; i < sketches.size(); i++){
-			#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 			for(size_t j = 0; j < sketches[i].hash32_arr.size(); j++){
-				uint32_t hash = sketches[i].hash32_arr[j];
-				hashMapId[hash].push_back(i);
+				uint32_t cur_hash = sketches[i].hash32_arr[j];
+				hash_map_arr[cur_hash].push_back(i);
 			}
 		}
 		double tt0 = get_sec();
 		#ifdef Timer_inner
-		cerr << "the time of generate the idx by multiple threads are: " << tt0 - t0 << endl;
+		cerr << "the time of generate the idx (32-bit phmap) are: " << tt0 - t0 << endl;
 		#endif
-
+		size_t hash_number = hash_map_arr.size();
+		cerr << "the hash_number (32-bit) is: " << hash_number << endl;
+		size_t total_size = 0;
+		uint32_t* hash_arr = (uint32_t*)malloc(hash_number * sizeof(uint32_t));
+		uint32_t* hash_size_arr = (uint32_t*)malloc(hash_number * sizeof(uint32_t));
 		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
-		FILE * fp0 = fopen(cur_dict_file.c_str(), "w+");
-		uint64_t totalIndex = 0;
-		for(size_t hash = 0; hash < hashSize; hash++){
-			offsetArr[hash] = 0;
-			if(hashMapId[hash].size() != 0){
-				fwrite(hashMapId[hash].data(), sizeof(uint32_t), hashMapId[hash].size(), fp0);
-				totalIndex += hashMapId[hash].size();
-				offsetArr[hash] = hashMapId[hash].size();
-			}
+		FILE* fp_dict = fopen(cur_dict_file.c_str(), "w+");
+		if(!fp_dict){
+			cerr << "ERROR: transSketches, cannot open dictFile: " << cur_dict_file << endl;
+			exit(1);
 		}
-		fclose(fp0);
-		
-		double t1 = get_sec();
-		#ifdef Timer_inner
-		cerr << "the time of merge multiple idx into final hashMap is: " << t1 - tt0 << endl;
-		#endif
-
+		size_t cur_id = 0;
+		for(const auto& x : hash_map_arr){
+			hash_arr[cur_id] = x.first;
+			fwrite(x.second.data(), sizeof(uint32_t), x.second.size(), fp_dict);
+			hash_size_arr[cur_id] = x.second.size();
+			total_size += x.second.size();
+			cur_id++;
+		}
+		cerr << "the total size (32-bit) is: " << total_size << endl;
+		fclose(fp_dict);
 		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
-		FILE * fp1 = fopen(cur_index_file.c_str(), "w+");
-		fwrite(&hashSize, sizeof(size_t), 1, fp1);
-		fwrite(&totalIndex, sizeof(uint64_t), 1, fp1);
-		fwrite(offsetArr, sizeof(uint32_t), hashSize, fp1);
+		FILE* fp_index = fopen(cur_index_file.c_str(), "w+");
+		if(!fp_index){
+			cerr << "ERROR: transSketches, cannot open indexFile: " << cur_index_file << endl;
+			exit(1);
+		}
+		fwrite(&hash_number, sizeof(size_t), 1, fp_index);
+		fwrite(hash_arr, sizeof(uint32_t), hash_number, fp_index);
+		fwrite(hash_size_arr, sizeof(uint32_t), hash_number, fp_index);
+		fclose(fp_index);
+		free(hash_arr);
+		free(hash_size_arr);
 		double t2 = get_sec();
-		fclose(fp1);
 		#ifdef Timer_inner
-		cerr << "the time of write output file is: " << t2 - t1 << endl;
+		cerr << "the time of write output file (32-bit) is: " << t2 - tt0 << endl;
 		#endif
 	}
 
@@ -1423,38 +1422,44 @@ void transSketchesFromIndex(const KssdInvertedIndex& inverted_index, const KssdP
 		free(hash_size_arr);
 	}
 	else{
-		const auto& hashMapId = inverted_index.hash_map_32;
-		size_t hashSize = inverted_index.hashSize;
-		uint32_t* offsetArr = (uint32_t*)calloc(hashSize, sizeof(uint32_t));
+		// 32-bit: write sparse format (like 64-bit) for phmap
+		const auto& hash_map_arr = inverted_index.hash_map_32;
+		size_t hash_number = hash_map_arr.size();
+		cerr << "the hash_number (32-bit) is: " << hash_number << endl;
+		
+		size_t total_size = 0;
+		uint32_t* hash_arr = (uint32_t*)malloc(hash_number * sizeof(uint32_t));
+		uint32_t* hash_size_arr = (uint32_t*)malloc(hash_number * sizeof(uint32_t));
 		
 		string cur_dict_file = folder_path + '/' + "kssd.sketch.dict";
-		FILE * fp0 = fopen(cur_dict_file.c_str(), "w+");
-		if(!fp0){
+		FILE* fp_dict = fopen(cur_dict_file.c_str(), "w+");
+		if(!fp_dict){
 			cerr << "ERROR: transSketchesFromIndex, cannot open dictFile: " << cur_dict_file << endl;
 			exit(1);
 		}
-		uint64_t totalIndex = 0;
-		for(size_t hash = 0; hash < hashSize; hash++){
-			offsetArr[hash] = 0;
-			if(hashMapId[hash].size() != 0){
-				fwrite(hashMapId[hash].data(), sizeof(uint32_t), hashMapId[hash].size(), fp0);
-				totalIndex += hashMapId[hash].size();
-				offsetArr[hash] = hashMapId[hash].size();
-			}
+		size_t cur_id = 0;
+		for(const auto& x : hash_map_arr){
+			hash_arr[cur_id] = x.first;
+			fwrite(x.second.data(), sizeof(uint32_t), x.second.size(), fp_dict);
+			hash_size_arr[cur_id] = x.second.size();
+			total_size += x.second.size();
+			cur_id++;
 		}
-		fclose(fp0);
+		cerr << "the total size (32-bit) is: " << total_size << endl;
+		fclose(fp_dict);
 		
 		string cur_index_file = folder_path + '/' + "kssd.sketch.index";
-		FILE * fp1 = fopen(cur_index_file.c_str(), "w+");
-		if(!fp1){
+		FILE* fp_index = fopen(cur_index_file.c_str(), "w+");
+		if(!fp_index){
 			cerr << "ERROR: transSketchesFromIndex, cannot open indexFile: " << cur_index_file << endl;
 			exit(1);
 		}
-		fwrite(&hashSize, sizeof(size_t), 1, fp1);
-		fwrite(&totalIndex, sizeof(uint64_t), 1, fp1);
-		fwrite(offsetArr, sizeof(uint32_t), hashSize, fp1);
-		fclose(fp1);
-		free(offsetArr);
+		fwrite(&hash_number, sizeof(size_t), 1, fp_index);
+		fwrite(hash_arr, sizeof(uint32_t), hash_number, fp_index);
+		fwrite(hash_size_arr, sizeof(uint32_t), hash_number, fp_index);
+		fclose(fp_index);
+		free(hash_arr);
+		free(hash_size_arr);
 	}
 	
 	double t1 = get_sec();
