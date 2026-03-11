@@ -529,7 +529,93 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 		system(command.c_str());
 		saveKssdSketches(final_sketches, pre_info, new_folder_path, sketch_by_file);
 	}
-	transSketches(final_sketches, append_info, new_folder_path, threads);
+
+	bool use64 = append_info.half_k - append_info.drlevel > 8;
+	KssdInvertedIndex inverted_index;
+	inverted_index.init(use64);
+
+	cerr << "-----loading pre-existing KSSD inverted index from: " << folder_path << endl;
+	double t_idx0 = get_sec();
+	string pre_index_file = folder_path + '/' + "kssd.sketch.index";
+	string pre_dict_file = folder_path + '/' + "kssd.sketch.dict";
+	if(use64){
+		FILE* fp_index = fopen(pre_index_file.c_str(), "rb");
+		if(!fp_index){ cerr << "ERROR: append_clust_mst_fast(), cannot open index file: " << pre_index_file << endl; exit(1); }
+		size_t hash_number;
+		fread(&hash_number, sizeof(size_t), 1, fp_index);
+		uint64_t* hash_arr = new uint64_t[hash_number];
+		uint32_t* hash_size_arr = new uint32_t[hash_number];
+		fread(hash_arr, sizeof(uint64_t), hash_number, fp_index);
+		fread(hash_size_arr, sizeof(uint32_t), hash_number, fp_index);
+		fclose(fp_index);
+
+		FILE* fp_dict = fopen(pre_dict_file.c_str(), "rb");
+		if(!fp_dict){ cerr << "ERROR: append_clust_mst_fast(), cannot open dict file: " << pre_dict_file << endl; exit(1); }
+		uint64_t total_size = 0;
+		for(size_t i = 0; i < hash_number; i++) total_size += hash_size_arr[i];
+		uint32_t* dict_buf = new uint32_t[total_size];
+		fread(dict_buf, sizeof(uint32_t), total_size, fp_dict);
+		fclose(fp_dict);
+
+		inverted_index.hash_map_64.reserve(hash_number);
+		size_t off = 0;
+		for(size_t i = 0; i < hash_number; i++){
+			size_t len = hash_size_arr[i];
+			inverted_index.hash_map_64[hash_arr[i]] = vector<uint32_t>(dict_buf + off, dict_buf + off + len);
+			off += len;
+		}
+		delete[] dict_buf;
+		delete[] hash_arr;
+		delete[] hash_size_arr;
+	} else {
+		FILE* fp_index = fopen(pre_index_file.c_str(), "rb");
+		if(!fp_index){ cerr << "ERROR: append_clust_mst_fast(), cannot open index file: " << pre_index_file << endl; exit(1); }
+		size_t hash_number;
+		fread(&hash_number, sizeof(size_t), 1, fp_index);
+		uint32_t* hash_arr = new uint32_t[hash_number];
+		uint32_t* hash_size_arr = new uint32_t[hash_number];
+		fread(hash_arr, sizeof(uint32_t), hash_number, fp_index);
+		fread(hash_size_arr, sizeof(uint32_t), hash_number, fp_index);
+		fclose(fp_index);
+
+		FILE* fp_dict = fopen(pre_dict_file.c_str(), "rb");
+		if(!fp_dict){ cerr << "ERROR: append_clust_mst_fast(), cannot open dict file: " << pre_dict_file << endl; exit(1); }
+		uint64_t total_size = 0;
+		for(size_t i = 0; i < hash_number; i++) total_size += hash_size_arr[i];
+		uint32_t* dict_buf = new uint32_t[total_size];
+		fread(dict_buf, sizeof(uint32_t), total_size, fp_dict);
+		fclose(fp_dict);
+
+		inverted_index.hash_map_32.reserve(hash_number);
+		size_t off = 0;
+		for(size_t i = 0; i < hash_number; i++){
+			size_t len = hash_size_arr[i];
+			inverted_index.hash_map_32[hash_arr[i]] = vector<uint32_t>(dict_buf + off, dict_buf + off + len);
+			off += len;
+		}
+		delete[] dict_buf;
+		delete[] hash_arr;
+		delete[] hash_size_arr;
+	}
+	double t_idx1 = get_sec();
+	cerr << "-----loaded pre-existing inverted index in " << t_idx1 - t_idx0 << " seconds" << endl;
+
+	cerr << "-----appending " << final_sketches.size() - pre_sketch_size << " new genomes to inverted index..." << endl;
+	if(use64){
+		for(size_t i = pre_sketch_size; i < final_sketches.size(); i++){
+			for(size_t j = 0; j < final_sketches[i].hash64_arr.size(); j++){
+				inverted_index.hash_map_64[final_sketches[i].hash64_arr[j]].push_back((uint32_t)i);
+			}
+		}
+	} else {
+		for(size_t i = pre_sketch_size; i < final_sketches.size(); i++){
+			for(size_t j = 0; j < final_sketches[i].hash32_arr.size(); j++){
+				inverted_index.hash_map_32[final_sketches[i].hash32_arr[j]].push_back((uint32_t)i);
+			}
+		}
+	}
+	double t_idx2 = get_sec();
+	cerr << "-----appended new genomes to inverted index in " << t_idx2 - t_idx1 << " seconds" << endl;
 
 	int ** pre_dense_arr;
 	uint64_t* pre_ani_arr;
@@ -542,7 +628,7 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	int ** dense_arr;
 	int dense_span = DENSE_SPAN;
 	uint64_t* ani_arr;
-	vector<EdgeInfo> append_mst = compute_kssd_mst(final_sketches, append_info, new_folder_path, pre_sketch_size, no_dense, isContainment, threads, dense_arr, dense_span, ani_arr, threshold);
+	vector<EdgeInfo> append_mst = compute_kssd_mst(final_sketches, append_info, new_folder_path, pre_sketch_size, no_dense, isContainment, threads, dense_arr, dense_span, ani_arr, threshold, &inverted_index);
 	vector<EdgeInfo> final_graph;
 	final_graph.insert(final_graph.end(), pre_mst.begin(), pre_mst.end());
 	final_graph.insert(final_graph.end(), append_mst.begin(), append_mst.end());
@@ -579,6 +665,7 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 	cerr << "-----the cluster number of: " << output_file << " is: " << tmpClust.size() << endl;
 	if(!no_save){
 		saveKssdMST(final_sketches, final_mst, new_folder_path, sketch_by_file);
+		transSketchesFromIndex(inverted_index, append_info, new_folder_path);
 	}
 
 	if(!no_dense){
@@ -687,52 +774,61 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 	int dense_span = DENSE_SPAN;
 	uint64_t* ani_arr;
 	
-	// Use inverted index optimization for MinHash MST append
 	vector<EdgeInfo> append_mst;
 	if(sketch_func_id_0 == 0 && final_sketches.size() > 0 && final_sketches[0].minHash != nullptr) {
-		// Build inverted index from all final_sketches (pre + append) using thread-local indices
 		MinHashInvertedIndex inverted_index;
-		cerr << "-----building MinHash inverted index for append MST computation..." << endl;
-		
-		// Use thread-local indices to reduce lock contention
-		vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
-		
-		#pragma omp parallel num_threads(threads)
-		{
-			int tid = omp_get_thread_num();
-			auto& local_index = thread_local_indices[tid];
-			
-			#pragma omp for schedule(dynamic, 100)
-			for(size_t i = 0; i < final_sketches.size(); i++){
+		double t_idx0 = get_sec();
+
+		bool loaded = loadMinHashIndex(folder_path, inverted_index);
+		if(loaded){
+			double t_idx1 = get_sec();
+			cerr << "-----loaded pre-existing MinHash inverted index in " << t_idx1 - t_idx0 << " seconds" << endl;
+			cerr << "-----appending " << final_sketches.size() - pre_sketch_size << " new genomes to MinHash inverted index..." << endl;
+			for(size_t i = pre_sketch_size; i < final_sketches.size(); i++){
 				if(final_sketches[i].minHash != nullptr) {
-					final_sketches[i].id = i;  // Ensure ID matches position
 					vector<uint64_t> hashes = final_sketches[i].minHash->storeMinHashes();
 					for(uint64_t hash : hashes) {
-						local_index[hash].push_back(i);
+						inverted_index.hash_map[hash].push_back((uint32_t)i);
 					}
 				}
 			}
-		}
-		
-		// Merge thread-local indices (no lock needed here)
-		cerr << "-----merging thread-local indices..." << endl;
-		for(int tid = 0; tid < threads; tid++){
-			for(auto& entry : thread_local_indices[tid]){
-				uint64_t hash = entry.first;
-				auto& seq_ids = entry.second;
-				inverted_index.hash_map[hash].insert(
-					inverted_index.hash_map[hash].end(), 
-					seq_ids.begin(), seq_ids.end()
-				);
+			double t_idx2 = get_sec();
+			cerr << "-----appended new genomes to MinHash inverted index in " << t_idx2 - t_idx1 << " seconds" << endl;
+		} else {
+			cerr << "-----no pre-existing MinHash inverted index found, building from scratch..." << endl;
+			vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
+			#pragma omp parallel num_threads(threads)
+			{
+				int tid = omp_get_thread_num();
+				auto& local_index = thread_local_indices[tid];
+				#pragma omp for schedule(dynamic, 100)
+				for(size_t i = 0; i < final_sketches.size(); i++){
+					if(final_sketches[i].minHash != nullptr) {
+						final_sketches[i].id = i;
+						vector<uint64_t> hashes = final_sketches[i].minHash->storeMinHashes();
+						for(uint64_t hash : hashes) {
+							local_index[hash].push_back(i);
+						}
+					}
+				}
 			}
+			for(int tid = 0; tid < threads; tid++){
+				for(auto& entry : thread_local_indices[tid]){
+					inverted_index.hash_map[entry.first].insert(
+						inverted_index.hash_map[entry.first].end(),
+						entry.second.begin(), entry.second.end()
+					);
+				}
+			}
+			cerr << "-----MinHash inverted index built: " << inverted_index.hash_map.size() << " unique hashes" << endl;
 		}
-		
-		cerr << "-----MinHash inverted index built: " << inverted_index.hash_map.size() << " unique hashes" << endl;
-		
-		// Use compute_minhash_mst with start_index=pre_sketch_size (only compute edges for new sketches)
+
 		append_mst = compute_minhash_mst(final_sketches, pre_sketch_size, no_dense, is_containment, threads, dense_arr, dense_span, ani_arr, threshold, kmer_size, &inverted_index);
+
+		if(!no_save){
+			saveMinHashIndex(inverted_index, new_folder_path);
+		}
 	} else {
-		// Fallback to traditional modifyMST for non-MinHash
 		append_mst = modifyMST(final_sketches, pre_sketch_size, sketch_func_id_0, threads, no_dense, dense_arr, dense_span, ani_arr);
 	}
 	vector<EdgeInfo> final_graph;
@@ -1355,9 +1451,12 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		if(sketchFunc == "MinHash")	sketch_func_id = 0;
 		else if(sketchFunc == "KSSD") sketch_func_id = 1;
 
-		compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, isSave, threads, nullptr);
+		MinHashInvertedIndex minhash_index;
+		MinHashInvertedIndex* idx_ptr = (sketch_func_id == 0) ? &minhash_index : nullptr;
 
-		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_phylip_tree, is_nexus_tree, is_linkage_matrix, is_auto_threshold, is_stability, no_dense, folder_path, sketch_func_id, threshold, isSave, threads, use_inverted_index, save_rep_index);
+		compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, isSave, threads, idx_ptr);
+
+		compute_clusters(sketches, sketchByFile, outputFile, is_newick_tree, is_phylip_tree, is_nexus_tree, is_linkage_matrix, is_auto_threshold, is_stability, no_dense, folder_path, sketch_func_id, threshold, isSave, threads, use_inverted_index, save_rep_index, idx_ptr);
 	}
 
 	bool tune_kssd_parameters(bool sketchByFile, bool isSetKmer, string inputFile, int threads, int minLen, bool& isContainment, int& kmerSize, double& threshold, int &drlevel){
@@ -1912,7 +2011,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		}
 	}
 
-	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index, bool save_rep_index){
+	void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index, bool save_rep_index, MinHashInvertedIndex* inverted_index){
 		vector<vector<int>> cluster;
 		double t2 = get_sec();
 #ifdef GREEDY_CLUST
@@ -1954,62 +2053,63 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		// Use inverted index optimization for MinHash MST
 		vector<EdgeInfo> mst;
 		if(sketch_func_id == 0 && sketches.size() > 0 && sketches[0].minHash != nullptr) {
-			// Read kmerSize from sketch parameters file (more reliable than from sketch object)
-			int kmer_size_from_file = 21;  // Default for MinHash
+			int kmer_size_from_file = 21;
 			int sketch_func_id_check, contain_compress, sketch_size, half_k, half_subk, drlevel;
 			bool is_containment_from_file;
 			read_sketch_parameters(folder_path, sketch_func_id_check, kmer_size_from_file, is_containment_from_file, contain_compress, sketch_size, half_k, half_subk, drlevel);
 			
-			// Build inverted index from sketches using thread-local indices (like KSSD)
-			MinHashInvertedIndex inverted_index;
-			cerr << "-----building MinHash inverted index for MST computation..." << endl;
+			MinHashInvertedIndex local_index;
+			MinHashInvertedIndex* idx_ptr = inverted_index;
 			
-			// Use thread-local indices to reduce lock contention
-			vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
-			
-			#pragma omp parallel num_threads(threads)
-			{
-				int tid = omp_get_thread_num();
-				auto& local_index = thread_local_indices[tid];
+			if(idx_ptr == nullptr) {
+				// No pre-built index: build from scratch using thread-local indices
+				cerr << "-----building MinHash inverted index for MST computation..." << endl;
 				
-				#pragma omp for schedule(dynamic, 100)
-				for(size_t i = 0; i < sketches.size(); i++){
-					if(sketches[i].minHash != nullptr) {
-						sketches[i].id = i;  // Ensure ID matches position
-						vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
-						for(uint64_t hash : hashes) {
-							local_index[hash].push_back(i);
+				vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
+				
+				#pragma omp parallel num_threads(threads)
+				{
+					int tid = omp_get_thread_num();
+					auto& tl_index = thread_local_indices[tid];
+					
+					#pragma omp for schedule(dynamic, 100)
+					for(size_t i = 0; i < sketches.size(); i++){
+						if(sketches[i].minHash != nullptr) {
+							sketches[i].id = i;
+							vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
+							for(uint64_t hash : hashes) {
+								tl_index[hash].push_back(i);
+							}
 						}
 					}
 				}
-			}
-			
-			// Merge thread-local indices (no lock needed here)
-			cerr << "-----merging thread-local indices..." << endl;
-			for(int tid = 0; tid < threads; tid++){
-				for(auto& entry : thread_local_indices[tid]){
-					uint64_t hash = entry.first;
-					auto& seq_ids = entry.second;
-					inverted_index.hash_map[hash].insert(
-						inverted_index.hash_map[hash].end(), 
-						seq_ids.begin(), seq_ids.end()
-					);
+				
+				cerr << "-----merging thread-local indices..." << endl;
+				for(int tid = 0; tid < threads; tid++){
+					for(auto& entry : thread_local_indices[tid]){
+						local_index.hash_map[entry.first].insert(
+							local_index.hash_map[entry.first].end(), 
+							entry.second.begin(), entry.second.end()
+						);
+					}
 				}
+				idx_ptr = &local_index;
 			}
 			
-			cerr << "-----MinHash inverted index built: " << inverted_index.hash_map.size() << " unique hashes" << endl;
+			cerr << "-----MinHash inverted index: " << idx_ptr->hash_map.size() << " unique hashes" << endl;
 			
-			// Use kmerSize from file (default 21 for MinHash), fallback to sketch object if file read fails
 			int kmer_size = kmer_size_from_file;
 			bool is_containment = is_containment_from_file;
 			if(kmer_size <= 0) {
-				// Fallback: get from sketch object
 				kmer_size = sketches[0].minHash->getKmerSize();
 				is_containment = sketches[0].isContainment;
 			}
 			
-			// Use compute_minhash_mst with inverted index
-			mst = compute_minhash_mst(sketches, 0, no_dense, is_containment, threads, denseArr, denseSpan, aniArr, threshold, kmer_size, &inverted_index);
+			mst = compute_minhash_mst(sketches, 0, no_dense, is_containment, threads, denseArr, denseSpan, aniArr, threshold, kmer_size, idx_ptr);
+			
+			if(isSave){
+				saveMinHashIndex(*idx_ptr, folder_path);
+			}
 		} else {
 			// Fallback to traditional modifyMST for non-MinHash or when MinHash is not available
 			mst = modifyMST(sketches, 0, sketch_func_id, threads, no_dense, denseArr, denseSpan, aniArr);

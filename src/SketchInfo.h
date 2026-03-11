@@ -121,6 +121,8 @@ bool sketchFileWithKssd(const string inputFile, const uint64_t minLen, int kmerS
 bool sketchSequencesWithKssd(const string inputFile, const int minLen, const int kmerSize, const int drlevel, vector<KssdSketchInfo>& sketches, KssdParameters& info, int threads, KssdInvertedIndex* inverted_index = nullptr);
 void transSketches(const vector<KssdSketchInfo>& sketches, const KssdParameters& info, const string folder_path, int numThreads);
 void transSketchesFromIndex(const KssdInvertedIndex& inverted_index, const KssdParameters& info, const string folder_path);
+void saveMinHashIndex(const MinHashInvertedIndex& inverted_index, const string folder_path);
+bool loadMinHashIndex(const string folder_path, MinHashInvertedIndex& inverted_index);
 
 
 

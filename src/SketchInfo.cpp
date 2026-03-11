@@ -841,22 +841,23 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen,
 	gzclose(fp1);
 	kseq_destroy(ks1);
 
-	// Build inverted index after merging all sketches (for RABBIT_FX case)
 	if(inverted_index != nullptr && sketchFunc == "MinHash") {
-		#pragma omp parallel for num_threads(threads) schedule(dynamic)
+		// Ensure IDs match positions and build index for RABBIT_FX path
+		// (non-RABBIT_FX path already built inline during the while loop)
 		for(size_t i = 0; i < sketches.size(); i++){
+			sketches[i].id = i;
+#ifdef RABBIT_FX
 			if(sketches[i].minHash != nullptr) {
-				sketches[i].id = i;  // Ensure ID matches position
 				vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
 				for(uint64_t hash : hashes) {
-					inverted_index->insert_hash_safe(hash, i);
+					inverted_index->hash_map[hash].push_back(i);
 				}
 			}
+#endif
 		}
+	} else {
+		sort(sketches.begin(), sketches.end(), cmpSeqSize);
 	}
-
-	//sort(sketches.begin(), sketches.end(), cmpSketch);
-	sort(sketches.begin(), sketches.end(), cmpSeqSize);
 
 	return true;
 }
@@ -964,12 +965,10 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 				tmpSketchInfo.id = actual_id;
 				sketches.push_back(tmpSketchInfo);
 				
-				// Insert into inverted index while generating sketch (pipeline optimization)
-				// Do this inside critical section to ensure thread safety and correct ID
 				if(inverted_index != nullptr && tmpSketchInfo.minHash != nullptr) {
 					vector<uint64_t> hashes = tmpSketchInfo.minHash->storeMinHashes();
 					for(uint64_t hash : hashes) {
-						inverted_index->insert_hash_safe(hash, actual_id);
+						inverted_index->hash_map[hash].push_back(actual_id);
 					}
 				}
 			}
@@ -985,10 +984,9 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 		for(size_t i = 0; i < sketches.size(); i++){
 			sketches[i].id = i;
 		}
+	} else {
+		sort(sketches.begin(), sketches.end(), cmpGenomeSize);
 	}
-
-	//sort(sketches.begin(), sketches.end(), cmpSketch);
-	sort(sketches.begin(), sketches.end(), cmpGenomeSize);
 
 	return true;
 }
@@ -1468,7 +1466,89 @@ void transSketchesFromIndex(const KssdInvertedIndex& inverted_index, const KssdP
 	#endif
 }
 
+void saveMinHashIndex(const MinHashInvertedIndex& inverted_index, const string folder_path){
+	double t0 = get_sec();
+	const auto& hash_map = inverted_index.hash_map;
+	size_t hash_number = hash_map.size();
+	cerr << "-----saving MinHash inverted index: " << hash_number << " unique hashes" << endl;
 
+	size_t total_size = 0;
+	uint64_t* hash_arr = (uint64_t*)malloc(hash_number * sizeof(uint64_t));
+	uint32_t* hash_size_arr = (uint32_t*)malloc(hash_number * sizeof(uint32_t));
+
+	string cur_dict_file = folder_path + '/' + "minhash.sketch.dict";
+	FILE* fp_dict = fopen(cur_dict_file.c_str(), "w+");
+	if(!fp_dict){
+		cerr << "ERROR: saveMinHashIndex, cannot open dictFile: " << cur_dict_file << endl;
+		exit(1);
+	}
+	size_t cur_id = 0;
+	for(const auto& x : hash_map){
+		hash_arr[cur_id] = x.first;
+		fwrite(x.second.data(), sizeof(uint32_t), x.second.size(), fp_dict);
+		hash_size_arr[cur_id] = x.second.size();
+		total_size += x.second.size();
+		cur_id++;
+	}
+	fclose(fp_dict);
+
+	string cur_index_file = folder_path + '/' + "minhash.sketch.index";
+	FILE* fp_index = fopen(cur_index_file.c_str(), "w+");
+	if(!fp_index){
+		cerr << "ERROR: saveMinHashIndex, cannot open indexFile: " << cur_index_file << endl;
+		exit(1);
+	}
+	fwrite(&hash_number, sizeof(size_t), 1, fp_index);
+	fwrite(hash_arr, sizeof(uint64_t), hash_number, fp_index);
+	fwrite(hash_size_arr, sizeof(uint32_t), hash_number, fp_index);
+	fclose(fp_index);
+	free(hash_arr);
+	free(hash_size_arr);
+
+	double t1 = get_sec();
+	cerr << "-----saved MinHash inverted index (" << hash_number << " hashes, " << total_size << " entries) in " << t1 - t0 << " seconds" << endl;
+}
+
+bool loadMinHashIndex(const string folder_path, MinHashInvertedIndex& inverted_index){
+	string index_file = folder_path + '/' + "minhash.sketch.index";
+	string dict_file = folder_path + '/' + "minhash.sketch.dict";
+	FILE* fp_index = fopen(index_file.c_str(), "rb");
+	if(!fp_index) return false;
+
+	size_t hash_number;
+	fread(&hash_number, sizeof(size_t), 1, fp_index);
+	uint64_t* hash_arr = new uint64_t[hash_number];
+	uint32_t* hash_size_arr = new uint32_t[hash_number];
+	fread(hash_arr, sizeof(uint64_t), hash_number, fp_index);
+	fread(hash_size_arr, sizeof(uint32_t), hash_number, fp_index);
+	fclose(fp_index);
+
+	FILE* fp_dict = fopen(dict_file.c_str(), "rb");
+	if(!fp_dict){
+		delete[] hash_arr;
+		delete[] hash_size_arr;
+		return false;
+	}
+	uint64_t total_size = 0;
+	for(size_t i = 0; i < hash_number; i++) total_size += hash_size_arr[i];
+	uint32_t* dict_buf = new uint32_t[total_size];
+	fread(dict_buf, sizeof(uint32_t), total_size, fp_dict);
+	fclose(fp_dict);
+
+	inverted_index.hash_map.reserve(hash_number);
+	size_t off = 0;
+	for(size_t i = 0; i < hash_number; i++){
+		size_t len = hash_size_arr[i];
+		inverted_index.hash_map[hash_arr[i]] = vector<uint32_t>(dict_buf + off, dict_buf + off + len);
+		off += len;
+	}
+	delete[] dict_buf;
+	delete[] hash_arr;
+	delete[] hash_size_arr;
+
+	cerr << "-----loaded MinHash inverted index: " << hash_number << " unique hashes, " << total_size << " entries" << endl;
+	return true;
+}
 
 
 

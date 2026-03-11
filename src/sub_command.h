@@ -21,7 +21,7 @@ using namespace std;
 
 void compute_sketches(vector<SketchInfo>& sketches, string inputFile, string& folder_path, bool sketchByFile, int minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, bool isSave, int threads, MinHashInvertedIndex* inverted_index = nullptr);
 
-void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index, bool save_rep_index);
+void compute_clusters(vector<SketchInfo>& sketches, bool sketchByFile, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, string folder_path, int sketch_func_id, double threshold, bool isSave, int threads, bool use_inverted_index, bool save_rep_index, MinHashInvertedIndex* inverted_index = nullptr);
 
 void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads, bool use_inverted_index, bool save_rep_index);
 
