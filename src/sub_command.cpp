@@ -4,6 +4,8 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <cmath>
+#include <limits>
 #include <unordered_set>
 #include <sys/stat.h>  // For stat()
 #include <omp.h>  // For OpenMP functions
@@ -486,6 +488,262 @@ void repdb_stats(string db_path) {
 	KssdClusterState state;
 	if (!state.load_repdb(db_path)) {
 		cerr << "ERROR: Failed to load RepDB from: " << db_path << endl;
+		exit(1);
+	}
+	state.print_stats(std::cout);
+}
+
+// =====================================================================
+// MinHash RepDB workflow functions
+// =====================================================================
+
+void mh_repdb_build_from_sketch(string folder_path, string db_path, string output_file, double threshold, int threads, bool use_inverted_index) {
+	vector<SketchInfo> sketches;
+	int sketch_func_id;
+	bool sketchByFile = loadSketches(folder_path, threads, sketches, sketch_func_id);
+
+	int kmer_size = sketches[0].minHash->getKmerSize();
+	int sketch_size = sketches[0].minHash->getSketchSize();
+	bool is_containment = sketches[0].isContainment;
+
+	cerr << "===== MinHash RepDB Build (from pre-sketched) =====" << endl;
+	cerr << "  Genomes:       " << sketches.size() << endl;
+	cerr << "  Threshold:     " << threshold << endl;
+	cerr << "  Kmer size:     " << kmer_size << endl;
+	cerr << "  Sketch size:   " << sketch_size << endl;
+	cerr << "  Containment:   " << (is_containment ? "yes" : "no") << endl;
+
+	MinHashClusterState state = MinHashInitialClusterWithState(sketches, threshold, threads, kmer_size, sketch_size, is_containment);
+
+	state.rep_hash_arrays.resize(state.representatives.size());
+	for (size_t i = 0; i < state.representatives.size(); i++) {
+		if (state.representatives[i].minHash)
+			state.rep_hash_arrays[i] = state.representatives[i].minHash->storeMinHashes();
+	}
+
+	state.save_repdb(db_path);
+
+	if (!output_file.empty()) {
+		printResult(state.clusters, state.all_sketches, sketchByFile, output_file);
+		cerr << "-----write the cluster result into: " << output_file << endl;
+	}
+
+	cerr << "\n===== MinHash RepDB Build Summary =====" << endl;
+	cerr << "  Total genomes:    " << sketches.size() << endl;
+	cerr << "  Representatives:  " << state.representatives.size() << endl;
+	cerr << "  Compression:      " << std::fixed << std::setprecision(2)
+		 << (1.0 - (double)state.representatives.size() / sketches.size()) * 100.0 << "%" << endl;
+	cerr << "  RepDB saved to:   " << db_path << endl;
+	cerr << "===============================" << endl;
+}
+
+void mh_repdb_build_from_genome(string input_file, string db_path, string output_file, bool sketch_by_file, int min_len, int kmer_size, int sketch_size, string sketch_func, bool is_containment, int contain_compress, double threshold, int threads) {
+	vector<SketchInfo> sketches;
+	string folder_path;
+	compute_sketches(sketches, input_file, folder_path, sketch_by_file, min_len, kmer_size, sketch_size, sketch_func, is_containment, contain_compress, true, threads, nullptr);
+
+	int actual_kmer_size = sketches[0].minHash->getKmerSize();
+	int actual_sketch_size = sketches[0].minHash->getSketchSize();
+	bool actual_containment = sketches[0].isContainment;
+
+	cerr << "===== MinHash RepDB Build (from genomes) =====" << endl;
+	cerr << "  Genomes:       " << sketches.size() << endl;
+	cerr << "  Threshold:     " << threshold << endl;
+	cerr << "  Kmer size:     " << actual_kmer_size << endl;
+	cerr << "  Sketch size:   " << actual_sketch_size << endl;
+
+	MinHashClusterState state = MinHashInitialClusterWithState(sketches, threshold, threads, actual_kmer_size, actual_sketch_size, actual_containment);
+
+	state.rep_hash_arrays.resize(state.representatives.size());
+	for (size_t i = 0; i < state.representatives.size(); i++) {
+		if (state.representatives[i].minHash)
+			state.rep_hash_arrays[i] = state.representatives[i].minHash->storeMinHashes();
+	}
+
+	state.save_repdb(db_path);
+
+	if (!output_file.empty()) {
+		printResult(state.clusters, state.all_sketches, sketch_by_file, output_file);
+		cerr << "-----write the cluster result into: " << output_file << endl;
+	}
+
+	cerr << "\n===== MinHash RepDB Build Summary =====" << endl;
+	cerr << "  Total genomes:    " << sketches.size() << endl;
+	cerr << "  Representatives:  " << state.representatives.size() << endl;
+	cerr << "  Compression:      " << std::fixed << std::setprecision(2)
+		 << (1.0 - (double)state.representatives.size() / sketches.size()) * 100.0 << "%" << endl;
+	cerr << "  RepDB saved to:   " << db_path << endl;
+	cerr << "===============================" << endl;
+}
+
+void mh_repdb_query(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int topk, int threads) {
+	MinHashClusterState state;
+	if (!state.load_repdb(db_path)) {
+		cerr << "ERROR: Failed to load MinHash RepDB from: " << db_path << endl;
+		exit(1);
+	}
+
+	vector<SketchInfo> queries;
+	string qfolder;
+	compute_sketches(queries, input_file, qfolder, sketch_by_file, min_len, state.kmer_size, state.sketch_size, "MinHash", state.is_containment, 1000, false, threads, nullptr);
+
+	cerr << "===== MinHash RepDB Query =====" << endl;
+	cerr << "  Query genomes:  " << queries.size() << endl;
+	cerr << "  Top-k:          " << topk << endl;
+	cerr << "  DB reps:        " << state.representatives.size() << endl;
+
+	FILE* fp = fopen(output_file.c_str(), "w");
+	if (!fp) { cerr << "ERROR: Cannot open output file: " << output_file << endl; exit(1); }
+
+	fprintf(fp, "#query\trank\trep_name\tdistance\tcluster_id\tcluster_size\n");
+
+	for (size_t i = 0; i < queries.size(); i++) {
+		auto results = state.query_topk(queries[i], topk, threads);
+		string qname = queries[i].fileName;
+		if (qname.empty()) qname = "query_" + std::to_string(i);
+
+		if (results.empty()) {
+			fprintf(fp, "%s\t0\tno_match\t-1\t-1\t0\n", qname.c_str());
+		} else {
+			for (int r = 0; r < (int)results.size(); r++) {
+				fprintf(fp, "%s\t%d\t%s\t%.6f\t%d\t%d\n",
+					qname.c_str(), r + 1,
+					results[r].genome_name.c_str(),
+					results[r].distance,
+					results[r].cluster_id,
+					results[r].cluster_size);
+			}
+		}
+		if ((i + 1) % 10000 == 0)
+			cerr << "---queried: " << (i + 1) << " / " << queries.size() << endl;
+	}
+	fclose(fp);
+	cerr << "===== Query Results =====" << endl;
+	cerr << "  Output: " << output_file << endl;
+	cerr << "=========================" << endl;
+}
+
+void mh_repdb_assign(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads) {
+	MinHashClusterState state;
+	if (!state.load_repdb(db_path)) {
+		cerr << "ERROR: Failed to load MinHash RepDB from: " << db_path << endl;
+		exit(1);
+	}
+
+	vector<SketchInfo> queries;
+	string qfolder;
+	compute_sketches(queries, input_file, qfolder, sketch_by_file, min_len, state.kmer_size, state.sketch_size, "MinHash", state.is_containment, 1000, false, threads, nullptr);
+
+	cerr << "===== MinHash RepDB Assignment =====" << endl;
+	cerr << "  Query genomes:  " << queries.size() << endl;
+	cerr << "  DB reps:        " << state.representatives.size() << endl;
+	cerr << "  Threshold:      " << state.threshold << endl;
+
+	FILE* fp = fopen(output_file.c_str(), "w");
+	if (!fp) { cerr << "ERROR: Cannot open output file: " << output_file << endl; exit(1); }
+
+	fprintf(fp, "#query\tassigned_cluster\trep_name\tdistance\tcluster_size\tstatus\n");
+
+	int assigned = 0, unassigned = 0;
+	for (size_t i = 0; i < queries.size(); i++) {
+		auto result = state.assign(queries[i], threads);
+		string qname = queries[i].fileName;
+		if (qname.empty()) qname = "query_" + std::to_string(i);
+
+		if (result.rep_idx >= 0) {
+			fprintf(fp, "%s\t%d\t%s\t%.6f\t%d\tassigned\n",
+				qname.c_str(), result.cluster_id,
+				result.genome_name.c_str(), result.distance, result.cluster_size);
+			assigned++;
+		} else {
+			fprintf(fp, "%s\t-1\tunassigned\t-1\t0\tnovel\n", qname.c_str());
+			unassigned++;
+		}
+		if ((i + 1) % 10000 == 0)
+			cerr << "---assigned: " << (i + 1) << " / " << queries.size() << endl;
+	}
+	fclose(fp);
+
+	cerr << "===== Assignment Results =====" << endl;
+	cerr << "  Assigned:    " << assigned << " (" << std::fixed << std::setprecision(1)
+		 << (100.0 * assigned / queries.size()) << "%)" << endl;
+	cerr << "  Novel:       " << unassigned << " (" << std::fixed << std::setprecision(1)
+		 << (100.0 * unassigned / queries.size()) << "%)" << endl;
+	cerr << "  Output:      " << output_file << endl;
+	cerr << "==============================" << endl;
+}
+
+static void printRepDBClusterResult(vector<vector<int>>& clusters, vector<SketchInfo>& sketches, string outputFile, double threshold) {
+	FILE* fp = fopen(outputFile.c_str(), "w");
+	if (!fp) { cerr << "ERROR: cannot open file: " << outputFile << endl; exit(1); }
+
+	if (threshold >= 0.0) {
+		fprintf(fp, "# Clustering threshold: %.6f\n", threshold);
+		fprintf(fp, "# Total clusters: %zu\n", clusters.size());
+		fprintf(fp, "#\n");
+	}
+
+	for (size_t i = 0; i < clusters.size(); i++) {
+		fprintf(fp, "the cluster %zu is: \n", i);
+		for (size_t j = 0; j < clusters[i].size(); j++) {
+			int curId = clusters[i][j];
+			if (curId < 0 || curId >= (int)sketches.size()) continue;
+			const char* fname = sketches[curId].fileName.empty() ? "N/A" : sketches[curId].fileName.c_str();
+			const char* seqName = "N/A";
+			const char* seqComment = "";
+			if (!sketches[curId].fileSeqs.empty()) {
+				seqName = sketches[curId].fileSeqs[0].name.c_str();
+				seqComment = sketches[curId].fileSeqs[0].comment.c_str();
+			}
+			fprintf(fp, "\t%5zu\t%6d\t%12ldnt\t%20s\t%20s\t%s\n",
+				j, curId, (long)sketches[curId].totalSeqLength, fname, seqName, seqComment);
+		}
+		fprintf(fp, "\n");
+	}
+	fclose(fp);
+}
+
+void mh_repdb_append(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads) {
+	MinHashClusterState state;
+	if (!state.load_repdb(db_path)) {
+		cerr << "ERROR: Failed to load MinHash RepDB from: " << db_path << endl;
+		exit(1);
+	}
+
+	vector<SketchInfo> new_sketches;
+	string nfolder;
+	compute_sketches(new_sketches, input_file, nfolder, sketch_by_file, min_len, state.kmer_size, state.sketch_size, "MinHash", state.is_containment, 1000, false, threads, nullptr);
+
+	int old_rep_count = state.representatives.size();
+	int old_total = state.all_sketches.size();
+
+	cerr << "===== MinHash RepDB Append =====" << endl;
+	cerr << "  Existing reps:    " << old_rep_count << endl;
+	cerr << "  Existing genomes: " << old_total << endl;
+	cerr << "  New genomes:      " << new_sketches.size() << endl;
+
+	MinHashIncrementalCluster(state, new_sketches, threads);
+
+	state.save_repdb(db_path);
+
+	if (!output_file.empty()) {
+		printRepDBClusterResult(state.clusters, state.all_sketches, output_file, state.threshold);
+		cerr << "-----write the cluster result into: " << output_file << endl;
+	}
+
+	int new_rep_count = state.representatives.size();
+	cerr << "\n===== Append Summary =====" << endl;
+	cerr << "  New reps added:   " << (new_rep_count - old_rep_count) << endl;
+	cerr << "  Total reps now:   " << new_rep_count << endl;
+	cerr << "  Total genomes:    " << state.all_sketches.size() << endl;
+	cerr << "  RepDB updated:    " << db_path << endl;
+	cerr << "==========================" << endl;
+}
+
+void mh_repdb_stats(string db_path) {
+	MinHashClusterState state;
+	if (!state.load_repdb(db_path)) {
+		cerr << "ERROR: Failed to load MinHash RepDB from: " << db_path << endl;
 		exit(1);
 	}
 	state.print_stats(std::cout);

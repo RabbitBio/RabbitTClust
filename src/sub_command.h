@@ -39,12 +39,21 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 void append_clust_greedy(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads, bool save_rep_index);
 void append_clust_greedy_fast(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads, bool save_rep_index);
 
+// KSSD RepDB (--fast)
 void repdb_build_from_sketch(string folder_path, string db_path, string output_file, double threshold, int threads);
 void repdb_build_from_genome(string input_file, string db_path, string output_file, bool sketch_by_file, int min_len, int kmer_size, int drlevel, double threshold, int threads);
 void repdb_query(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int topk, int threads);
 void repdb_assign(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads);
 void repdb_append(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads);
 void repdb_stats(string db_path);
+
+// MinHash RepDB (without --fast)
+void mh_repdb_build_from_sketch(string folder_path, string db_path, string output_file, double threshold, int threads, bool use_inverted_index);
+void mh_repdb_build_from_genome(string input_file, string db_path, string output_file, bool sketch_by_file, int min_len, int kmer_size, int sketch_size, string sketch_func, bool is_containment, int contain_compress, double threshold, int threads);
+void mh_repdb_query(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int topk, int threads);
+void mh_repdb_assign(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads);
+void mh_repdb_append(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads);
+void mh_repdb_stats(string db_path);
 
 void compute_kssd_sketches(vector<KssdSketchInfo>& sketches, KssdParameters& info, bool isSave, const string inputFile, string& folder_path, bool sketchByFile, const int minLen, const int kmerSize, const int drlevel, int threads);
 void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdParameters& info, KssdInvertedIndex& inverted_index, bool isSave, const string inputFile, string& folder_path, bool sketchByFile, const int minLen, const int kmerSize, const int drlevel, int threads);

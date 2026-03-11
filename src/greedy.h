@@ -92,12 +92,20 @@ struct MinHashClusterState {
     bool is_containment;
 
     phmap::flat_hash_map<uint64_t, vector<int>> inverted_index;  // MinHash uses uint64_t
+    vector<vector<uint64_t>> rep_hash_arrays;  // raw hashes per representative for RepDB distance computation
 
     bool save(const string& filepath) const;
     bool load(const string& filepath);
 
+    bool save_repdb(const string& filepath) const;
+    bool load_repdb(const string& filepath);
+
     void build_inverted_index();
     void update_inverted_index(int rep_idx);
+
+    vector<RepDBQueryResult> query_topk(const SketchInfo& query, int topk, int threads) const;
+    RepDBQueryResult assign(const SketchInfo& query, int threads) const;
+    void print_stats(std::ostream& out) const;
 };
 
 vector<vector<int>> MinHashIncrementalCluster(

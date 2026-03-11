@@ -138,12 +138,16 @@ int main(int argc, char * argv[]){
 		"    --assign  Assign input genomes to clusters (read-only, threshold-based)\n"
 		"    --append  Add new genomes, update RepDB (creates new reps if needed)\n"
 		"    --stats   Print RepDB statistics report (no -o needed)\n"
-		"  Examples:\n"
+		"  Examples (KSSD mode with --fast):\n"
 		"    ./clust-greedy --fast --db rep.db --build --presketched sketch_dir -d 0.05 -o res.cluster\n"
 		"    ./clust-greedy --fast --db rep.db --query -i new.fna -o query.tsv --top-k 10\n"
 		"    ./clust-greedy --fast --db rep.db --assign -i list.txt -l -o assign.tsv\n"
 		"    ./clust-greedy --fast --db rep.db --append list.txt -l -o updated.cluster\n"
-		"    ./clust-greedy --fast --db rep.db --stats");
+		"    ./clust-greedy --fast --db rep.db --stats\n"
+		"  Examples (MinHash mode without --fast):\n"
+		"    ./clust-greedy --db rep.db --build --presketched sketch_dir -d 0.05 -o res.cluster\n"
+		"    ./clust-greedy --db rep.db --query -i new.fna -o query.tsv --top-k 10\n"
+		"    ./clust-greedy --db rep.db --stats");
 	auto flag_repdb_build = app.add_flag("--build", repdb_build_flag, "Build RepDB from clustering result (use with --db)");
 	auto flag_repdb_query = app.add_flag("--query", repdb_query_flag, "Query: return top-k nearest representatives with distances (use with --db, read-only)");
 	auto flag_repdb_assign = app.add_flag("--assign", repdb_assign_flag, "Assign: classify genomes into existing clusters or mark as novel (use with --db, read-only)");
@@ -253,55 +257,72 @@ int main(int argc, char * argv[]){
 
 	// ===== RepDB mode: --db <path> =====
 	if (!repdb_path.empty()) {
-		if (!is_fast) {
-			cerr << "ERROR: --db requires --fast (KSSD mode)" << endl;
-			return 1;
-		}
-
-		if (repdb_stats_flag) {
-			repdb_stats(repdb_path);
-			return 0;
-		}
-
-		if (repdb_build_flag) {
-			if (*option_presketched) {
-				repdb_build_from_sketch(folder_path, repdb_path, outputFile, threshold, threads);
-			} else if (*option_input) {
-				if (!isSetKmer) {
-					kmerSize = 19;
-					cerr << "-----use default kmerSize: " << kmerSize << endl;
+		if (is_fast) {
+			// KSSD RepDB path
+			if (repdb_stats_flag) {
+				repdb_stats(repdb_path);
+				return 0;
+			}
+			if (repdb_build_flag) {
+				if (*option_presketched) {
+					repdb_build_from_sketch(folder_path, repdb_path, outputFile, threshold, threads);
+				} else if (*option_input) {
+					if (!isSetKmer) { kmerSize = 19; cerr << "-----use default kmerSize: " << kmerSize << endl; }
+					repdb_build_from_genome(inputFile, repdb_path, outputFile, sketchByFile, minLen, kmerSize, drlevel, threshold, threads);
+				} else {
+					cerr << "ERROR: --build requires --presketched <folder> or -i <genome_list> -l" << endl;
+					return 1;
 				}
-				repdb_build_from_genome(inputFile, repdb_path, outputFile, sketchByFile, minLen, kmerSize, drlevel, threshold, threads);
-			} else {
-				cerr << "ERROR: --build requires --presketched <folder> or -i <genome_list> -l" << endl;
-				return 1;
+				return 0;
 			}
-			return 0;
-		}
-
-		if (repdb_query_flag) {
-			if (!*option_input) {
-				cerr << "ERROR: --query requires -i <input_file>" << endl;
-				return 1;
+			if (repdb_query_flag) {
+				if (!*option_input) { cerr << "ERROR: --query requires -i <input_file>" << endl; return 1; }
+				repdb_query(repdb_path, inputFile, outputFile, sketchByFile, minLen, topk, threads);
+				return 0;
 			}
-			repdb_query(repdb_path, inputFile, outputFile, sketchByFile, minLen, topk, threads);
-			return 0;
-		}
-
-		if (repdb_assign_flag) {
-			if (!*option_input) {
-				cerr << "ERROR: --assign requires -i <input_file>" << endl;
-				return 1;
+			if (repdb_assign_flag) {
+				if (!*option_input) { cerr << "ERROR: --assign requires -i <input_file>" << endl; return 1; }
+				repdb_assign(repdb_path, inputFile, outputFile, sketchByFile, minLen, threads);
+				return 0;
 			}
-			repdb_assign(repdb_path, inputFile, outputFile, sketchByFile, minLen, threads);
-			return 0;
+			if (*option_append) {
+				repdb_append(repdb_path, inputFile, outputFile, sketchByFile, minLen, threads);
+				return 0;
+			}
+		} else {
+			// MinHash RepDB path
+			if (repdb_stats_flag) {
+				mh_repdb_stats(repdb_path);
+				return 0;
+			}
+			if (repdb_build_flag) {
+				if (*option_presketched) {
+					mh_repdb_build_from_sketch(folder_path, repdb_path, outputFile, threshold, threads, use_inverted_index);
+				} else if (*option_input) {
+					if (!isSetKmer) { kmerSize = 21; cerr << "-----use default kmerSize: " << kmerSize << endl; }
+					if (!*option_sketch_size) { sketchSize = 1000; }
+					mh_repdb_build_from_genome(inputFile, repdb_path, outputFile, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, threshold, threads);
+				} else {
+					cerr << "ERROR: --build requires --presketched <folder> or -i <genome_list> -l" << endl;
+					return 1;
+				}
+				return 0;
+			}
+			if (repdb_query_flag) {
+				if (!*option_input) { cerr << "ERROR: --query requires -i <input_file>" << endl; return 1; }
+				mh_repdb_query(repdb_path, inputFile, outputFile, sketchByFile, minLen, topk, threads);
+				return 0;
+			}
+			if (repdb_assign_flag) {
+				if (!*option_input) { cerr << "ERROR: --assign requires -i <input_file>" << endl; return 1; }
+				mh_repdb_assign(repdb_path, inputFile, outputFile, sketchByFile, minLen, threads);
+				return 0;
+			}
+			if (*option_append) {
+				mh_repdb_append(repdb_path, inputFile, outputFile, sketchByFile, minLen, threads);
+				return 0;
+			}
 		}
-
-		if (*option_append) {
-			repdb_append(repdb_path, inputFile, outputFile, sketchByFile, minLen, threads);
-			return 0;
-		}
-
 		cerr << "ERROR: --db requires one of: --build, --query, --assign, --append, --stats" << endl;
 		return 1;
 	}

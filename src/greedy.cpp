@@ -1711,7 +1711,9 @@ vector<vector<int>> KssdIncrementalCluster(
         for (size_t i = 0; i < candidates.size(); i++) {
             int rep_idx = candidates[i].first;
             int common = candidates[i].second;
-            
+
+            if (rep_idx < 0 || rep_idx >= (int)state.representatives.size()) continue;
+
             const auto& rep = state.representatives[rep_idx];
             int sizeRef = rep.hash32_arr.size();
             
@@ -1773,9 +1775,15 @@ vector<vector<int>> KssdIncrementalCluster(
     std::cerr << "Assigned to existing clusters: " << assigned_to_existing << std::endl;
     std::cerr << "New clusters created: " << new_clusters << std::endl;
     std::cerr << "Total clusters now: " << state.clusters.size() << std::endl;
-    std::cerr << "Average candidates per query: " << (total_candidates / (double)new_sketches.size()) << std::endl;
+    if (!new_sketches.empty()) {
+        std::cerr << "Average candidates per query: " << (total_candidates / (double)new_sketches.size()) << std::endl;
+    }
     std::cerr << "Total distance calculations: " << total_distance_calcs << std::endl;
-    std::cerr << "Speedup ratio: " << (state.representatives.size() * new_sketches.size() / (double)total_distance_calcs) << "x" << std::endl;
+    if (total_distance_calcs > 0) {
+        std::cerr << "Speedup ratio: " << (state.representatives.size() * new_sketches.size() / (double)total_distance_calcs) << "x" << std::endl;
+    } else {
+        std::cerr << "Speedup ratio: N/A (no distance calculations performed)" << std::endl;
+    }
     std::cerr << "=========================================\n" << std::endl;
     
     return state.clusters;
@@ -1854,7 +1862,6 @@ vector<vector<int>> MinHashIncrementalCluster(
     std::cerr << "New genomes: " << new_sketches.size() << std::endl;
     std::cerr << "Inverted index size: " << state.inverted_index.size() << " unique hashes" << std::endl;
     
-    // Safety checks
     if (new_sketches.empty()) {
         std::cerr << "ERROR: No new sketches to process" << std::endl;
         return state.clusters;
@@ -1867,24 +1874,31 @@ vector<vector<int>> MinHashIncrementalCluster(
     
     int old_genome_count = state.all_sketches.size();
     
-    // Add new sketches to all_sketches
     int new_genome_start_idx = old_genome_count;
     for (auto& new_sketch : new_sketches) {
         state.all_sketches.push_back(new_sketch);
     }
+
+    if (state.rep_hash_arrays.empty()) {
+        state.rep_hash_arrays.resize(state.representatives.size());
+        for (size_t i = 0; i < state.representatives.size(); i++) {
+            if (state.representatives[i].minHash)
+                state.rep_hash_arrays[i] = state.representatives[i].minHash->storeMinHashes();
+        }
+    }
+
+    double x = std::exp(-state.threshold * state.kmer_size);
+    double jaccard_min = x / (2.0 - x);
     
-    // Statistics
     int new_clusters = 0;
     int assigned_to_existing = 0;
     uint64_t total_candidates = 0;
     uint64_t total_distance_calcs = 0;
     
-    // Process each new genome (maintain greedy serial property)
     for (size_t new_idx = 0; new_idx < new_sketches.size(); new_idx++) {
         int genome_idx = new_genome_start_idx + new_idx;
         auto& new_sketch = state.all_sketches[genome_idx];
         
-        // Safety check
         if (!new_sketch.minHash) {
             std::cerr << "ERROR: New sketch at index " << new_idx << " has null minHash, skipping" << std::endl;
             continue;
@@ -1893,8 +1907,7 @@ vector<vector<int>> MinHashIncrementalCluster(
         std::vector<uint64_t> new_hashes = new_sketch.minHash->storeMinHashes();
         int sizeQry = new_hashes.size();
         
-        // Use inverted index to find candidate representatives
-        phmap::flat_hash_map<int, int> candidate_counts;  // rep_idx → intersection count
+        phmap::flat_hash_map<int, int> candidate_counts;
         candidate_counts.reserve(1000);
         
         for (uint64_t hash : new_hashes) {
@@ -1908,48 +1921,57 @@ vector<vector<int>> MinHashIncrementalCluster(
         
         total_candidates += candidate_counts.size();
         
-        // Parallel distance calculation
         double best_dist = std::numeric_limits<double>::max();
         int best_rep_idx = -1;
         
-        std::vector<std::pair<int, int>> candidates;  // (rep_idx, intersection_count)
+        std::vector<std::pair<int, int>> candidates;
         candidates.reserve(candidate_counts.size());
-        for (const auto& pair : candidate_counts) {
-            int rep_idx = pair.first;
-            int cnt = pair.second;
-            candidates.emplace_back(rep_idx, cnt);
-        }
+        for (const auto& pair : candidate_counts)
+            candidates.emplace_back(pair.first, pair.second);
         
         #pragma omp parallel for num_threads(threads) schedule(dynamic)
         for (size_t i = 0; i < candidates.size(); i++) {
             int rep_idx = candidates[i].first;
             int common = candidates[i].second;
             
-            // Safety check
-            if (rep_idx < 0 || rep_idx >= state.representatives.size()) {
-                continue;
+            if (rep_idx < 0 || rep_idx >= (int)state.rep_hash_arrays.size()) continue;
+            
+            int sizeRef = state.rep_hash_arrays[rep_idx].size();
+            if (sizeRef == 0) continue;
+
+            int min_common_needed;
+            if (state.is_containment) {
+                int minSz = std::min(sizeQry, sizeRef);
+                min_common_needed = (int)(jaccard_min * minSz);
+            } else {
+                min_common_needed = (int)(jaccard_min * (sizeQry + sizeRef) / (1.0 + jaccard_min));
             }
-            
-            const auto& rep = state.representatives[rep_idx];
-            if (!rep.minHash) {
-                continue;
-            }
-            
-            std::vector<uint64_t> rep_hashes = rep.minHash->storeMinHashes();
-            int sizeRef = rep_hashes.size();
-            
-            // Calculate precise distance
+            if (common < min_common_needed) continue;
+
             #pragma omp atomic
             total_distance_calcs++;
-            
-            double dist;
+
+            double jaccard;
             if (state.is_containment) {
-                dist = new_sketch.minHash->containDistance(rep.minHash);
+                int minSz = std::min(sizeQry, sizeRef);
+                jaccard = (double)common / minSz;
             } else {
-                dist = new_sketch.minHash->distance(rep.minHash);
+                int denom = sizeQry + sizeRef - common;
+                if (denom == 0) continue;
+                jaccard = (double)common / denom;
             }
-            
-            if (dist <= state.threshold && !std::isnan(dist) && !std::isinf(dist)) {
+
+            double dist;
+            if (jaccard >= 1.0) {
+                dist = 0.0;
+            } else if (jaccard <= 0.0) {
+                dist = 1.0;
+            } else {
+                dist = -std::log(2.0 * jaccard / (1.0 + jaccard)) / state.kmer_size;
+                if (dist > 1.0) dist = 1.0;
+            }
+
+            if (dist <= state.threshold) {
                 #pragma omp critical
                 {
                     if (dist < best_dist) {
@@ -1960,20 +1982,17 @@ vector<vector<int>> MinHashIncrementalCluster(
             }
         }
         
-        // Decision: join existing cluster or become new representative
         if (best_rep_idx != -1) {
-            // Join existing cluster (use index)
             state.clusters[best_rep_idx].push_back(genome_idx);
             assigned_to_existing++;
         } else {
-            // Become new representative (use index)
             int new_rep_idx = state.representatives.size();
             state.representative_ids.push_back(genome_idx);
             state.representatives.push_back(new_sketch);
-            state.clusters.push_back(vector<int>());  // Empty cluster, only representative
+            state.rep_hash_arrays.push_back(new_hashes);
+            state.clusters.push_back(vector<int>());
             new_clusters++;
             
-            // Update inverted index: add new representative
             for (uint64_t hash : new_hashes) {
                 state.inverted_index[hash].push_back(new_rep_idx);
             }
@@ -2603,6 +2622,386 @@ void KssdClusterState::print_stats(std::ostream& out) const {
         for (const auto& r : representatives) {
             rep_seq_len += r.totalSeqLength;
         }
+        out << "  Total sequence length:  " << total_seq_len << " bp" << std::endl;
+        out << "  Representative seq len: " << rep_seq_len << " bp" << std::endl;
+        out << "  Coverage ratio:         " << std::fixed << std::setprecision(2)
+            << (100.0 * rep_seq_len / total_seq_len) << "%" << std::endl;
+    }
+
+    out << "========================================" << std::endl;
+}
+
+// =====================================================================
+// RepDB: Representative Database methods for MinHashClusterState
+// =====================================================================
+
+static inline double minhash_mash_distance(int common, int sizeQry, int sizeRef, int kmer_size, bool is_containment) {
+    if (common <= 0) return 1.0;
+    double jaccard;
+    if (is_containment) {
+        int minSize = std::min(sizeQry, sizeRef);
+        if (minSize == 0) return 1.0;
+        jaccard = (double)common / minSize;
+    } else {
+        int denom = sizeQry + sizeRef - common;
+        if (denom == 0) return 0.0;
+        jaccard = (double)common / denom;
+    }
+    if (jaccard >= 1.0) return 0.0;
+    if (jaccard <= 0.0) return 1.0;
+    double dist = -std::log(2.0 * jaccard / (1.0 + jaccard)) / kmer_size;
+    return dist > 1.0 ? 1.0 : dist;
+}
+
+bool MinHashClusterState::save_repdb(const string& filepath) const {
+    std::ofstream ofs(filepath, std::ios::binary);
+    if (!ofs) {
+        std::cerr << "ERROR: Cannot open RepDB file for writing: " << filepath << std::endl;
+        return false;
+    }
+
+    const char magic[] = "MHREPDB1";
+    ofs.write(magic, 8);
+
+    ofs.write((char*)&threshold, sizeof(double));
+    ofs.write((char*)&kmer_size, sizeof(int));
+    ofs.write((char*)&sketch_size, sizeof(int));
+    ofs.write((char*)&is_containment, sizeof(bool));
+
+    size_t rep_count = representatives.size();
+    ofs.write((char*)&rep_count, sizeof(size_t));
+
+    for (size_t i = 0; i < rep_count; i++) {
+        ofs.write((char*)&representative_ids[i], sizeof(int));
+
+        const auto& sk = representatives[i];
+        ofs.write((char*)&sk.id, sizeof(int));
+        ofs.write((char*)&sk.totalSeqLength, sizeof(uint64_t));
+        ofs.write((char*)&sk.isContainment, sizeof(bool));
+
+        const std::vector<uint64_t>& hashes = (i < rep_hash_arrays.size())
+            ? rep_hash_arrays[i]
+            : (sk.minHash ? sk.minHash->storeMinHashes() : std::vector<uint64_t>());
+        size_t hash_count = hashes.size();
+        ofs.write((char*)&hash_count, sizeof(size_t));
+        if (hash_count > 0)
+            ofs.write((char*)hashes.data(), sizeof(uint64_t) * hash_count);
+
+        size_t name_len = sk.fileName.length();
+        ofs.write((char*)&name_len, sizeof(size_t));
+        ofs.write(sk.fileName.c_str(), name_len);
+    }
+
+    size_t cluster_count = clusters.size();
+    ofs.write((char*)&cluster_count, sizeof(size_t));
+    for (const auto& cl : clusters) {
+        size_t member_count = cl.size();
+        ofs.write((char*)&member_count, sizeof(size_t));
+        ofs.write((char*)cl.data(), sizeof(int) * member_count);
+    }
+
+    size_t all_count = all_sketches.size();
+    ofs.write((char*)&all_count, sizeof(size_t));
+    for (const auto& sk : all_sketches) {
+        size_t name_len = sk.fileName.length();
+        ofs.write((char*)&name_len, sizeof(size_t));
+        ofs.write(sk.fileName.c_str(), name_len);
+        ofs.write((char*)&sk.totalSeqLength, sizeof(uint64_t));
+    }
+
+    size_t index_size = inverted_index.size();
+    ofs.write((char*)&index_size, sizeof(size_t));
+    for (const auto& pair : inverted_index) {
+        uint64_t hash = pair.first;
+        const std::vector<int>& rep_list = pair.second;
+        ofs.write((char*)&hash, sizeof(uint64_t));
+        size_t list_size = rep_list.size();
+        ofs.write((char*)&list_size, sizeof(size_t));
+        ofs.write((char*)rep_list.data(), sizeof(int) * list_size);
+    }
+
+    ofs.close();
+    std::cerr << "MinHash RepDB saved to: " << filepath << std::endl;
+    std::cerr << "  Representatives: " << rep_count << std::endl;
+    std::cerr << "  Total genomes:   " << all_count << std::endl;
+    std::cerr << "  Inverted index:  " << index_size << " unique hashes" << std::endl;
+    return true;
+}
+
+bool MinHashClusterState::load_repdb(const string& filepath) {
+    std::ifstream ifs(filepath, std::ios::binary);
+    if (!ifs) {
+        std::cerr << "ERROR: Cannot open RepDB file for reading: " << filepath << std::endl;
+        return false;
+    }
+
+    char magic[8];
+    ifs.read(magic, 8);
+    if (std::string(magic, 8) != "MHREPDB1") {
+        std::cerr << "ERROR: Invalid MinHash RepDB file (bad magic): " << filepath << std::endl;
+        return false;
+    }
+
+    ifs.read((char*)&threshold, sizeof(double));
+    ifs.read((char*)&kmer_size, sizeof(int));
+    ifs.read((char*)&sketch_size, sizeof(int));
+    ifs.read((char*)&is_containment, sizeof(bool));
+
+    size_t rep_count;
+    ifs.read((char*)&rep_count, sizeof(size_t));
+    representative_ids.resize(rep_count);
+    representatives.resize(rep_count);
+    rep_hash_arrays.resize(rep_count);
+
+    for (size_t i = 0; i < rep_count; i++) {
+        ifs.read((char*)&representative_ids[i], sizeof(int));
+
+        auto& sk = representatives[i];
+        ifs.read((char*)&sk.id, sizeof(int));
+        ifs.read((char*)&sk.totalSeqLength, sizeof(uint64_t));
+        ifs.read((char*)&sk.isContainment, sizeof(bool));
+
+        size_t hash_count;
+        ifs.read((char*)&hash_count, sizeof(size_t));
+        rep_hash_arrays[i].resize(hash_count);
+        if (hash_count > 0)
+            ifs.read((char*)rep_hash_arrays[i].data(), sizeof(uint64_t) * hash_count);
+
+        sk.minHash = nullptr;
+
+        size_t name_len;
+        ifs.read((char*)&name_len, sizeof(size_t));
+        sk.fileName.resize(name_len);
+        ifs.read(&sk.fileName[0], name_len);
+    }
+
+    size_t cluster_count;
+    ifs.read((char*)&cluster_count, sizeof(size_t));
+    clusters.resize(cluster_count);
+    for (auto& cl : clusters) {
+        size_t member_count;
+        ifs.read((char*)&member_count, sizeof(size_t));
+        cl.resize(member_count);
+        ifs.read((char*)cl.data(), sizeof(int) * member_count);
+    }
+
+    size_t all_count;
+    ifs.read((char*)&all_count, sizeof(size_t));
+    all_sketches.resize(all_count);
+    for (auto& sk : all_sketches) {
+        size_t name_len;
+        ifs.read((char*)&name_len, sizeof(size_t));
+        sk.fileName.resize(name_len);
+        ifs.read(&sk.fileName[0], name_len);
+        ifs.read((char*)&sk.totalSeqLength, sizeof(uint64_t));
+    }
+
+    size_t index_size;
+    ifs.read((char*)&index_size, sizeof(size_t));
+    inverted_index.clear();
+    inverted_index.reserve(index_size);
+    for (size_t i = 0; i < index_size; i++) {
+        uint64_t hash;
+        ifs.read((char*)&hash, sizeof(uint64_t));
+        size_t list_size;
+        ifs.read((char*)&list_size, sizeof(size_t));
+        vector<int> rep_list(list_size);
+        ifs.read((char*)rep_list.data(), sizeof(int) * list_size);
+        inverted_index[hash] = std::move(rep_list);
+    }
+
+    ifs.close();
+    std::cerr << "MinHash RepDB loaded from: " << filepath << std::endl;
+    std::cerr << "  Representatives: " << rep_count << std::endl;
+    std::cerr << "  Total genomes:   " << all_count << std::endl;
+    std::cerr << "  Inverted index:  " << index_size << " unique hashes" << std::endl;
+    std::cerr << "  Threshold:       " << threshold << std::endl;
+    std::cerr << "  Kmer size:       " << kmer_size << std::endl;
+    std::cerr << "  Sketch size:     " << sketch_size << std::endl;
+    std::cerr << "  Containment:     " << (is_containment ? "yes" : "no") << std::endl;
+    return true;
+}
+
+vector<RepDBQueryResult> MinHashClusterState::query_topk(
+    const SketchInfo& query, int topk, int threads) const
+{
+    if (!query.minHash) {
+        std::cerr << "ERROR: query has null minHash" << std::endl;
+        return {};
+    }
+
+    std::vector<uint64_t> query_hashes = query.minHash->storeMinHashes();
+    int sizeQry = query_hashes.size();
+
+    phmap::flat_hash_map<int, int> candidate_counts;
+    candidate_counts.reserve(1000);
+
+    for (uint64_t hash : query_hashes) {
+        auto it = inverted_index.find(hash);
+        if (it != inverted_index.end()) {
+            for (int rep_idx : it->second) {
+                candidate_counts[rep_idx]++;
+            }
+        }
+    }
+
+    struct DistPair {
+        int rep_idx;
+        double distance;
+    };
+    std::vector<DistPair> scored;
+    scored.reserve(candidate_counts.size());
+
+    std::vector<std::pair<int, int>> candidates;
+    candidates.reserve(candidate_counts.size());
+    for (const auto& p : candidate_counts)
+        candidates.emplace_back(p.first, p.second);
+
+    std::mutex mtx;
+
+    #pragma omp parallel num_threads(threads)
+    {
+        std::vector<DistPair> local;
+        #pragma omp for schedule(dynamic)
+        for (size_t i = 0; i < candidates.size(); i++) {
+            int rep_idx = candidates[i].first;
+            int common = candidates[i].second;
+            if (rep_idx < 0 || rep_idx >= (int)rep_hash_arrays.size()) continue;
+
+            int sizeRef = rep_hash_arrays[rep_idx].size();
+            double dist = minhash_mash_distance(common, sizeQry, sizeRef, kmer_size, is_containment);
+
+            if (!std::isnan(dist) && !std::isinf(dist))
+                local.push_back({rep_idx, dist});
+        }
+        std::lock_guard<std::mutex> lock(mtx);
+        scored.insert(scored.end(), local.begin(), local.end());
+    }
+
+    std::sort(scored.begin(), scored.end(),
+        [](const DistPair& a, const DistPair& b) { return a.distance < b.distance; });
+
+    int k = std::min(topk, (int)scored.size());
+    vector<RepDBQueryResult> results;
+    results.reserve(k);
+
+    for (int i = 0; i < k; i++) {
+        RepDBQueryResult r;
+        r.rep_idx = scored[i].rep_idx;
+        r.distance = scored[i].distance;
+        if (r.rep_idx >= 0 && r.rep_idx < (int)representatives.size()) {
+            r.genome_id = representative_ids[r.rep_idx];
+            r.genome_name = representatives[r.rep_idx].fileName;
+        } else {
+            r.genome_id = -1;
+            r.genome_name = "N/A";
+        }
+        r.cluster_id = r.rep_idx;
+        r.cluster_size = (r.rep_idx >= 0 && r.rep_idx < (int)clusters.size())
+                         ? (int)clusters[r.rep_idx].size() : 0;
+        results.push_back(r);
+    }
+    return results;
+}
+
+RepDBQueryResult MinHashClusterState::assign(
+    const SketchInfo& query, int threads) const
+{
+    auto results = query_topk(query, 1, threads);
+    if (!results.empty() && results[0].distance <= threshold) {
+        return results[0];
+    }
+    RepDBQueryResult none;
+    none.rep_idx = -1;
+    none.genome_id = -1;
+    none.genome_name = "unassigned";
+    none.distance = -1.0;
+    none.cluster_id = -1;
+    none.cluster_size = 0;
+    return none;
+}
+
+void MinHashClusterState::print_stats(std::ostream& out) const {
+    size_t total_genomes = 0;
+    for (const auto& cl : clusters) total_genomes += cl.size();
+
+    out << "========================================" << std::endl;
+    out << "    MinHash RepDB Statistics Report" << std::endl;
+    out << "========================================" << std::endl;
+    out << std::endl;
+
+    out << "[Basic Info]" << std::endl;
+    out << "  Threshold:              " << threshold << std::endl;
+    out << "  Kmer size:              " << kmer_size << std::endl;
+    out << "  Sketch size:            " << sketch_size << std::endl;
+    out << "  Containment mode:       " << (is_containment ? "yes" : "no") << std::endl;
+    out << std::endl;
+
+    out << "[Scale]" << std::endl;
+    out << "  Total genomes:          " << total_genomes << std::endl;
+    out << "  Representatives:        " << representatives.size() << std::endl;
+    out << "  Clusters:               " << clusters.size() << std::endl;
+    double compression = total_genomes > 0
+        ? (1.0 - (double)representatives.size() / total_genomes) * 100.0 : 0.0;
+    out << "  Compression ratio:      " << std::fixed << std::setprecision(2)
+        << compression << "%" << std::endl;
+    out << std::endl;
+
+    out << "[Inverted Index]" << std::endl;
+    out << "  Unique hashes:          " << inverted_index.size() << std::endl;
+    size_t total_postings = 0;
+    size_t max_posting = 0;
+    for (const auto& p : inverted_index) {
+        total_postings += p.second.size();
+        if (p.second.size() > max_posting) max_posting = p.second.size();
+    }
+    double avg_posting = inverted_index.size() > 0
+        ? (double)total_postings / inverted_index.size() : 0;
+    out << "  Total postings:         " << total_postings << std::endl;
+    out << "  Avg posting length:     " << std::fixed << std::setprecision(2)
+        << avg_posting << std::endl;
+    out << "  Max posting length:     " << max_posting << std::endl;
+    out << std::endl;
+
+    out << "[Cluster Size Distribution]" << std::endl;
+    if (!clusters.empty()) {
+        std::vector<int> sizes;
+        sizes.reserve(clusters.size());
+        size_t singleton = 0;
+        for (const auto& cl : clusters) {
+            sizes.push_back(cl.size());
+            if (cl.size() <= 1) singleton++;
+        }
+        std::sort(sizes.begin(), sizes.end());
+        double mean = (double)total_genomes / clusters.size();
+        int median = sizes[sizes.size() / 2];
+
+        out << "  Min cluster size:       " << sizes.front() << std::endl;
+        out << "  Max cluster size:       " << sizes.back() << std::endl;
+        out << "  Mean cluster size:      " << std::fixed << std::setprecision(2)
+            << mean << std::endl;
+        out << "  Median cluster size:    " << median << std::endl;
+        out << "  Singletons:             " << singleton << " ("
+            << std::fixed << std::setprecision(1)
+            << (100.0 * singleton / clusters.size()) << "%)" << std::endl;
+
+        size_t p90 = sizes[(size_t)(sizes.size() * 0.9)];
+        size_t p95 = sizes[(size_t)(sizes.size() * 0.95)];
+        size_t p99 = sizes[(size_t)(sizes.size() * 0.99)];
+        out << "  P90 cluster size:       " << p90 << std::endl;
+        out << "  P95 cluster size:       " << p95 << std::endl;
+        out << "  P99 cluster size:       " << p99 << std::endl;
+    }
+
+    uint64_t total_seq_len = 0;
+    for (const auto& sk : all_sketches)
+        total_seq_len += sk.totalSeqLength;
+    if (total_seq_len > 0) {
+        out << std::endl;
+        out << "[Genome Coverage]" << std::endl;
+        uint64_t rep_seq_len = 0;
+        for (const auto& r : representatives)
+            rep_seq_len += r.totalSeqLength;
         out << "  Total sequence length:  " << total_seq_len << " bp" << std::endl;
         out << "  Representative seq len: " << rep_seq_len << " bp" << std::endl;
         out << "  Coverage ratio:         " << std::fixed << std::setprecision(2)
