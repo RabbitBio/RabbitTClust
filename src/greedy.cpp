@@ -13,6 +13,7 @@
 #include <cmath>     // For log, exp
 #include <cstring>   // For memset
 #include <fstream>   // For ifstream, ofstream (binary I/O)
+#include <mutex>
 #include "phmap.h"  // Google's Swiss Tables (fastest hash map, 3x speedup over std::unordered_map)
 using namespace std;
 
@@ -2212,6 +2213,403 @@ void MinHashClusterState::update_inverted_index(int rep_idx) {
     for (uint64_t hash : hashes) {
         inverted_index[hash].push_back(rep_idx);
     }
+}
+
+// =====================================================================
+// RepDB: Representative Database methods for KssdClusterState
+// =====================================================================
+
+bool KssdClusterState::save_repdb(const string& filepath) const {
+    std::ofstream ofs(filepath, std::ios::binary);
+    if (!ofs) {
+        std::cerr << "ERROR: Cannot open RepDB file for writing: " << filepath << std::endl;
+        return false;
+    }
+
+    const char magic[] = "REPDB001";
+    ofs.write(magic, 8);
+
+    ofs.write((char*)&threshold, sizeof(double));
+    ofs.write((char*)&kmer_size, sizeof(int));
+    ofs.write((char*)&params.half_k, sizeof(int));
+    ofs.write((char*)&params.half_subk, sizeof(int));
+    ofs.write((char*)&params.drlevel, sizeof(int));
+    ofs.write((char*)&params.genomeNumber, sizeof(int));
+
+    size_t rep_count = representatives.size();
+    ofs.write((char*)&rep_count, sizeof(size_t));
+
+    for (size_t i = 0; i < rep_count; i++) {
+        ofs.write((char*)&representative_ids[i], sizeof(int));
+
+        const auto& sk = representatives[i];
+        ofs.write((char*)&sk.id, sizeof(int));
+        ofs.write((char*)&sk.totalSeqLength, sizeof(uint64_t));
+        ofs.write((char*)&sk.use64, sizeof(bool));
+        ofs.write((char*)&sk.sketchsize, sizeof(uint32_t));
+
+        size_t h32sz = sk.hash32_arr.size();
+        size_t h64sz = sk.hash64_arr.size();
+        ofs.write((char*)&h32sz, sizeof(size_t));
+        ofs.write((char*)&h64sz, sizeof(size_t));
+        if (h32sz > 0)
+            ofs.write((char*)sk.hash32_arr.data(), sizeof(uint32_t) * h32sz);
+        if (h64sz > 0)
+            ofs.write((char*)sk.hash64_arr.data(), sizeof(uint64_t) * h64sz);
+
+        size_t name_len = sk.fileName.length();
+        ofs.write((char*)&name_len, sizeof(size_t));
+        ofs.write(sk.fileName.c_str(), name_len);
+    }
+
+    size_t cluster_count = clusters.size();
+    ofs.write((char*)&cluster_count, sizeof(size_t));
+    for (const auto& cl : clusters) {
+        size_t member_count = cl.size();
+        ofs.write((char*)&member_count, sizeof(size_t));
+        ofs.write((char*)cl.data(), sizeof(int) * member_count);
+    }
+
+    size_t all_count = all_sketches.size();
+    ofs.write((char*)&all_count, sizeof(size_t));
+    for (const auto& sk : all_sketches) {
+        size_t name_len = sk.fileName.length();
+        ofs.write((char*)&name_len, sizeof(size_t));
+        ofs.write(sk.fileName.c_str(), name_len);
+        ofs.write((char*)&sk.totalSeqLength, sizeof(uint64_t));
+    }
+
+    size_t index_size = inverted_index.size();
+    ofs.write((char*)&index_size, sizeof(size_t));
+    for (const auto& pair : inverted_index) {
+        uint32_t hash = pair.first;
+        const std::vector<int>& rep_list = pair.second;
+        ofs.write((char*)&hash, sizeof(uint32_t));
+        size_t list_size = rep_list.size();
+        ofs.write((char*)&list_size, sizeof(size_t));
+        ofs.write((char*)rep_list.data(), sizeof(int) * list_size);
+    }
+
+    ofs.close();
+    std::cerr << "RepDB saved to: " << filepath << std::endl;
+    std::cerr << "  Representatives: " << rep_count << std::endl;
+    std::cerr << "  Total genomes:   " << all_count << std::endl;
+    std::cerr << "  Inverted index:  " << index_size << " unique hashes" << std::endl;
+    return true;
+}
+
+bool KssdClusterState::load_repdb(const string& filepath) {
+    std::ifstream ifs(filepath, std::ios::binary);
+    if (!ifs) {
+        std::cerr << "ERROR: Cannot open RepDB file for reading: " << filepath << std::endl;
+        return false;
+    }
+
+    char magic[8];
+    ifs.read(magic, 8);
+    if (std::string(magic, 8) != "REPDB001") {
+        std::cerr << "ERROR: Invalid RepDB file (bad magic): " << filepath << std::endl;
+        return false;
+    }
+
+    ifs.read((char*)&threshold, sizeof(double));
+    ifs.read((char*)&kmer_size, sizeof(int));
+    ifs.read((char*)&params.half_k, sizeof(int));
+    ifs.read((char*)&params.half_subk, sizeof(int));
+    ifs.read((char*)&params.drlevel, sizeof(int));
+    ifs.read((char*)&params.genomeNumber, sizeof(int));
+
+    size_t rep_count;
+    ifs.read((char*)&rep_count, sizeof(size_t));
+    representative_ids.resize(rep_count);
+    representatives.resize(rep_count);
+
+    for (size_t i = 0; i < rep_count; i++) {
+        ifs.read((char*)&representative_ids[i], sizeof(int));
+
+        auto& sk = representatives[i];
+        ifs.read((char*)&sk.id, sizeof(int));
+        ifs.read((char*)&sk.totalSeqLength, sizeof(uint64_t));
+        ifs.read((char*)&sk.use64, sizeof(bool));
+        ifs.read((char*)&sk.sketchsize, sizeof(uint32_t));
+
+        size_t h32sz, h64sz;
+        ifs.read((char*)&h32sz, sizeof(size_t));
+        ifs.read((char*)&h64sz, sizeof(size_t));
+        if (h32sz > 0) {
+            sk.hash32_arr.resize(h32sz);
+            ifs.read((char*)sk.hash32_arr.data(), sizeof(uint32_t) * h32sz);
+        }
+        if (h64sz > 0) {
+            sk.hash64_arr.resize(h64sz);
+            ifs.read((char*)sk.hash64_arr.data(), sizeof(uint64_t) * h64sz);
+        }
+
+        size_t name_len;
+        ifs.read((char*)&name_len, sizeof(size_t));
+        sk.fileName.resize(name_len);
+        ifs.read(&sk.fileName[0], name_len);
+    }
+
+    size_t cluster_count;
+    ifs.read((char*)&cluster_count, sizeof(size_t));
+    clusters.resize(cluster_count);
+    for (auto& cl : clusters) {
+        size_t member_count;
+        ifs.read((char*)&member_count, sizeof(size_t));
+        cl.resize(member_count);
+        ifs.read((char*)cl.data(), sizeof(int) * member_count);
+    }
+
+    size_t all_count;
+    ifs.read((char*)&all_count, sizeof(size_t));
+    all_sketches.resize(all_count);
+    for (auto& sk : all_sketches) {
+        size_t name_len;
+        ifs.read((char*)&name_len, sizeof(size_t));
+        sk.fileName.resize(name_len);
+        ifs.read(&sk.fileName[0], name_len);
+        ifs.read((char*)&sk.totalSeqLength, sizeof(uint64_t));
+    }
+
+    size_t index_size;
+    ifs.read((char*)&index_size, sizeof(size_t));
+    inverted_index.clear();
+    inverted_index.reserve(index_size);
+    for (size_t i = 0; i < index_size; i++) {
+        uint32_t hash;
+        ifs.read((char*)&hash, sizeof(uint32_t));
+        size_t list_size;
+        ifs.read((char*)&list_size, sizeof(size_t));
+        vector<int> rep_list(list_size);
+        ifs.read((char*)rep_list.data(), sizeof(int) * list_size);
+        inverted_index[hash] = std::move(rep_list);
+    }
+
+    ifs.close();
+    std::cerr << "RepDB loaded from: " << filepath << std::endl;
+    std::cerr << "  Representatives: " << rep_count << std::endl;
+    std::cerr << "  Total genomes:   " << all_count << std::endl;
+    std::cerr << "  Inverted index:  " << index_size << " unique hashes" << std::endl;
+    std::cerr << "  Threshold:       " << threshold << std::endl;
+    std::cerr << "  Kmer size:       " << kmer_size << std::endl;
+    return true;
+}
+
+vector<RepDBQueryResult> KssdClusterState::query_topk(
+    const KssdSketchInfo& query, int topk, int threads) const
+{
+    double radio = calculateMaxSizeRatio(threshold, kmer_size);
+    double x = std::exp(-threshold * kmer_size);
+    double jaccard_min = x / (2.0 - x);
+    int sizeQry = query.hash32_arr.size();
+
+    phmap::flat_hash_map<int, int> candidate_counts;
+    candidate_counts.reserve(1000);
+
+    for (uint32_t hash : query.hash32_arr) {
+        auto it = inverted_index.find(hash);
+        if (it != inverted_index.end()) {
+            for (int rep_idx : it->second) {
+                candidate_counts[rep_idx]++;
+            }
+        }
+    }
+
+    struct DistPair {
+        int rep_idx;
+        double distance;
+    };
+    std::vector<DistPair> scored;
+    scored.reserve(candidate_counts.size());
+
+    std::vector<std::pair<int, int>> candidates;
+    candidates.reserve(candidate_counts.size());
+    for (const auto& p : candidate_counts) {
+        candidates.emplace_back(p.first, p.second);
+    }
+
+    std::vector<DistPair> thread_results;
+    std::mutex mtx;
+
+    #pragma omp parallel num_threads(threads)
+    {
+        std::vector<DistPair> local;
+        #pragma omp for schedule(dynamic)
+        for (size_t i = 0; i < candidates.size(); i++) {
+            int rep_idx = candidates[i].first;
+            int common = candidates[i].second;
+            const auto& rep = representatives[rep_idx];
+            int sizeRef = rep.hash32_arr.size();
+
+            double ratio = (double)sizeQry / sizeRef;
+            if (ratio > radio || ratio < 1.0 / radio)
+                continue;
+
+            int min_common = (int)(jaccard_min * (sizeQry + sizeRef) / (1.0 + jaccard_min));
+            if (common < min_common)
+                continue;
+
+            double dist = calculate_mash_distance(rep.hash32_arr, query.hash32_arr, kmer_size);
+            local.push_back({rep_idx, dist});
+        }
+        std::lock_guard<std::mutex> lock(mtx);
+        scored.insert(scored.end(), local.begin(), local.end());
+    }
+
+    std::sort(scored.begin(), scored.end(),
+        [](const DistPair& a, const DistPair& b) { return a.distance < b.distance; });
+
+    int k = std::min(topk, (int)scored.size());
+    vector<RepDBQueryResult> results;
+    results.reserve(k);
+
+    for (int i = 0; i < k; i++) {
+        RepDBQueryResult r;
+        r.rep_idx = scored[i].rep_idx;
+        r.distance = scored[i].distance;
+
+        if (r.rep_idx >= 0 && r.rep_idx < (int)representatives.size()) {
+            r.genome_id = representative_ids[r.rep_idx];
+            r.genome_name = representatives[r.rep_idx].fileName;
+        } else {
+            r.genome_id = -1;
+            r.genome_name = "N/A";
+        }
+        r.cluster_id = r.rep_idx;
+        r.cluster_size = (r.rep_idx >= 0 && r.rep_idx < (int)clusters.size())
+                         ? (int)clusters[r.rep_idx].size() : 0;
+        results.push_back(r);
+    }
+    return results;
+}
+
+RepDBQueryResult KssdClusterState::assign(
+    const KssdSketchInfo& query, int threads) const
+{
+    auto results = query_topk(query, 1, threads);
+    if (!results.empty() && results[0].distance <= threshold) {
+        return results[0];
+    }
+    RepDBQueryResult none;
+    none.rep_idx = -1;
+    none.genome_id = -1;
+    none.genome_name = "unassigned";
+    none.distance = -1.0;
+    none.cluster_id = -1;
+    none.cluster_size = 0;
+    return none;
+}
+
+void KssdClusterState::print_stats(std::ostream& out) const {
+    size_t total_genomes = 0;
+    for (const auto& cl : clusters) total_genomes += cl.size();
+
+    out << "========================================" << std::endl;
+    out << "        RepDB Statistics Report" << std::endl;
+    out << "========================================" << std::endl;
+    out << std::endl;
+
+    out << "[Basic Info]" << std::endl;
+    out << "  Threshold:              " << threshold << std::endl;
+    out << "  Kmer size:              " << kmer_size << std::endl;
+    out << "  KSSD half_k:            " << params.half_k << std::endl;
+    out << "  KSSD half_subk:         " << params.half_subk << std::endl;
+    out << "  KSSD drlevel:           " << params.drlevel << std::endl;
+    out << std::endl;
+
+    out << "[Scale]" << std::endl;
+    out << "  Total genomes:          " << total_genomes << std::endl;
+    out << "  Representatives:        " << representatives.size() << std::endl;
+    out << "  Clusters:               " << clusters.size() << std::endl;
+    double compression = total_genomes > 0
+        ? (1.0 - (double)representatives.size() / total_genomes) * 100.0 : 0.0;
+    out << "  Compression ratio:      " << std::fixed << std::setprecision(2)
+        << compression << "%" << std::endl;
+    out << std::endl;
+
+    out << "[Inverted Index]" << std::endl;
+    out << "  Unique hashes:          " << inverted_index.size() << std::endl;
+    size_t total_postings = 0;
+    size_t max_posting = 0;
+    for (const auto& p : inverted_index) {
+        total_postings += p.second.size();
+        if (p.second.size() > max_posting) max_posting = p.second.size();
+    }
+    double avg_posting = inverted_index.size() > 0
+        ? (double)total_postings / inverted_index.size() : 0;
+    out << "  Total postings:         " << total_postings << std::endl;
+    out << "  Avg posting length:     " << std::fixed << std::setprecision(2)
+        << avg_posting << std::endl;
+    out << "  Max posting length:     " << max_posting << std::endl;
+    out << std::endl;
+
+    out << "[Cluster Size Distribution]" << std::endl;
+    if (!clusters.empty()) {
+        std::vector<int> sizes;
+        sizes.reserve(clusters.size());
+        size_t singleton = 0;
+        size_t max_sz = 0;
+        for (const auto& cl : clusters) {
+            sizes.push_back(cl.size());
+            if (cl.size() <= 1) singleton++;
+            if (cl.size() > max_sz) max_sz = cl.size();
+        }
+        std::sort(sizes.begin(), sizes.end());
+        double mean = (double)total_genomes / clusters.size();
+        int median = sizes[sizes.size() / 2];
+
+        out << "  Min cluster size:       " << sizes.front() << std::endl;
+        out << "  Max cluster size:       " << sizes.back() << std::endl;
+        out << "  Mean cluster size:      " << std::fixed << std::setprecision(2)
+            << mean << std::endl;
+        out << "  Median cluster size:    " << median << std::endl;
+        out << "  Singletons:             " << singleton << " ("
+            << std::fixed << std::setprecision(1)
+            << (100.0 * singleton / clusters.size()) << "%)" << std::endl;
+
+        size_t p90 = sizes[(size_t)(sizes.size() * 0.9)];
+        size_t p95 = sizes[(size_t)(sizes.size() * 0.95)];
+        size_t p99 = sizes[(size_t)(sizes.size() * 0.99)];
+        out << "  P90 cluster size:       " << p90 << std::endl;
+        out << "  P95 cluster size:       " << p95 << std::endl;
+        out << "  P99 cluster size:       " << p99 << std::endl;
+    }
+    out << std::endl;
+
+    out << "[Representative Sketch Sizes]" << std::endl;
+    if (!representatives.empty()) {
+        size_t min_sk = UINT64_MAX, max_sk = 0, sum_sk = 0;
+        for (const auto& r : representatives) {
+            size_t sz = r.hash32_arr.size();
+            if (sz < min_sk) min_sk = sz;
+            if (sz > max_sk) max_sk = sz;
+            sum_sk += sz;
+        }
+        out << "  Min sketch size:        " << min_sk << std::endl;
+        out << "  Max sketch size:        " << max_sk << std::endl;
+        out << "  Mean sketch size:       " << std::fixed << std::setprecision(1)
+            << (double)sum_sk / representatives.size() << std::endl;
+    }
+
+    uint64_t total_seq_len = 0;
+    for (const auto& sk : all_sketches) {
+        total_seq_len += sk.totalSeqLength;
+    }
+    if (total_seq_len > 0) {
+        out << std::endl;
+        out << "[Genome Coverage]" << std::endl;
+        uint64_t rep_seq_len = 0;
+        for (const auto& r : representatives) {
+            rep_seq_len += r.totalSeqLength;
+        }
+        out << "  Total sequence length:  " << total_seq_len << " bp" << std::endl;
+        out << "  Representative seq len: " << rep_seq_len << " bp" << std::endl;
+        out << "  Coverage ratio:         " << std::fixed << std::setprecision(2)
+            << (100.0 * rep_seq_len / total_seq_len) << "%" << std::endl;
+    }
+
+    out << "========================================" << std::endl;
 }
 
 

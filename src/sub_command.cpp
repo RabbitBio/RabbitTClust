@@ -3,6 +3,7 @@
 #include "cluster_postprocess.h"
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 #include <unordered_set>
 #include <sys/stat.h>  // For stat()
 #include <omp.h>  // For OpenMP functions
@@ -264,6 +265,232 @@ void append_clust_greedy_fast(string folder_path, string input_file, string outp
 			cerr << "-----updated cluster state saved" << endl;
 	}
 }
+
+// =====================================================================
+// RepDB workflow functions
+// =====================================================================
+
+void repdb_build_from_sketch(string folder_path, string db_path, string output_file, double threshold, int threads) {
+	vector<KssdSketchInfo> sketches;
+	KssdParameters info;
+	bool sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
+
+	int kmer_size = info.half_k * 2;
+	cerr << "===== RepDB Build (from pre-sketched) =====" << endl;
+	cerr << "  Genomes:    " << sketches.size() << endl;
+	cerr << "  Threshold:  " << threshold << endl;
+	cerr << "  Kmer size:  " << kmer_size << endl;
+
+	KssdClusterState state = KssdInitialClusterWithState(sketches, info, threshold, threads, kmer_size);
+
+	state.save_repdb(db_path);
+
+	if (!output_file.empty()) {
+		printKssdResult(state.clusters, state.all_sketches, sketchByFile, output_file, threshold);
+		cerr << "-----write the cluster result into: " << output_file << endl;
+	}
+
+	cerr << "\n===== RepDB Build Summary =====" << endl;
+	cerr << "  Total genomes:    " << sketches.size() << endl;
+	cerr << "  Representatives:  " << state.representatives.size() << endl;
+	cerr << "  Compression:      " << std::fixed << std::setprecision(2)
+		 << (1.0 - (double)state.representatives.size() / sketches.size()) * 100.0 << "%" << endl;
+	cerr << "  RepDB saved to:   " << db_path << endl;
+	cerr << "===============================" << endl;
+}
+
+void repdb_build_from_genome(string input_file, string db_path, string output_file, bool sketch_by_file, int min_len, int kmer_size, int drlevel, double threshold, int threads) {
+	vector<KssdSketchInfo> sketches;
+	KssdParameters info;
+	string folder_path;
+	compute_kssd_sketches(sketches, info, true, input_file, folder_path, sketch_by_file, min_len, kmer_size, drlevel, threads);
+
+	int actual_kmer_size = info.half_k * 2;
+	cerr << "===== RepDB Build (from genomes) =====" << endl;
+	cerr << "  Genomes:    " << sketches.size() << endl;
+	cerr << "  Threshold:  " << threshold << endl;
+	cerr << "  Kmer size:  " << actual_kmer_size << endl;
+
+	KssdClusterState state = KssdInitialClusterWithState(sketches, info, threshold, threads, actual_kmer_size);
+
+	state.save_repdb(db_path);
+
+	if (!output_file.empty()) {
+		printKssdResult(state.clusters, state.all_sketches, sketch_by_file, output_file, threshold);
+		cerr << "-----write the cluster result into: " << output_file << endl;
+	}
+
+	cerr << "\n===== RepDB Build Summary =====" << endl;
+	cerr << "  Total genomes:    " << sketches.size() << endl;
+	cerr << "  Representatives:  " << state.representatives.size() << endl;
+	cerr << "  Compression:      " << std::fixed << std::setprecision(2)
+		 << (1.0 - (double)state.representatives.size() / sketches.size()) * 100.0 << "%" << endl;
+	cerr << "  RepDB saved to:   " << db_path << endl;
+	cerr << "===============================" << endl;
+}
+
+void repdb_query(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int topk, int threads) {
+	KssdClusterState state;
+	if (!state.load_repdb(db_path)) {
+		cerr << "ERROR: Failed to load RepDB from: " << db_path << endl;
+		exit(1);
+	}
+
+	vector<KssdSketchInfo> queries;
+	KssdParameters qinfo;
+	string qfolder;
+	compute_kssd_sketches(queries, qinfo, false, input_file, qfolder, sketch_by_file, min_len, state.kmer_size, state.params.drlevel, threads);
+
+	cerr << "===== RepDB Query =====" << endl;
+	cerr << "  Query genomes:  " << queries.size() << endl;
+	cerr << "  Top-k:          " << topk << endl;
+	cerr << "  DB reps:        " << state.representatives.size() << endl;
+
+	FILE* fp = fopen(output_file.c_str(), "w");
+	if (!fp) {
+		cerr << "ERROR: Cannot open output file: " << output_file << endl;
+		exit(1);
+	}
+
+	fprintf(fp, "#query\trank\trep_name\tdistance\tcluster_id\tcluster_size\n");
+
+	for (size_t i = 0; i < queries.size(); i++) {
+		auto results = state.query_topk(queries[i], topk, threads);
+		string qname = queries[i].fileName;
+		if (qname.empty()) qname = "query_" + std::to_string(i);
+
+		if (results.empty()) {
+			fprintf(fp, "%s\t0\tno_match\t-1\t-1\t0\n", qname.c_str());
+		} else {
+			for (int r = 0; r < (int)results.size(); r++) {
+				fprintf(fp, "%s\t%d\t%s\t%.6f\t%d\t%d\n",
+					qname.c_str(),
+					r + 1,
+					results[r].genome_name.c_str(),
+					results[r].distance,
+					results[r].cluster_id,
+					results[r].cluster_size);
+			}
+		}
+
+		if ((i + 1) % 10000 == 0) {
+			cerr << "---queried: " << (i + 1) << " / " << queries.size() << endl;
+		}
+	}
+	fclose(fp);
+
+	cerr << "===== Query Results =====" << endl;
+	cerr << "  Output: " << output_file << endl;
+	cerr << "=========================" << endl;
+}
+
+void repdb_assign(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads) {
+	KssdClusterState state;
+	if (!state.load_repdb(db_path)) {
+		cerr << "ERROR: Failed to load RepDB from: " << db_path << endl;
+		exit(1);
+	}
+
+	vector<KssdSketchInfo> queries;
+	KssdParameters qinfo;
+	string qfolder;
+	compute_kssd_sketches(queries, qinfo, false, input_file, qfolder, sketch_by_file, min_len, state.kmer_size, state.params.drlevel, threads);
+
+	cerr << "===== RepDB Assignment =====" << endl;
+	cerr << "  Query genomes:  " << queries.size() << endl;
+	cerr << "  DB reps:        " << state.representatives.size() << endl;
+	cerr << "  Threshold:      " << state.threshold << endl;
+
+	FILE* fp = fopen(output_file.c_str(), "w");
+	if (!fp) {
+		cerr << "ERROR: Cannot open output file: " << output_file << endl;
+		exit(1);
+	}
+
+	fprintf(fp, "#query\tassigned_cluster\trep_name\tdistance\tcluster_size\tstatus\n");
+
+	int assigned = 0, unassigned = 0;
+
+	for (size_t i = 0; i < queries.size(); i++) {
+		auto result = state.assign(queries[i], threads);
+		string qname = queries[i].fileName;
+		if (qname.empty()) qname = "query_" + std::to_string(i);
+
+		if (result.rep_idx >= 0) {
+			fprintf(fp, "%s\t%d\t%s\t%.6f\t%d\tassigned\n",
+				qname.c_str(),
+				result.cluster_id,
+				result.genome_name.c_str(),
+				result.distance,
+				result.cluster_size);
+			assigned++;
+		} else {
+			fprintf(fp, "%s\t-1\tunassigned\t-1\t0\tnovel\n", qname.c_str());
+			unassigned++;
+		}
+
+		if ((i + 1) % 10000 == 0) {
+			cerr << "---assigned: " << (i + 1) << " / " << queries.size() << endl;
+		}
+	}
+	fclose(fp);
+
+	cerr << "===== Assignment Results =====" << endl;
+	cerr << "  Assigned:    " << assigned << " (" << std::fixed << std::setprecision(1)
+		 << (100.0 * assigned / queries.size()) << "%)" << endl;
+	cerr << "  Novel:       " << unassigned << " (" << std::fixed << std::setprecision(1)
+		 << (100.0 * unassigned / queries.size()) << "%)" << endl;
+	cerr << "  Output:      " << output_file << endl;
+	cerr << "==============================" << endl;
+}
+
+void repdb_append(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads) {
+	KssdClusterState state;
+	if (!state.load_repdb(db_path)) {
+		cerr << "ERROR: Failed to load RepDB from: " << db_path << endl;
+		exit(1);
+	}
+
+	vector<KssdSketchInfo> new_sketches;
+	KssdParameters new_info;
+	string new_folder;
+	compute_kssd_sketches(new_sketches, new_info, false, input_file, new_folder, sketch_by_file, min_len, state.kmer_size, state.params.drlevel, threads);
+
+	int old_rep_count = state.representatives.size();
+	int old_total = state.all_sketches.size();
+
+	cerr << "===== RepDB Append =====" << endl;
+	cerr << "  Existing reps:    " << old_rep_count << endl;
+	cerr << "  Existing genomes: " << old_total << endl;
+	cerr << "  New genomes:      " << new_sketches.size() << endl;
+
+	vector<vector<int>> clusters = KssdIncrementalCluster(state, new_sketches, threads);
+
+	state.save_repdb(db_path);
+
+	if (!output_file.empty()) {
+		printKssdResult(clusters, state.all_sketches, sketch_by_file, output_file, state.threshold);
+		cerr << "-----write the cluster result into: " << output_file << endl;
+	}
+
+	int new_rep_count = state.representatives.size();
+	cerr << "\n===== Append Summary =====" << endl;
+	cerr << "  New reps added:   " << (new_rep_count - old_rep_count) << endl;
+	cerr << "  Total reps now:   " << new_rep_count << endl;
+	cerr << "  Total genomes:    " << state.all_sketches.size() << endl;
+	cerr << "  RepDB updated:    " << db_path << endl;
+	cerr << "==========================" << endl;
+}
+
+void repdb_stats(string db_path) {
+	KssdClusterState state;
+	if (!state.load_repdb(db_path)) {
+		cerr << "ERROR: Failed to load RepDB from: " << db_path << endl;
+		exit(1);
+	}
+	state.print_stats(std::cout);
+}
+
 #endif
 
 #ifndef GREEDY_CLUST

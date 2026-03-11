@@ -35,6 +35,15 @@ vector<vector<int>> MinHashGreedyClusterWithInvertedIndex(
 
 #include "phmap.h"
 
+struct RepDBQueryResult {
+    int rep_idx;
+    int genome_id;
+    string genome_name;
+    double distance;
+    int cluster_id;
+    int cluster_size;
+};
+
 struct KssdClusterState {
     vector<int> representative_ids;
     vector<KssdSketchInfo> representatives;
@@ -49,8 +58,15 @@ struct KssdClusterState {
     bool save(const string& filepath) const;
     bool load(const string& filepath);
 
+    bool save_repdb(const string& filepath) const;
+    bool load_repdb(const string& filepath);
+
     void build_inverted_index();
     void update_inverted_index(int rep_idx);
+
+    vector<RepDBQueryResult> query_topk(const KssdSketchInfo& query, int topk, int threads) const;
+    RepDBQueryResult assign(const KssdSketchInfo& query, int threads) const;
+    void print_stats(std::ostream& out) const;
 };
 
 vector<vector<int>> KssdIncrementalCluster(
