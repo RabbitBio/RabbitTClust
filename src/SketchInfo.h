@@ -107,6 +107,57 @@ struct MinHashInvertedIndex{
 			hash_map[hash_val].push_back(genome_id);
 		}
 	}
+
+	static string index_path(const string& folder) {
+		return folder + "/minhash.sketch.index";
+	}
+
+	bool save_to_file(const string& folder) const {
+		string path = index_path(folder);
+		FILE* fp = fopen(path.c_str(), "wb");
+		if (!fp) { cerr << "WARNING: cannot save MinHash index to: " << path << endl; return false; }
+		const char magic[9] = "MHIDX001";
+		fwrite(magic, 1, 8, fp);
+		size_t n = hash_map.size();
+		fwrite(&n, sizeof(size_t), 1, fp);
+		for (const auto& kv : hash_map) {
+			uint64_t h = kv.first;
+			uint32_t m = (uint32_t)kv.second.size();
+			fwrite(&h, sizeof(uint64_t), 1, fp);
+			fwrite(&m, sizeof(uint32_t), 1, fp);
+			fwrite(kv.second.data(), sizeof(uint32_t), m, fp);
+		}
+		fclose(fp);
+		cerr << "-----MinHash inverted index saved: " << path
+		     << " (" << n << " unique hashes)" << endl;
+		return true;
+	}
+
+	bool load_from_file(const string& folder) {
+		string path = index_path(folder);
+		FILE* fp = fopen(path.c_str(), "rb");
+		if (!fp) return false;
+		char magic[9] = {};
+		if (fread(magic, 1, 8, fp) != 8 || string(magic, 8) != "MHIDX001") {
+			fclose(fp); return false;
+		}
+		size_t n;
+		fread(&n, sizeof(size_t), 1, fp);
+		hash_map.clear();
+		hash_map.reserve(n);
+		for (size_t i = 0; i < n; i++) {
+			uint64_t h; uint32_t m;
+			fread(&h, sizeof(uint64_t), 1, fp);
+			fread(&m, sizeof(uint32_t), 1, fp);
+			auto& vec = hash_map[h];
+			vec.resize(m);
+			fread(vec.data(), sizeof(uint32_t), m, fp);
+		}
+		fclose(fp);
+		cerr << "-----MinHash inverted index loaded: " << path
+		     << " (" << n << " unique hashes)" << endl;
+		return true;
+	}
 };
 
 bool cmpGenomeSize(SketchInfo s1, SketchInfo s2);

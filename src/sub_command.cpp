@@ -1084,7 +1084,7 @@ void append_clust_mst(string folder_path, string input_file, string output_file,
 		append_mst = compute_minhash_mst(final_sketches, pre_sketch_size, no_dense, is_containment, threads, dense_arr, dense_span, ani_arr, threshold, kmer_size, &inverted_index);
 
 		if(!no_save){
-			saveMinHashIndex(inverted_index, new_folder_path);
+			inverted_index.save_to_file(new_folder_path);
 		}
 	} else {
 		append_mst = modifyMST(final_sketches, pre_sketch_size, sketch_func_id_0, threads, no_dense, dense_arr, dense_span, ani_arr);
@@ -2103,55 +2103,52 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			int sketch_func_id_check, contain_compress, sketch_size, half_k, half_subk, drlevel;
 			bool is_containment_from_file;
 			read_sketch_parameters(folder_path, sketch_func_id_check, kmer_size_from_file, is_containment_from_file, contain_compress, sketch_size, half_k, half_subk, drlevel);
-			
-			// Build inverted index from loaded sketches using thread-local indices (like KSSD)
+
 			MinHashInvertedIndex inverted_index;
-			cerr << "-----building MinHash inverted index for MST computation..." << endl;
-			
-			// Use thread-local indices to reduce lock contention (similar to KSSD optimization)
-			vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
-			
-			#pragma omp parallel num_threads(threads)
-			{
-				int tid = omp_get_thread_num();
-				auto& local_index = thread_local_indices[tid];
-				
-				#pragma omp for schedule(dynamic, 100)
-				for(size_t i = 0; i < sketches.size(); i++){
-					if(sketches[i].minHash != nullptr) {
-						sketches[i].id = i;  // Ensure ID matches position
-						vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
-						for(uint64_t hash : hashes) {
-							local_index[hash].push_back(i);
+
+			// Try to load pre-built index from sketch folder; rebuild only if not found
+			if (!inverted_index.load_from_file(folder_path)) {
+				cerr << "-----building MinHash inverted index for MST computation..." << endl;
+
+				vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
+
+				#pragma omp parallel num_threads(threads)
+				{
+					int tid = omp_get_thread_num();
+					auto& local_index = thread_local_indices[tid];
+
+					#pragma omp for schedule(dynamic, 100)
+					for(size_t i = 0; i < sketches.size(); i++){
+						if(sketches[i].minHash != nullptr) {
+							sketches[i].id = i;
+							vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
+							for(uint64_t hash : hashes)
+								local_index[hash].push_back(i);
 						}
 					}
 				}
-			}
-			
-			// Merge thread-local indices (no lock needed here)
-			cerr << "-----merging thread-local indices..." << endl;
-			for(int tid = 0; tid < threads; tid++){
-				for(auto& entry : thread_local_indices[tid]){
-					uint64_t hash = entry.first;
-					auto& seq_ids = entry.second;
-					inverted_index.hash_map[hash].insert(
-						inverted_index.hash_map[hash].end(), 
-						seq_ids.begin(), seq_ids.end()
-					);
+
+				cerr << "-----merging thread-local indices..." << endl;
+				for(int tid = 0; tid < threads; tid++){
+					for(auto& entry : thread_local_indices[tid]){
+						inverted_index.hash_map[entry.first].insert(
+							inverted_index.hash_map[entry.first].end(),
+							entry.second.begin(), entry.second.end()
+						);
+					}
 				}
+				cerr << "-----MinHash inverted index built: " << inverted_index.hash_map.size() << " unique hashes" << endl;
+				// Save for future reuse
+				inverted_index.save_to_file(folder_path);
 			}
-			
-			cerr << "-----MinHash inverted index built: " << inverted_index.hash_map.size() << " unique hashes" << endl;
-			
-			// Use kmerSize from file (default 21 for MinHash), fallback to sketch object if file read fails
+
 			int kmer_size = kmer_size_from_file;
 			bool is_containment = is_containment_from_file;
 			if(kmer_size <= 0) {
-				// Fallback: get from sketch object
 				kmer_size = sketches[0].minHash->getKmerSize();
 				is_containment = sketches[0].isContainment;
 			}
-			
+
 			// Use compute_minhash_mst with inverted index
 			mst = compute_minhash_mst(sketches, 0, no_dense, is_containment, threads, denseArr, denseSpan, aniArr, threshold, kmer_size, &inverted_index);
 		} else {
@@ -2262,6 +2259,8 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			string command = "mkdir -p " + folder_path;
 			system(command.c_str());
 			saveSketches(sketches, folder_path, sketchByFile, sketchFunc, isContainment, containCompress, sketchSize, kmerSize);
+			if (inverted_index != nullptr && !inverted_index->hash_map.empty())
+				inverted_index->save_to_file(folder_path);
 			double t2 = get_sec();
 #ifdef Timer
 			cerr << "========time of saveSketches is: " << t2 - t1 << "========" << endl;
@@ -2318,42 +2317,45 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			
 			MinHashInvertedIndex local_index;
 			MinHashInvertedIndex* idx_ptr = inverted_index;
-			
+
 			if(idx_ptr == nullptr) {
-				// No pre-built index: build from scratch using thread-local indices
-				cerr << "-----building MinHash inverted index for MST computation..." << endl;
-				
-				vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
-				
-				#pragma omp parallel num_threads(threads)
-				{
-					int tid = omp_get_thread_num();
-					auto& tl_index = thread_local_indices[tid];
-					
-					#pragma omp for schedule(dynamic, 100)
-					for(size_t i = 0; i < sketches.size(); i++){
-						if(sketches[i].minHash != nullptr) {
-							sketches[i].id = i;
-							vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
-							for(uint64_t hash : hashes) {
-								tl_index[hash].push_back(i);
+				// No pre-built index passed: try to load from sketch folder first
+				if (!local_index.load_from_file(folder_path)) {
+					cerr << "-----building MinHash inverted index for MST computation..." << endl;
+
+					vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
+
+					#pragma omp parallel num_threads(threads)
+					{
+						int tid = omp_get_thread_num();
+						auto& tl_index = thread_local_indices[tid];
+
+						#pragma omp for schedule(dynamic, 100)
+						for(size_t i = 0; i < sketches.size(); i++){
+							if(sketches[i].minHash != nullptr) {
+								sketches[i].id = i;
+								vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
+								for(uint64_t hash : hashes)
+									tl_index[hash].push_back(i);
 							}
 						}
 					}
-				}
-				
-				cerr << "-----merging thread-local indices..." << endl;
-				for(int tid = 0; tid < threads; tid++){
-					for(auto& entry : thread_local_indices[tid]){
-						local_index.hash_map[entry.first].insert(
-							local_index.hash_map[entry.first].end(), 
-							entry.second.begin(), entry.second.end()
-						);
+
+					cerr << "-----merging thread-local indices..." << endl;
+					for(int tid = 0; tid < threads; tid++){
+						for(auto& entry : thread_local_indices[tid]){
+							local_index.hash_map[entry.first].insert(
+								local_index.hash_map[entry.first].end(),
+								entry.second.begin(), entry.second.end()
+							);
+						}
 					}
+					// Save for future reuse (only if isSave — but index is useful anyway)
+					if(isSave) local_index.save_to_file(folder_path);
 				}
 				idx_ptr = &local_index;
 			}
-			
+
 			cerr << "-----MinHash inverted index: " << idx_ptr->hash_map.size() << " unique hashes" << endl;
 			
 			int kmer_size = kmer_size_from_file;
@@ -2366,7 +2368,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			mst = compute_minhash_mst(sketches, 0, no_dense, is_containment, threads, denseArr, denseSpan, aniArr, threshold, kmer_size, idx_ptr);
 			
 			if(isSave){
-				saveMinHashIndex(*idx_ptr, folder_path);
+				idx_ptr->save_to_file(folder_path);
 			}
 		} else {
 			// Fallback to traditional modifyMST for non-MinHash or when MinHash is not available
