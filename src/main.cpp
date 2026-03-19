@@ -123,7 +123,7 @@ int main(int argc, char * argv[]){
 	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing");
 #ifdef USE_MPI
 	bool is_mpi = false;
-	auto flag_mpi = app.add_flag("--mpi", is_mpi, "use MPI for distributed sketching and MST (clust-mst, works with both MinHash and KSSD/--fast)");
+	auto flag_mpi = app.add_flag("--mpi", is_mpi, "use MPI for distributed sketching/MST (clust-mst): from genomes or --presketched; MinHash and KSSD/--fast");
 #endif
 	auto flag_inverted_index = app.add_flag("--inverted-index", use_inverted_index, "use inverted index optimization for greedy clustering (MinHash only)");
 	

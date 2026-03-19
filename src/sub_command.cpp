@@ -2190,6 +2190,24 @@ void clust_from_sketches_fast_MPI(int my_rank, int comm_sz, int /* half_k */, in
 	double t_load_end = get_sec();
 	if (my_rank == 0) cerr << "========time of loading & sorting sketches is: " << t_load_end - t_load_start << " s========" << endl;
 
+	// KSSD 64-bit MST (MPI) reads inverted index from kssd.sketch.index / kssd.sketch.dict.
+	// Plain presketch dirs (saveKssdSketches / MPI sketch save) only have kssd.*.sketch files,
+	// so build the on-disk index once on rank 0 before MST (all ranks need shared FS or copy).
+	if (!sketches.empty() && sketches[0].use64) {
+		string idx_path = folder_path + "/kssd.sketch.index";
+		struct stat st {};
+		bool have_index = (stat(idx_path.c_str(), &st) == 0);
+		if (!have_index) {
+			MPI_Barrier(MPI_COMM_WORLD);
+			if (my_rank == 0) {
+				cerr << "-----MPI: 64-bit KSSD requires inverted index on disk; writing kssd.sketch.index / kssd.sketch.dict under: "
+				     << folder_path << endl;
+				transSketches(sketches, info, folder_path, threads);
+			}
+			MPI_Barrier(MPI_COMM_WORLD);
+		}
+	}
+
 	double t_index_start = get_sec();
 	char* sum_info_buffer = nullptr, * sum_hash_buffer = nullptr, * sum_index_buffer = nullptr, * sum_dict_buffer = nullptr;
 	size_t sum_info_size = 0, sum_hash_size = 0, sum_index_size = 0, sum_dict_size = 0;
