@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <vector>
 #include "phmap.h"  // Google's Swiss Tables for faster hash maps
 using namespace std;
 
@@ -335,32 +336,36 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
     hash_map_32_ptr = &hash_map_32_loaded;
   }
 
-  //int denseSpan = 10;
-  double step = 1.0 / denseSpan;
-
-  //double step = threshold / denseSpan;
-  //cerr << "the threshold is: " << threshold << endl;
-  //cerr << "the step is: " << step << endl;
   int N = sketches.size();
-  denseArr = new int*[denseSpan];
-  int** denseLocalArr = new int*[denseSpan * threads];
-  double distRadius[denseSpan];
-  for(int i = 0; i < denseSpan; i++){
-    distRadius[i] = step * i;
-    denseArr[i] = new int[N];
-    memset(denseArr[i], 0, N * sizeof(int));
-    for(int j = 0; j < threads; j++){
-      denseLocalArr[i * threads + j] = new int[N];
-      memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
+  denseArr = nullptr;
+  aniArr = nullptr;
+  int** denseLocalArr = nullptr;
+  uint64_t** threadsANI = nullptr;
+  vector<double> distRadiusVec;
+  double* distRadius = nullptr;
+  // Density + per-ANI histogram: DENSE_SPAN * (threads+1) * N ints — omitted when no_dense (default; use --dense to enable).
+  if(!no_dense){
+    const double step = 1.0 / denseSpan;
+    distRadiusVec.resize((size_t)denseSpan);
+    distRadius = distRadiusVec.data();
+    denseArr = new int*[denseSpan];
+    denseLocalArr = new int*[denseSpan * threads];
+    for(int i = 0; i < denseSpan; i++){
+      distRadius[i] = step * (double)i;
+      denseArr[i] = new int[N];
+      memset(denseArr[i], 0, N * sizeof(int));
+      for(int j = 0; j < threads; j++){
+        denseLocalArr[i * threads + j] = new int[N];
+        memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
+      }
     }
-  }
-  //for ANI distribution calculation.
-  aniArr = new uint64_t[101];
-  memset(aniArr, 0, 101 * sizeof(uint64_t));
-  uint64_t** threadsANI = new uint64_t*[threads];
-  for(int i = 0; i < threads; i++){
-    threadsANI[i] = new uint64_t[101];
-    memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+    aniArr = new uint64_t[101];
+    memset(aniArr, 0, 101 * sizeof(uint64_t));
+    threadsANI = new uint64_t*[threads];
+    for(int i = 0; i < threads; i++){
+      threadsANI[i] = new uint64_t[101];
+      memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+    }
   }
 
   // start to generate the sub_mst
@@ -589,15 +594,17 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
       }
     }
   }
-  for(int i = 0; i < threads; i++){
-    delete [] threadsANI[i];
+  if(!no_dense){
+    for(int i = 0; i < threads; i++){
+      delete [] threadsANI[i];
+    }
+    delete [] threadsANI;
+
+    for(int i = 0; i < denseSpan * threads; i++){
+      delete [] denseLocalArr[i];
+    }
+    delete [] denseLocalArr;
   }
-  delete [] threadsANI;
-  
-  for(int i = 0; i < denseSpan * threads; i++){
-    delete [] denseLocalArr[i];
-  }
-  delete [] denseLocalArr;
 
   if(tailNum != 0){
     for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
@@ -800,35 +807,35 @@ vector<EdgeInfo> compute_kssd_mst(vector<KssdSketchInfo>& sketches, KssdParamete
 }
 
 vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sketch_func_id, int threads, bool no_dense, int** &denseArr, int denseSpan, uint64_t* &aniArr){
-  //int denseSpan = 10;
-  double step = 1.0 / denseSpan;
-
-  //double step = threshold / denseSpan;
-  //cerr << "the threshold is: " << threshold << endl;
-  //cerr << "the step is: " << step << endl;
   int N = sketches.size();
-  denseArr = new int*[denseSpan];
-  int** denseLocalArr = new int*[denseSpan * threads];
-  double distRadius[denseSpan];
-  for(int i = 0; i < denseSpan; i++){
-    //distRadius[i] = 0.05 - 0.005 * i;
-    //distRadius[i] = threshold - step * i;
-    distRadius[i] = step * i;
-    denseArr[i] = new int[N];
-    memset(denseArr[i], 0, N * sizeof(int));
-    for(int j = 0; j < threads; j++){
-      denseLocalArr[i * threads + j] = new int[N];
-      memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
+  denseArr = nullptr;
+  aniArr = nullptr;
+  int** denseLocalArr = nullptr;
+  uint64_t** threadsANI = nullptr;
+  vector<double> distRadiusVec;
+  double* distRadius = nullptr;
+  if(!no_dense){
+    const double step = 1.0 / denseSpan;
+    distRadiusVec.resize((size_t)denseSpan);
+    distRadius = distRadiusVec.data();
+    denseArr = new int*[denseSpan];
+    denseLocalArr = new int*[denseSpan * threads];
+    for(int i = 0; i < denseSpan; i++){
+      distRadius[i] = step * (double)i;
+      denseArr[i] = new int[N];
+      memset(denseArr[i], 0, N * sizeof(int));
+      for(int j = 0; j < threads; j++){
+        denseLocalArr[i * threads + j] = new int[N];
+        memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
+      }
     }
-  }
-  //for ANI distribution calculation.
-  aniArr = new uint64_t[101];
-  memset(aniArr, 0, 101 * sizeof(uint64_t));
-  uint64_t** threadsANI = new uint64_t*[threads];
-  //uint64_t threadsANI[threads][101];
-  for(int i = 0; i < threads; i++){
-    threadsANI[i] = new uint64_t[101];
-    memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+    aniArr = new uint64_t[101];
+    memset(aniArr, 0, 101 * sizeof(uint64_t));
+    threadsANI = new uint64_t*[threads];
+    for(int i = 0; i < threads; i++){
+      threadsANI[i] = new uint64_t[101];
+      memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+    }
   }
 
   vector<EdgeInfo> mstArr[threads];
@@ -923,15 +930,17 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
       }
     }
   }
-  for(int i = 0; i < threads; i++){
-    delete [] threadsANI[i];
-  }
-  delete [] threadsANI;
+  if(!no_dense){
+    for(int i = 0; i < threads; i++){
+      delete [] threadsANI[i];
+    }
+    delete [] threadsANI;
 
-  for(int i = 0; i < denseSpan * threads; i++){
-    delete [] denseLocalArr[i];
+    for(int i = 0; i < denseSpan * threads; i++){
+      delete [] denseLocalArr[i];
+    }
+    delete [] denseLocalArr;
   }
-  delete [] denseLocalArr;
 
   if(tailNum != 0){
     for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
@@ -1313,29 +1322,35 @@ vector<EdgeInfo> compute_minhash_mst(vector<SketchInfo>& sketches, int start_ind
   }
   cerr << "-----MinHash sketches cached" << endl;
 
-  //int denseSpan = 10;
-  double step = 1.0 / denseSpan;
-
   int N = sketches.size();
-  denseArr = new int*[denseSpan];
-  int** denseLocalArr = new int*[denseSpan * threads];
-  double distRadius[denseSpan];
-  for(int i = 0; i < denseSpan; i++){
-    distRadius[i] = step * i;
-    denseArr[i] = new int[N];
-    memset(denseArr[i], 0, N * sizeof(int));
-    for(int j = 0; j < threads; j++){
-      denseLocalArr[i * threads + j] = new int[N];
-      memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
+  denseArr = nullptr;
+  aniArr = nullptr;
+  int** denseLocalArr = nullptr;
+  uint64_t** threadsANI = nullptr;
+  vector<double> distRadiusVec;
+  double* distRadius = nullptr;
+  if(!no_dense){
+    const double step = 1.0 / denseSpan;
+    distRadiusVec.resize((size_t)denseSpan);
+    distRadius = distRadiusVec.data();
+    denseArr = new int*[denseSpan];
+    denseLocalArr = new int*[denseSpan * threads];
+    for(int i = 0; i < denseSpan; i++){
+      distRadius[i] = step * (double)i;
+      denseArr[i] = new int[N];
+      memset(denseArr[i], 0, N * sizeof(int));
+      for(int j = 0; j < threads; j++){
+        denseLocalArr[i * threads + j] = new int[N];
+        memset(denseLocalArr[i*threads+j], 0, N * sizeof(int));
+      }
     }
-  }
-  //for ANI distribution calculation.
-  aniArr = new uint64_t[101];
-  memset(aniArr, 0, 101 * sizeof(uint64_t));
-  uint64_t** threadsANI = new uint64_t*[threads];
-  for(int i = 0; i < threads; i++){
-    threadsANI[i] = new uint64_t[101];
-    memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+    aniArr = new uint64_t[101];
+    memset(aniArr, 0, 101 * sizeof(uint64_t));
+    threadsANI = new uint64_t*[threads];
+    for(int i = 0; i < threads; i++){
+      threadsANI[i] = new uint64_t[101];
+      memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+    }
   }
 
   // start to generate the sub_mst
@@ -1551,15 +1566,17 @@ vector<EdgeInfo> compute_minhash_mst(vector<SketchInfo>& sketches, int start_ind
       }
     }
   }
-  for(int i = 0; i < threads; i++){
-    delete [] threadsANI[i];
+  if(!no_dense){
+    for(int i = 0; i < threads; i++){
+      delete [] threadsANI[i];
+    }
+    delete [] threadsANI;
+
+    for(int i = 0; i < denseSpan * threads; i++){
+      delete [] denseLocalArr[i];
+    }
+    delete [] denseLocalArr;
   }
-  delete [] threadsANI;
-  
-  for(int i = 0; i < denseSpan * threads; i++){
-    delete [] denseLocalArr[i];
-  }
-  delete [] denseLocalArr;
 
   if(tailNum != 0){
     for(int i = sketches.size()-tailNum; i < sketches.size(); i++){

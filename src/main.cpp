@@ -95,7 +95,7 @@ int main(int argc, char * argv[]){
 	bool is_auto_threshold = false;
 	bool is_stability = false;
 	bool is_fast = false;
-	bool no_dense = false;
+	bool dense = false;  // --dense: enable density/ANI/noise-removal; default off (saves RAM)
 	double dedup_dist = -1.0;
 	int reps_per_cluster = 0;
 	string buildDB_folder;
@@ -127,6 +127,9 @@ int main(int argc, char * argv[]){
 	auto option_presketched = app.add_option("--presketched", folder_path, "clustering by the pre-generated sketch files rather than genomes");
 	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing");
 	auto flag_inverted_index = app.add_flag("--inverted-index", use_inverted_index, "use inverted index optimization for greedy clustering (MinHash only)");
+#if defined(GREEDY_CLUST) || (!defined(LEIDEN_CLUST) && !defined(DBSCAN_CLUST))
+	auto flag_dense = app.add_flag("--dense", dense, "enable density maps, ANI histogram, and MST noise-removal pass (high memory; default: off)");
+#endif
 
 #ifdef GREEDY_CLUST
 	auto option_repdb = app.add_option("--db", repdb_path,
@@ -202,7 +205,6 @@ int main(int argc, char * argv[]){
 	auto flag_auto_threshold = app.add_flag("--auto-threshold", is_auto_threshold, "automatically select optimal threshold based on MST edge length distribution");
 	auto flag_stability = app.add_flag("--stability", is_stability, "evaluate threshold stability by measuring clustering consistency under small perturbations (works with --auto-threshold or user-specified threshold)");
 	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
-	auto flag_no_dense = app.add_flag("--no-dense", no_dense, "not calculate the density and ANI datas");
 	auto option_dedup_dist = app.add_option("--dedup-dist", dedup_dist, "within each cluster, collapse near-duplicate nodes connected by forest edges with dist <= dedup-dist; output to <output>.dedup");
 	auto option_reps_per_cluster = app.add_option("--reps-per-cluster", reps_per_cluster, "select up to k representatives per cluster (after optional dedup); output to <output>.reps");
 	auto option_buildDB = app.add_option("--buildDB", buildDB_folder, "build a reusable KSSD sketch+index database into the given folder and exit (clust-mst --fast only)");
@@ -212,6 +214,8 @@ int main(int argc, char * argv[]){
 	option_append->excludes(option_input);
 
 	CLI11_PARSE(app, argc, argv);
+
+	const bool no_dense = !dense;
 
 	// Manual validation: output is required unless we're in --buildDB or --stats mode.
 	if(buildDB_folder.empty() && !repdb_stats_flag && option_output->count() == 0){

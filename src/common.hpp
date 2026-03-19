@@ -23,7 +23,7 @@
 #define WMH_SKETCH_SIZE 50
 #define WINDOW_SIZE 20
 #define HLL_SKETCH_BIT 10
-#define DENSE_SPAN 100;
+#define DENSE_SPAN 100
 
 #include <sys/time.h>
 inline double get_sec(){

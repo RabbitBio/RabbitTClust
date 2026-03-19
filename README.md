@@ -85,6 +85,7 @@ Options:
   --premsted TEXT             clustering by the pre-generated mst files rather than genomes for clust-mst
   --newick-tree               output the newick tree format file for clust-mst
   --fast                      use the kssd algorithm for sketching and distance computing for clust-mst
+  --dense                     optional: enable density/ANI stats and MST noise-removal pass (high memory; default is off)
   --dedup-dist FLOAT          within each cluster, collapse near-duplicate nodes connected by forest edges with dist <= dedup-dist; output to <output>.dedup
   --reps-per-cluster INT      select up to k representatives per cluster (after optional dedup); output to <output>.reps
   --append TEXT Excludes: --input
@@ -108,6 +109,7 @@ Options:
   --append TEXT Excludes: --input
                               append genome file or file list with the pre-generated sketch or MST files
   --save-rep                  save representative inverted index for incremental clustering (note: may slightly affect performance)
+  --dense                     optional: enable density/ANI-related MST post-processing (high memory; default is off; KSSD presketched path)
 
 # clust-leiden, graph-based clustering module for RabbitTClust (requires igraph)
 Usage: ./clust-leiden [OPTIONS]
