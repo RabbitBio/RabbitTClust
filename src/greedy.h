@@ -53,7 +53,8 @@ struct KssdClusterState {
     double threshold;
     int kmer_size;
 
-    phmap::flat_hash_map<uint32_t, vector<int>> inverted_index;
+    // uint64_t keys: 32-bit KSSD hashes are zero-extended; 64-bit uses full width
+    phmap::flat_hash_map<uint64_t, vector<int>> inverted_index;
 
     bool save(const string& filepath) const;
     bool load(const string& filepath);

@@ -117,7 +117,47 @@ double calculate_mash_distance(const std::vector<uint32_t>& hashesRef, const std
   return dist;
 }
 
+/** KSSD sketch length (hash32_arr or hash64_arr depending on use64). */
+static inline size_t kssd_hash_count(const KssdSketchInfo& s) {
+  return s.use64 ? s.hash64_arr.size() : s.hash32_arr.size();
+}
 
+double jaccard_u64(const std::vector<uint64_t>& hashesRef, const std::vector<uint64_t>& hashesQry)
+{
+  uint64_t common_elements = 0;
+  size_t i = 0, j = 0;
+  size_t sizeRef = hashesRef.size();
+  size_t sizeQry = hashesQry.size();
+  while (i < sizeRef && j < sizeQry) {
+    if (hashesRef[i] < hashesQry[j]) {
+      i++;
+    } else if (hashesRef[i] > hashesQry[j]) {
+      j++;
+    } else {
+      common_elements++;
+      i++;
+      j++;
+    }
+  }
+  uint64_t union_elements = static_cast<uint64_t>(sizeRef) + sizeQry - common_elements;
+  if (union_elements == 0) {
+    return 0.0;
+  }
+  return static_cast<double>(common_elements) / union_elements;
+}
+
+double calculate_mash_distance(const std::vector<uint64_t>& hashesRef, const std::vector<uint64_t>& hashesQry, double kmerSize)
+{
+  double jaccard_ = jaccard_u64(hashesRef, hashesQry);
+  if (jaccard_ == 1.0) {
+    return 0.0;
+  }
+  double dist = -log(2 * jaccard_ / (1.0 + jaccard_)) / kmerSize;
+  if (dist > 1.0) {
+    dist = 1.0;
+  }
+  return dist;
+}
 
 double calculateMaxSizeRatio(double D, int k) {
     if (D < 0) {
@@ -321,9 +361,8 @@ vector<vector<int>> greedyCluster(vector<SketchInfo>& sketches, int sketch_func_
 class DynamicInvertedIndex {
 public:
     // Inverted index: hash -> list of representative IDs containing this hash
-    // Use phmap (Google's Swiss Tables) for 3x faster lookups compared to std::unordered_map
-    // Made public for direct access in array-based counting optimization
-    phmap::flat_hash_map<uint32_t, std::vector<uint32_t>> index_map;
+    // uint64_t keys unify 32-bit (zero-extended) and 64-bit KSSD sketches
+    phmap::flat_hash_map<uint64_t, std::vector<uint32_t>> index_map;
     
 private:
     // Set of representative sequences for fast lookup
@@ -341,17 +380,14 @@ public:
         representative_set.reserve(50000);  // Expected representatives (~2% of genomes)
     }
     
-    // Add a new representative to the inverted index
-    void add_representative(int rep_id, const std::vector<uint32_t>& hash_array) {
+    // Add a new representative (32- or 64-bit sketch hashes)
+    template<typename T>
+    void add_representative(int rep_id, const std::vector<T>& hash_array) {
         representative_set.insert(rep_id);
-        
-        // Insert all hashes of this representative into the index
-        // Optimization: use try_emplace to avoid double lookup (operator[] does find + insert)
-        for(uint32_t hash : hash_array) {
-            auto result = index_map.try_emplace(hash);
-            auto it = result.first;
-            // bool inserted = result.second;  // unused
-            it->second.push_back(rep_id);
+        for(T hash : hash_array) {
+            uint64_t key = static_cast<uint64_t>(hash);
+            auto result = index_map.try_emplace(key);
+            result.first->second.push_back(static_cast<uint32_t>(rep_id));
         }
     }
     
@@ -389,7 +425,7 @@ public:
         
         // Find representatives that are too large (will never match current or future sequences)
         for(int rep_id : representative_set) {
-            int rep_size = sketches[rep_id].hash32_arr.size();
+            int rep_size = (int)kssd_hash_count(sketches[rep_id]);
             max_rep_size = std::max(max_rep_size, rep_size);
             min_rep_size = std::min(min_rep_size, rep_size);
             
@@ -414,22 +450,26 @@ public:
         }
         
         // Remove from inverted index (expensive but necessary)
-        // Optimization: batch removal to reduce rehashing
         for(int rep_id : to_remove) {
-            const auto& hash_array = sketches[rep_id].hash32_arr;
-            for(uint32_t hash : hash_array) {
-                auto it = index_map.find(hash);
+            const KssdSketchInfo& sk = sketches[rep_id];
+            auto erase_key = [&](uint64_t key) {
+                auto it = index_map.find(key);
                 if(it != index_map.end()) {
                     auto& posting_list = it->second;
+                    uint32_t ru = static_cast<uint32_t>(rep_id);
                     posting_list.erase(
-                        std::remove(posting_list.begin(), posting_list.end(), rep_id),
+                        std::remove(posting_list.begin(), posting_list.end(), ru),
                         posting_list.end()
                     );
-                    // If posting list is empty, remove the hash entirely
                     if(posting_list.empty()) {
                         index_map.erase(it);
                     }
                 }
+            };
+            if(sk.use64) {
+                for(uint64_t h : sk.hash64_arr) erase_key(h);
+            } else {
+                for(uint32_t h : sk.hash32_arr) erase_key(static_cast<uint64_t>(h));
             }
         }
         
@@ -444,20 +484,18 @@ public:
      * @param hash_array Query sequence's hash array
      * @param intersection_map Output: map[rep_id] = intersection size (only representatives)
      */
+    template<typename Vec>
     void calculate_intersections_sparse(
-        const std::vector<uint32_t>& hash_array,
+        const Vec& hash_array,
         std::unordered_map<int, int>& intersection_map) const
     {
-        // Clear previous results
         intersection_map.clear();
-        
-        // Iterate through each hash of current sequence
-        for(uint32_t hash : hash_array) {
-            auto it = index_map.find(hash);
+        for(auto hash : hash_array) {
+            uint64_t key = static_cast<uint64_t>(hash);
+            auto it = index_map.find(key);
             if(it != index_map.end()) {
-                // Found representatives containing this hash, increment their counts
                 for(uint32_t rep_id : it->second) {
-                    intersection_map[rep_id]++;
+                    intersection_map[static_cast<int>(rep_id)]++;
                 }
             }
         }
@@ -534,6 +572,13 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
 {
     int numGenomes = sketches.size();
     if(numGenomes == 0) return std::vector<std::vector<int>>();
+    const bool use64 = sketches[0].use64;
+    for(int vi = 1; vi < numGenomes; vi++) {
+        if(sketches[vi].use64 != use64) {
+            std::cerr << "ERROR: Mixed KSSD hash width (use64) in dataset at genome " << vi << std::endl;
+            exit(1);
+        }
+    }
     
     std::cerr << "\n========================================" << std::endl;
     std::cerr << "KSSD Greedy Clustering with Inverted Index" << std::endl;
@@ -542,15 +587,16 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
     std::cerr << "Threshold: " << threshold << std::endl;
     std::cerr << "Threads: " << threads << std::endl;
     std::cerr << "K-mer size: " << kmer_size << std::endl;
+    std::cerr << "KSSD hash storage: " << (use64 ? "64-bit" : "32-bit") << std::endl;
     
     // ===== Sort sketches by size (descending) for monotonic pruning =====
     std::cerr << "\nSorting sketches by size (descending order)..." << std::endl;
     std::sort(sketches.begin(), sketches.end(), 
               [](const KssdSketchInfo& a, const KssdSketchInfo& b) {
-                  return a.hash32_arr.size() > b.hash32_arr.size();  // Descending
+                  return kssd_hash_count(a) > kssd_hash_count(b);
               });
-    std::cerr << "Sorting completed: [" << sketches[0].hash32_arr.size() 
-             << " ... " << sketches[numGenomes-1].hash32_arr.size() << "]" << std::endl;
+    std::cerr << "Sorting completed: [" << kssd_hash_count(sketches[0])
+             << " ... " << kssd_hash_count(sketches[numGenomes-1]) << "]" << std::endl;
     
     // Initialize data structures
     std::vector<int> clustLabels(numGenomes, 0);
@@ -570,7 +616,10 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
     representativeArr.push_back(0);
     rep2cid[0] = 0;  // First representative gets cluster ID 0
     cluster_members.emplace_back();  // Empty member list for first cluster
-    dynamic_index.add_representative(0, sketches[0].hash32_arr);
+    if(use64)
+        dynamic_index.add_representative(0, sketches[0].hash64_arr);
+    else
+        dynamic_index.add_representative(0, sketches[0].hash32_arr);
     
     // Thread-local storage to avoid critical sections
     // Store Jaccard instead of distance for best-match selection (avoid log computation)
@@ -611,29 +660,28 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
     
     // ===== DEBUG: Print sketch sizes to understand data distribution =====
     std::cerr << "\n=== Data Distribution Analysis ===" << std::endl;
-    std::cerr << "First sequence sketch size: " << sketches[0].hash32_arr.size() << std::endl;
+    std::cerr << "First sequence sketch size: " << kssd_hash_count(sketches[0]) << std::endl;
     if(numGenomes >= 100) {
-        std::cerr << "Sequence 100 sketch size: " << sketches[99].hash32_arr.size() << std::endl;
+        std::cerr << "Sequence 100 sketch size: " << kssd_hash_count(sketches[99]) << std::endl;
     }
     if(numGenomes >= 1000) {
-        std::cerr << "Sequence 1000 sketch size: " << sketches[999].hash32_arr.size() << std::endl;
+        std::cerr << "Sequence 1000 sketch size: " << kssd_hash_count(sketches[999]) << std::endl;
     }
     if(numGenomes >= 10000) {
-        std::cerr << "Sequence 10000 sketch size: " << sketches[9999].hash32_arr.size() << std::endl;
+        std::cerr << "Sequence 10000 sketch size: " << kssd_hash_count(sketches[9999]) << std::endl;
     }
     if(numGenomes >= 100000) {
-        std::cerr << "Sequence 100000 sketch size: " << sketches[99999].hash32_arr.size() << std::endl;
+        std::cerr << "Sequence 100000 sketch size: " << kssd_hash_count(sketches[99999]) << std::endl;
     }
     if(numGenomes >= 1000000) {
-        std::cerr << "Sequence 1000000 sketch size: " << sketches[999999].hash32_arr.size() << std::endl;
+        std::cerr << "Sequence 1000000 sketch size: " << kssd_hash_count(sketches[999999]) << std::endl;
     }
-    std::cerr << "Last sequence sketch size: " << sketches[numGenomes-1].hash32_arr.size() << std::endl;
+    std::cerr << "Last sequence sketch size: " << kssd_hash_count(sketches[numGenomes-1]) << std::endl;
     std::cerr << "===================================\n" << std::endl;
     
     // ===== Main loop: serial processing of each new sequence =====
     for(int j = 1; j < numGenomes; j++) {
-        const std::vector<uint32_t>& query_sketch = sketches[j].hash32_arr;
-        int sizeRef = query_sketch.size();
+        int sizeRef = (int)kssd_hash_count(sketches[j]);
         
         // Periodic pruning: remove representatives that are too large (exploiting decreasing size order)
         // Since sequences are sorted large->small, representatives that are too large for current
@@ -658,20 +706,27 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
         cur_mark++;  // New epoch for this query
         touched.clear();  // Clear touched list from previous query
         
-        for(uint32_t hash : query_sketch) {
-            auto it = dynamic_index.index_map.find(hash);
-            if(it != dynamic_index.index_map.end()) {
-                // Found representatives containing this hash
-                for(uint32_t rep_id : it->second) {
-                    if(mark[rep_id] != cur_mark) {
-                        // First time seeing this rep in current query
-                        mark[rep_id] = cur_mark;
-                        cnt[rep_id] = 1;
-                        touched.push_back(rep_id);
-                    } else {
-                        // Already seen this rep, increment count
-                        cnt[rep_id]++;
-                    }
+        auto touch_from_posting = [&](uint32_t rep_id) {
+            if(mark[rep_id] != cur_mark) {
+                mark[rep_id] = cur_mark;
+                cnt[rep_id] = 1;
+                touched.push_back(static_cast<int>(rep_id));
+            } else {
+                cnt[rep_id]++;
+            }
+        };
+        if(use64) {
+            for(uint64_t hash : sketches[j].hash64_arr) {
+                auto it = dynamic_index.index_map.find(hash);
+                if(it != dynamic_index.index_map.end()) {
+                    for(uint32_t rep_id : it->second) touch_from_posting(rep_id);
+                }
+            }
+        } else {
+            for(uint32_t h : sketches[j].hash32_arr) {
+                auto it = dynamic_index.index_map.find(static_cast<uint64_t>(h));
+                if(it != dynamic_index.index_map.end()) {
+                    for(uint32_t rep_id : it->second) touch_from_posting(rep_id);
                 }
             }
         }
@@ -710,7 +765,7 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
             for(size_t i = 0; i < touched.size(); i++) {
                 int repId = touched[i];
                 int common = cnt[repId];  // Read from array, not from pair
-                int sizeQry = sketches[repId].hash32_arr.size();
+                int sizeQry = (int)kssd_hash_count(sketches[repId]);
                 
                 // Optimization: Common threshold filtering
                 // Calculate minimum required common for this pair
@@ -774,7 +829,10 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndex(
             cluster_members.emplace_back();  // O(1) create empty member list
             
             // Critical: add new representative to inverted index
-            dynamic_index.add_representative(j, sketches[j].hash32_arr);
+            if(use64)
+                dynamic_index.add_representative(j, sketches[j].hash64_arr);
+            else
+                dynamic_index.add_representative(j, sketches[j].hash32_arr);
         }
         
         // Progress report (reduced frequency to minimize stderr overhead)
@@ -885,8 +943,14 @@ KssdClusterState KssdInitialClusterWithState(
     
     for (size_t rep_idx = 0; rep_idx < state.representatives.size(); rep_idx++) {
         const auto& rep = state.representatives[rep_idx];
-        for (uint32_t hash : rep.hash32_arr) {
-            state.inverted_index[hash].push_back(rep_idx);
+        if(rep.use64) {
+            for(uint64_t h : rep.hash64_arr) {
+                state.inverted_index[h].push_back(static_cast<int>(rep_idx));
+            }
+        } else {
+            for(uint32_t h : rep.hash32_arr) {
+                state.inverted_index[static_cast<uint64_t>(h)].push_back(static_cast<int>(rep_idx));
+            }
         }
     }
     
@@ -1355,6 +1419,7 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
 {
     int numGenomes = sketches.size();
     if(numGenomes == 0) return std::vector<std::vector<int>>();
+    const bool use64 = sketches[0].use64;
     
     std::cerr << "\n========================================" << std::endl;
     std::cerr << "BATCHED KSSD Greedy Clustering" << std::endl;
@@ -1363,6 +1428,7 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
     std::cerr << "Batch size: " << batch_size << std::endl;
     std::cerr << "Threshold: " << threshold << std::endl;
     std::cerr << "Threads: " << threads << std::endl;
+    std::cerr << "KSSD hash storage: " << (use64 ? "64-bit" : "32-bit") << std::endl;
     std::cerr << "========================================\n" << std::endl;
     
     // Initialize
@@ -1372,7 +1438,10 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
     
     // First sequence as initial representative
     semiClust[0] = std::vector<int>();
-    dynamic_index.add_representative(0, sketches[0].hash32_arr);
+    if(use64)
+        dynamic_index.add_representative(0, sketches[0].hash64_arr);
+    else
+        dynamic_index.add_representative(0, sketches[0].hash32_arr);
     
     // Batch processing result structure
     struct BatchResult {
@@ -1396,18 +1465,21 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
             batch_results[idx].best_dist = std::numeric_limits<double>::max();
             batch_results[idx].best_rep = -1;
             
-            int sizeRef = sketches[j].hash32_arr.size();
+            int sizeRef = (int)kssd_hash_count(sketches[j]);
             // Optimization: use sparse map, only store representatives, completely skip non-representatives
             std::unordered_map<int, int> intersection_map;
             
             // Compute intersections (note: each thread computes independently, with duplication)
-            dynamic_index.calculate_intersections_sparse(sketches[j].hash32_arr, intersection_map);
+            if(use64)
+                dynamic_index.calculate_intersections_sparse(sketches[j].hash64_arr, intersection_map);
+            else
+                dynamic_index.calculate_intersections_sparse(sketches[j].hash32_arr, intersection_map);
             
             // Find best representative (directly traverse map, more efficient)
             for(const auto& pair : intersection_map) {
                 int repId = pair.first;
                 int common = pair.second;
-                int sizeQry = sketches[repId].hash32_arr.size();
+                int sizeQry = (int)kssd_hash_count(sketches[repId]);
                 
                 double dist = calculate_mash_distance_fast(common, sizeRef, sizeQry, kmer_size);
                 
@@ -1433,7 +1505,10 @@ vector<std::vector<int>> KssdGreedyClusterWithInvertedIndexBatched(
                 semiClust[result.best_rep].push_back(j);
             } else {
                 semiClust[j] = std::vector<int>();
-                dynamic_index.add_representative(j, sketches[j].hash32_arr);
+                if(use64)
+                    dynamic_index.add_representative(j, sketches[j].hash64_arr);
+                else
+                    dynamic_index.add_representative(j, sketches[j].hash32_arr);
             }
         }
         
@@ -1524,14 +1599,17 @@ bool KssdClusterState::save(const string& filepath) const {
     }
     
 
+    // Inverted index: marker + 64-bit keys (supports 32- and 64-bit KSSD sketches)
+    const char kssd_inv_magic[8] = {'K','S','S','I','0','2','\0','\0'};
+    ofs.write(kssd_inv_magic, 8);
     size_t index_size = inverted_index.size();
     ofs.write((char*)&index_size, sizeof(size_t));
     std::cerr << "Saving inverted index: " << index_size << " unique hashes..." << std::endl;
     
     for (const auto& pair : inverted_index) {
-        uint32_t hash = pair.first;
+        uint64_t hash = pair.first;
         const std::vector<int>& rep_list = pair.second;
-        ofs.write((char*)&hash, sizeof(uint32_t));
+        ofs.write((char*)&hash, sizeof(uint64_t));
         size_t list_size = rep_list.size();
         ofs.write((char*)&list_size, sizeof(size_t));
         ofs.write((char*)rep_list.data(), sizeof(int) * list_size);
@@ -1615,24 +1693,35 @@ bool KssdClusterState::load(const string& filepath) {
     }
     
 
+    std::streampos inv_start = ifs.tellg();
+    char inv_probe[8];
+    ifs.read(inv_probe, 8);
+    bool inv64 = (std::strncmp(inv_probe, "KSSI02", 6) == 0 && inv_probe[6] == '\0');
+    if(!inv64) {
+        ifs.seekg(inv_start);
+    }
     size_t index_size;
     ifs.read((char*)&index_size, sizeof(size_t));
-    std::cerr << "Loading inverted index: " << index_size << " unique hashes..." << std::endl;
+    std::cerr << "Loading inverted index: " << index_size << " unique hashes (" 
+              << (inv64 ? "64-bit keys" : "legacy 32-bit keys") << ")..." << std::endl;
     
     inverted_index.clear();
     inverted_index.reserve(index_size);
     
     for (size_t i = 0; i < index_size; i++) {
-        uint32_t hash;
-        ifs.read((char*)&hash, sizeof(uint32_t));
-        
+        uint64_t hash64;
+        if(inv64) {
+            ifs.read((char*)&hash64, sizeof(uint64_t));
+        } else {
+            uint32_t hash32;
+            ifs.read((char*)&hash32, sizeof(uint32_t));
+            hash64 = static_cast<uint64_t>(hash32);
+        }
         size_t list_size;
         ifs.read((char*)&list_size, sizeof(size_t));
-        
         vector<int> rep_list(list_size);
         ifs.read((char*)rep_list.data(), sizeof(int) * list_size);
-        
-        inverted_index[hash] = std::move(rep_list);
+        inverted_index[hash64] = std::move(rep_list);
     }
     
     ifs.close();
@@ -1678,16 +1767,27 @@ vector<vector<int>> KssdIncrementalCluster(
     for (size_t new_idx = 0; new_idx < new_sketches.size(); new_idx++) {
         int genome_idx = new_genome_start_idx + new_idx;  // 在 all_sketches 中的索引
         auto& new_sketch = state.all_sketches[genome_idx];
-        int sizeQry = new_sketch.hash32_arr.size();
+        int sizeQry = (int)kssd_hash_count(new_sketch);
         
         phmap::flat_hash_map<int, int> candidate_counts;  // rep_idx → intersection count
         candidate_counts.reserve(1000); 
         
-        for (uint32_t hash : new_sketch.hash32_arr) {
-            auto it = state.inverted_index.find(hash);
-            if (it != state.inverted_index.end()) {
-                for (int rep_idx : it->second) {
-                    candidate_counts[rep_idx]++;
+        if(new_sketch.use64) {
+            for(uint64_t h : new_sketch.hash64_arr) {
+                auto it = state.inverted_index.find(h);
+                if(it != state.inverted_index.end()) {
+                    for(int rep_idx : it->second) {
+                        candidate_counts[rep_idx]++;
+                    }
+                }
+            }
+        } else {
+            for(uint32_t h : new_sketch.hash32_arr) {
+                auto it = state.inverted_index.find(static_cast<uint64_t>(h));
+                if(it != state.inverted_index.end()) {
+                    for(int rep_idx : it->second) {
+                        candidate_counts[rep_idx]++;
+                    }
                 }
             }
         }
@@ -1715,7 +1815,7 @@ vector<vector<int>> KssdIncrementalCluster(
             if (rep_idx < 0 || rep_idx >= (int)state.representatives.size()) continue;
 
             const auto& rep = state.representatives[rep_idx];
-            int sizeRef = rep.hash32_arr.size();
+            int sizeRef = (int)kssd_hash_count(rep);
             
             // Size ratio filtering
             double ratio = (double)sizeQry / sizeRef;
@@ -1734,7 +1834,11 @@ vector<vector<int>> KssdIncrementalCluster(
             #pragma omp atomic
             total_distance_calcs++;
             
-            double dist = calculate_mash_distance(rep.hash32_arr, new_sketch.hash32_arr, state.kmer_size);
+            double dist;
+            if(rep.use64)
+                dist = calculate_mash_distance(rep.hash64_arr, new_sketch.hash64_arr, state.kmer_size);
+            else
+                dist = calculate_mash_distance(rep.hash32_arr, new_sketch.hash32_arr, state.kmer_size);
             
             if (dist <= state.threshold) {
                 #pragma omp critical
@@ -1761,8 +1865,14 @@ vector<vector<int>> KssdIncrementalCluster(
             new_clusters++;
             
 
-            for (uint32_t hash : new_sketch.hash32_arr) {
-                state.inverted_index[hash].push_back(new_rep_idx);
+            if(new_sketch.use64) {
+                for(uint64_t h : new_sketch.hash64_arr) {
+                    state.inverted_index[h].push_back(new_rep_idx);
+                }
+            } else {
+                for(uint32_t h : new_sketch.hash32_arr) {
+                    state.inverted_index[static_cast<uint64_t>(h)].push_back(new_rep_idx);
+                }
             }
         }
         
@@ -2245,7 +2355,7 @@ bool KssdClusterState::save_repdb(const string& filepath) const {
         return false;
     }
 
-    const char magic[] = "REPDB001";
+    const char magic[] = "REPDB002";  // v2: inverted index uses 64-bit hash keys
     ofs.write(magic, 8);
 
     ofs.write((char*)&threshold, sizeof(double));
@@ -2301,9 +2411,9 @@ bool KssdClusterState::save_repdb(const string& filepath) const {
     size_t index_size = inverted_index.size();
     ofs.write((char*)&index_size, sizeof(size_t));
     for (const auto& pair : inverted_index) {
-        uint32_t hash = pair.first;
+        uint64_t hash = pair.first;
         const std::vector<int>& rep_list = pair.second;
-        ofs.write((char*)&hash, sizeof(uint32_t));
+        ofs.write((char*)&hash, sizeof(uint64_t));
         size_t list_size = rep_list.size();
         ofs.write((char*)&list_size, sizeof(size_t));
         ofs.write((char*)rep_list.data(), sizeof(int) * list_size);
@@ -2326,7 +2436,9 @@ bool KssdClusterState::load_repdb(const string& filepath) {
 
     char magic[8];
     ifs.read(magic, 8);
-    if (std::string(magic, 8) != "REPDB001") {
+    std::string mag(magic, 8);
+    bool repdb_v2 = (mag == "REPDB002");
+    if (!repdb_v2 && mag != "REPDB001") {
         std::cerr << "ERROR: Invalid RepDB file (bad magic): " << filepath << std::endl;
         return false;
     }
@@ -2396,13 +2508,19 @@ bool KssdClusterState::load_repdb(const string& filepath) {
     inverted_index.clear();
     inverted_index.reserve(index_size);
     for (size_t i = 0; i < index_size; i++) {
-        uint32_t hash;
-        ifs.read((char*)&hash, sizeof(uint32_t));
+        uint64_t hash64;
+        if(repdb_v2) {
+            ifs.read((char*)&hash64, sizeof(uint64_t));
+        } else {
+            uint32_t h32;
+            ifs.read((char*)&h32, sizeof(uint32_t));
+            hash64 = static_cast<uint64_t>(h32);
+        }
         size_t list_size;
         ifs.read((char*)&list_size, sizeof(size_t));
         vector<int> rep_list(list_size);
         ifs.read((char*)rep_list.data(), sizeof(int) * list_size);
-        inverted_index[hash] = std::move(rep_list);
+        inverted_index[hash64] = std::move(rep_list);
     }
 
     ifs.close();
@@ -2421,16 +2539,27 @@ vector<RepDBQueryResult> KssdClusterState::query_topk(
     double radio = calculateMaxSizeRatio(threshold, kmer_size);
     double x = std::exp(-threshold * kmer_size);
     double jaccard_min = x / (2.0 - x);
-    int sizeQry = query.hash32_arr.size();
+    int sizeQry = (int)kssd_hash_count(query);
 
     phmap::flat_hash_map<int, int> candidate_counts;
     candidate_counts.reserve(1000);
 
-    for (uint32_t hash : query.hash32_arr) {
-        auto it = inverted_index.find(hash);
-        if (it != inverted_index.end()) {
-            for (int rep_idx : it->second) {
-                candidate_counts[rep_idx]++;
+    if(query.use64) {
+        for(uint64_t h : query.hash64_arr) {
+            auto it = inverted_index.find(h);
+            if(it != inverted_index.end()) {
+                for(int rep_idx : it->second) {
+                    candidate_counts[rep_idx]++;
+                }
+            }
+        }
+    } else {
+        for(uint32_t h : query.hash32_arr) {
+            auto it = inverted_index.find(static_cast<uint64_t>(h));
+            if(it != inverted_index.end()) {
+                for(int rep_idx : it->second) {
+                    candidate_counts[rep_idx]++;
+                }
             }
         }
     }
@@ -2459,7 +2588,7 @@ vector<RepDBQueryResult> KssdClusterState::query_topk(
             int rep_idx = candidates[i].first;
             int common = candidates[i].second;
             const auto& rep = representatives[rep_idx];
-            int sizeRef = rep.hash32_arr.size();
+            int sizeRef = (int)kssd_hash_count(rep);
 
             double ratio = (double)sizeQry / sizeRef;
             if (ratio > radio || ratio < 1.0 / radio)
@@ -2469,7 +2598,11 @@ vector<RepDBQueryResult> KssdClusterState::query_topk(
             if (common < min_common)
                 continue;
 
-            double dist = calculate_mash_distance(rep.hash32_arr, query.hash32_arr, kmer_size);
+            double dist;
+            if(rep.use64)
+                dist = calculate_mash_distance(rep.hash64_arr, query.hash64_arr, kmer_size);
+            else
+                dist = calculate_mash_distance(rep.hash32_arr, query.hash32_arr, kmer_size);
             local.push_back({rep_idx, dist});
         }
         std::lock_guard<std::mutex> lock(mtx);
@@ -2600,7 +2733,7 @@ void KssdClusterState::print_stats(std::ostream& out) const {
     if (!representatives.empty()) {
         size_t min_sk = UINT64_MAX, max_sk = 0, sum_sk = 0;
         for (const auto& r : representatives) {
-            size_t sz = r.hash32_arr.size();
+            size_t sz = kssd_hash_count(r);
             if (sz < min_sk) min_sk = sz;
             if (sz > max_sk) max_sk = sz;
             sum_sk += sz;
