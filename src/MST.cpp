@@ -1,4 +1,5 @@
 #include <iostream>
+#include <vector>
 #include "MST.h"
 #include <stdio.h>
 #include <queue>
@@ -900,24 +901,33 @@ vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketc
 
 	double step = 1.0 / denseSpan;
 	int N = (int)sketches.size();
-	denseArr = new int*[denseSpan];
-	int** denseLocalArr = new int*[denseSpan * threads];
-	double distRadius[denseSpan];
-	for (int i = 0; i < denseSpan; i++) {
-		distRadius[i] = step * i;
-		denseArr[i] = new int[N];
-		memset(denseArr[i], 0, N * sizeof(int));
-		for (int j = 0; j < threads; j++) {
-			denseLocalArr[i * threads + j] = new int[N];
-			memset(denseLocalArr[i * threads + j], 0, N * sizeof(int));
+	denseArr = nullptr;
+	aniArr = nullptr;
+	int** denseLocalArr = nullptr;
+	uint64_t** threadsANI = nullptr;
+	std::vector<double> distRadiusVec;
+	double* distRadius = nullptr;
+	if (!no_dense) {
+		distRadiusVec.resize((size_t)denseSpan);
+		distRadius = distRadiusVec.data();
+		for (int i = 0; i < denseSpan; i++) distRadius[i] = step * i;
+		denseArr = new int*[denseSpan];
+		denseLocalArr = new int*[denseSpan * threads];
+		for (int i = 0; i < denseSpan; i++) {
+			denseArr[i] = new int[N];
+			memset(denseArr[i], 0, N * sizeof(int));
+			for (int j = 0; j < threads; j++) {
+				denseLocalArr[i * threads + j] = new int[N];
+				memset(denseLocalArr[i * threads + j], 0, N * sizeof(int));
+			}
 		}
-	}
-	aniArr = new uint64_t[101];
-	memset(aniArr, 0, 101 * sizeof(uint64_t));
-	uint64_t** threadsANI = new uint64_t*[threads];
-	for (int i = 0; i < threads; i++) {
-		threadsANI[i] = new uint64_t[101];
-		memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+		aniArr = new uint64_t[101];
+		memset(aniArr, 0, 101 * sizeof(uint64_t));
+		threadsANI = new uint64_t*[threads];
+		for (int i = 0; i < threads; i++) {
+			threadsANI[i] = new uint64_t[101];
+			memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+		}
 	}
 	vector<vector<EdgeInfo>> mstArr(threads);
 	int** intersectionArr = new int*[threads];
@@ -985,17 +995,21 @@ vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketc
 		mstArr[thread_id].swap(tmpMst);
 	}
 
-	if (!no_dense) {
+	if (!no_dense && threadsANI && denseLocalArr && denseArr && aniArr) {
 		for (int i = 0; i < 101; i++)
 			for (int j = 0; j < threads; j++) aniArr[i] += threadsANI[j][i];
 		for (int i = 0; i < denseSpan; i++)
 			for (int j = 0; j < threads; j++)
 				for (int k = 0; k < N; k++) denseArr[i][k] += denseLocalArr[i * threads + j][k];
 	}
-	for (int i = 0; i < threads; i++) delete[] threadsANI[i];
-	delete[] threadsANI;
-	for (int i = 0; i < denseSpan * threads; i++) delete[] denseLocalArr[i];
-	delete[] denseLocalArr;
+	if (threadsANI) {
+		for (int i = 0; i < threads; i++) delete[] threadsANI[i];
+		delete[] threadsANI;
+	}
+	if (denseLocalArr) {
+		for (int i = 0; i < denseSpan * threads; i++) delete[] denseLocalArr[i];
+		delete[] denseLocalArr;
+	}
 
 	vector<EdgeInfo> finalGraph;
 	for (int i = 0; i < threads; i++) {
@@ -1038,24 +1052,35 @@ vector<EdgeInfo> compute_minhash_mst_mpi(int my_rank, int comm_sz, vector<Sketch
 
 	double step = 1.0 / denseSpan;
 	int N = (int)sketches.size();
-	denseArr = new int*[denseSpan];
-	int** denseLocalArr = new int*[denseSpan * threads];
-	double distRadius[denseSpan];
-	for (int i = 0; i < denseSpan; i++) {
-		distRadius[i] = step * i;
-		denseArr[i] = new int[N];
-		memset(denseArr[i], 0, N * sizeof(int));
-		for (int j = 0; j < threads; j++) {
-			denseLocalArr[i * threads + j] = new int[N];
-			memset(denseLocalArr[i * threads + j], 0, N * sizeof(int));
+	denseArr = nullptr;
+	aniArr = nullptr;
+	int** denseLocalArr = nullptr;
+	uint64_t** threadsANI = nullptr;
+	std::vector<double> distRadiusVec;
+	double* distRadius = nullptr;
+	if (!no_dense) {
+		distRadiusVec.resize((size_t)denseSpan);
+		distRadius = distRadiusVec.data();
+		for (int i = 0; i < denseSpan; i++) {
+			distRadius[i] = step * i;
 		}
-	}
-	aniArr = new uint64_t[101];
-	memset(aniArr, 0, 101 * sizeof(uint64_t));
-	uint64_t** threadsANI = new uint64_t*[threads];
-	for (int i = 0; i < threads; i++) {
-		threadsANI[i] = new uint64_t[101];
-		memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+		denseArr = new int*[denseSpan];
+		denseLocalArr = new int*[denseSpan * threads];
+		for (int i = 0; i < denseSpan; i++) {
+			denseArr[i] = new int[N];
+			memset(denseArr[i], 0, N * sizeof(int));
+			for (int j = 0; j < threads; j++) {
+				denseLocalArr[i * threads + j] = new int[N];
+				memset(denseLocalArr[i * threads + j], 0, N * sizeof(int));
+			}
+		}
+		aniArr = new uint64_t[101];
+		memset(aniArr, 0, 101 * sizeof(uint64_t));
+		threadsANI = new uint64_t*[threads];
+		for (int i = 0; i < threads; i++) {
+			threadsANI[i] = new uint64_t[101];
+			memset(threadsANI[i], 0, 101 * sizeof(uint64_t));
+		}
 	}
 
 	vector<vector<EdgeInfo>> mstArr(threads);
@@ -1188,17 +1213,21 @@ vector<EdgeInfo> compute_minhash_mst_mpi(int my_rank, int comm_sz, vector<Sketch
 		mstArr[thread_id].swap(tmpMst);
 	}
 
-	if (!no_dense) {
+	if (!no_dense && threadsANI && denseLocalArr && denseArr && aniArr) {
 		for (int i = 0; i < 101; i++)
 			for (int j = 0; j < threads; j++) aniArr[i] += threadsANI[j][i];
 		for (int i = 0; i < denseSpan; i++)
 			for (int j = 0; j < threads; j++)
 				for (int k = 0; k < N; k++) denseArr[i][k] += denseLocalArr[i * threads + j][k];
 	}
-	for (int i = 0; i < threads; i++) delete[] threadsANI[i];
-	delete[] threadsANI;
-	for (int i = 0; i < denseSpan * threads; i++) delete[] denseLocalArr[i];
-	delete[] denseLocalArr;
+	if (threadsANI) {
+		for (int i = 0; i < threads; i++) delete[] threadsANI[i];
+		delete[] threadsANI;
+	}
+	if (denseLocalArr) {
+		for (int i = 0; i < denseSpan * threads; i++) delete[] denseLocalArr[i];
+		delete[] denseLocalArr;
+	}
 
 	vector<EdgeInfo> finalGraph;
 	for (int i = 0; i < threads; i++) {

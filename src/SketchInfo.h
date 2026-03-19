@@ -47,6 +47,11 @@ struct KssdSketchInfo{
   uint32_t sketchsize;
 };
 
+/** Sketch length: hash64_arr or hash32_arr depending on use64 (KSSD greedy/MPI load balance). */
+inline size_t kssd_sketch_hash_count(const KssdSketchInfo& s) {
+	return s.use64 ? s.hash64_arr.size() : s.hash32_arr.size();
+}
+
 struct KssdParameters{
 	int id;
 	int half_k;

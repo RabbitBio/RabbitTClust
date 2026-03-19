@@ -2178,7 +2178,9 @@ void clust_from_sketches_fast_MPI(int my_rank, int comm_sz, int /* half_k */, in
 
 	double t_load_start = get_sec();
 	sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
-	std::sort(sketches.begin(), sketches.end(), [](const KssdSketchInfo& a, const KssdSketchInfo& b) { return a.hash32_arr.size() < b.hash32_arr.size(); });
+	std::sort(sketches.begin(), sketches.end(), [](const KssdSketchInfo& a, const KssdSketchInfo& b) {
+		return kssd_sketch_hash_count(a) < kssd_sketch_hash_count(b);
+	});
 	size_t total = sketches.size();
 	const size_t chunkSize = 10000;
 	size_t numChunks = (total + chunkSize - 1) / chunkSize;
