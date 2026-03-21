@@ -2106,27 +2106,8 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 
 			MinHashInvertedIndex inverted_index;
 
-			// Try to load pre-built index from sketch folder; rebuild only if not found.
-			// A valid index must have at least one entry; treat an empty (16-byte) file
-			// as "not found" so we rebuild rather than silently use an empty index.
-			bool loaded_valid_index = inverted_index.load_from_file(folder_path)
-			                          && !inverted_index.hash_map.empty();
-			if (!loaded_valid_index) {
-				// Check if sketches are too large for an inverted index
-				// (containment mode can produce 10M+ hashes per genome → multi-GB index).
-				size_t total_hashes = 0;
-				for(size_t i = 0; i < sketches.size(); i++){
-					if(sketches[i].minHash != nullptr)
-						total_hashes += (size_t)sketches[i].minHash->getSketchSize();
-				}
-				const size_t MAX_INDEX_HASHES = 20ULL * 1000000000;
-				if(total_hashes > MAX_INDEX_HASHES){
-					cerr << "-----NOTE: total MinHash entries (" << total_hashes
-					     << ") exceed index limit (" << MAX_INDEX_HASHES
-					     << "); falling back to direct pairwise comparison."
-					     << " Consider --fast (KSSD) for large containment sketches." << endl;
-					// Leave inverted_index empty; compute_minhash_mst will do pairwise.
-				} else {
+			// Try to load pre-built index from sketch folder; rebuild only if not found
+			if (!inverted_index.load_from_file(folder_path)) {
 				cerr << "-----building MinHash inverted index for MST computation..." << endl;
 
 				vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
@@ -2155,31 +2136,21 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 							entry.second.begin(), entry.second.end()
 						);
 					}
-					// Free this thread's partial index immediately after merging
-					// to avoid holding all partial copies + final index at once.
-					phmap::flat_hash_map<uint64_t, vector<uint32_t>>().swap(thread_local_indices[tid]);
 				}
-				// Let the outer vector release its slots too.
-				thread_local_indices.clear();
-				thread_local_indices.shrink_to_fit();
 				cerr << "-----MinHash inverted index built: " << inverted_index.hash_map.size() << " unique hashes" << endl;
 				// Save for future reuse
 				inverted_index.save_to_file(folder_path);
-				} // end else (index size within limit)
 			}
 
 			int kmer_size = kmer_size_from_file;
 			bool is_containment = is_containment_from_file;
 			if(kmer_size <= 0) {
-				// minHash objects are still alive here (before compute_minhash_mst frees them)
 				kmer_size = sketches[0].minHash->getKmerSize();
 				is_containment = sketches[0].isContainment;
 			}
 
 			// Use compute_minhash_mst with inverted index
 			mst = compute_minhash_mst(sketches, 0, no_dense, is_containment, threads, denseArr, denseSpan, aniArr, threshold, kmer_size, &inverted_index);
-			// Free the inverted index immediately; it's no longer needed after MST is built.
-			{ MinHashInvertedIndex tmp; tmp.hash_map.swap(inverted_index.hash_map); }
 		} else {
 			// Fallback to traditional modifyMST for non-MinHash or when MinHash is not available
 			mst = modifyMST(sketches, 0, sketch_func_id, threads, no_dense, denseArr, denseSpan, aniArr);
@@ -2256,19 +2227,6 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			cerr << "-----write the cluster without noise into: " << outputFileNew << endl;
 			cerr << "-----the cluster number of: " << outputFileNew << " is: " << cluster.size() << endl;
 		}
-		if(!no_dense){
-			if(denseArr){
-				for(int di = 0; di < denseSpan; di++){
-					delete[] denseArr[di];
-				}
-				delete[] denseArr;
-				denseArr = nullptr;
-			}
-			if(aniArr){
-				delete[] aniArr;
-				aniArr = nullptr;
-			}
-		}
 		double time3 = get_sec();
 #ifdef Timer
 		cerr << "========time of generator forest and cluster is: " << time3 - time2 << "========" << endl;
@@ -2279,18 +2237,14 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 
 	void compute_sketches(vector<SketchInfo>& sketches, string inputFile, string& folder_path, bool sketchByFile, int minLen, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress,  bool isSave, int threads, MinHashInvertedIndex* inverted_index){
 		double t0 = get_sec();
-		// Pass nullptr so sketchFiles/sketchSequences do NOT try to build the index
-		// inside the #pragma omp critical section (which serialises all threads for
-		// large sketches and produces a grossly undersized index).  We build it in
-		// a proper parallel pass below, mirroring compute_kssd_sketches_with_index.
 		if(sketchByFile){
-			if(!sketchFiles(inputFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads, nullptr)){
+			if(!sketchFiles(inputFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, sketches, threads, inverted_index)){
 				cerr << "ERROR: generate_sketches(), cannot finish the sketch generation by genome files" << endl;
 				exit(1);
 			}
 		}//end sketch by sequence
 		else{
-			if(!sketchSequences(inputFile, kmerSize, sketchSize, minLen, sketchFunc, isContainment, containCompress, sketches, threads, nullptr)){
+			if(!sketchSequences(inputFile, kmerSize, sketchSize, minLen, sketchFunc, isContainment, containCompress, sketches, threads, inverted_index)){
 				cerr << "ERROR: generate_sketches(), cannot finish the sketch generation by genome sequences" << endl;
 				exit(1);
 			}
@@ -2305,55 +2259,12 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			string command = "mkdir -p " + folder_path;
 			system(command.c_str());
 			saveSketches(sketches, folder_path, sketchByFile, sketchFunc, isContainment, containCompress, sketchSize, kmerSize);
+			if (inverted_index != nullptr && !inverted_index->hash_map.empty())
+				inverted_index->save_to_file(folder_path);
 			double t2 = get_sec();
 #ifdef Timer
 			cerr << "========time of saveSketches is: " << t2 - t1 << "========" << endl;
 #endif
-		}
-
-		// Build inverted index in a proper parallel pass (thread-local then merge),
-		// analogous to how KSSD uses sketchFileWithKssd + transSketchesFromIndex.
-		// Skip if: no index requested, OR total hashes would be so large that the
-		// index itself would blow RAM (containment sketches can be 10M+ per genome).
-		if(inverted_index != nullptr && !sketches.empty()){
-			size_t total_hashes = 0;
-			for(size_t i = 0; i < sketches.size(); i++){
-				if(sketches[i].minHash != nullptr)
-					total_hashes += (size_t)sketches[i].minHash->getSketchSize();
-			}
-			const size_t MAX_INDEX_HASHES = 20ULL * 1000000000;
-			if(total_hashes > MAX_INDEX_HASHES){
-				cerr << "-----NOTE: total MinHash entries (" << total_hashes
-				     << ") exceed index limit (" << MAX_INDEX_HASHES
-				     << "); skipping index build. Use --fast (KSSD) for large genomes." << endl;
-			} else {
-				cerr << "-----building MinHash inverted index (" << total_hashes << " total hashes)..." << endl;
-				vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> tl_indices(threads);
-
-				#pragma omp parallel for num_threads(threads) schedule(dynamic, 10)
-				for(size_t i = 0; i < sketches.size(); i++){
-					if(sketches[i].minHash == nullptr) continue;
-					int tid = omp_get_thread_num();
-					auto& local = tl_indices[tid];
-					vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
-					uint32_t gid = (uint32_t)i;
-					for(uint64_t h : hashes)
-						local[h].push_back(gid);
-				}
-
-				for(int t = 0; t < threads; t++){
-					for(auto& kv : tl_indices[t]){
-						auto& vec = inverted_index->hash_map[kv.first];
-						vec.insert(vec.end(), kv.second.begin(), kv.second.end());
-					}
-					phmap::flat_hash_map<uint64_t, vector<uint32_t>>().swap(tl_indices[t]);
-				}
-				cerr << "-----MinHash inverted index built: "
-				     << inverted_index->hash_map.size() << " unique hashes" << endl;
-
-				if(isSave && !inverted_index->hash_map.empty())
-					inverted_index->save_to_file(folder_path);
-			}
 		}
 	}
 
@@ -2408,11 +2319,8 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			MinHashInvertedIndex* idx_ptr = inverted_index;
 
 			if(idx_ptr == nullptr) {
-				// No pre-built index passed: try to load from sketch folder first.
-				// A 16-byte file (magic + n=0) is stale/empty — treat as missing.
-				bool loaded_valid = local_index.load_from_file(folder_path)
-				                    && !local_index.hash_map.empty();
-				if (!loaded_valid) {
+				// No pre-built index passed: try to load from sketch folder first
+				if (!local_index.load_from_file(folder_path)) {
 					cerr << "-----building MinHash inverted index for MST computation..." << endl;
 
 					vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
@@ -2441,10 +2349,7 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 								entry.second.begin(), entry.second.end()
 							);
 						}
-						phmap::flat_hash_map<uint64_t, vector<uint32_t>>().swap(thread_local_indices[tid]);
 					}
-					thread_local_indices.clear();
-					thread_local_indices.shrink_to_fit();
 					// Save for future reuse (only if isSave — but index is useful anyway)
 					if(isSave) local_index.save_to_file(folder_path);
 				}
@@ -2456,16 +2361,11 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 			int kmer_size = kmer_size_from_file;
 			bool is_containment = is_containment_from_file;
 			if(kmer_size <= 0) {
-				// minHash objects still alive here, before compute_minhash_mst frees them
 				kmer_size = sketches[0].minHash->getKmerSize();
 				is_containment = sketches[0].isContainment;
 			}
 			
 			mst = compute_minhash_mst(sketches, 0, no_dense, is_containment, threads, denseArr, denseSpan, aniArr, threshold, kmer_size, idx_ptr);
-			// Free the index immediately; it's no longer needed after MST is built.
-			if(idx_ptr == &local_index){
-				MinHashInvertedIndex tmp; tmp.hash_map.swap(local_index.hash_map);
-			}
 			
 			if(isSave){
 				idx_ptr->save_to_file(folder_path);
@@ -2565,19 +2465,6 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 #ifdef Timer
 			cerr << "========time of tuning cluster is: " << t5 - t4 << "========" << endl;
 #endif
-		}
-		if(!no_dense){
-			if(denseArr){
-				for(int di = 0; di < denseSpan; di++){
-					delete[] denseArr[di];
-				}
-				delete[] denseArr;
-				denseArr = nullptr;
-			}
-			if(aniArr){
-				delete[] aniArr;
-				aniArr = nullptr;
-			}
 		}
 
 		//======clust-mst=======================================================================

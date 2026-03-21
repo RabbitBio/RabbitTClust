@@ -315,19 +315,20 @@ bool loadSketches(string folderPath, int threads, vector<SketchInfo>& sketches, 
 	Sketch::KSSDParameters kssdPara(half_k, half_subk, drlevel);
 
 	bool sketch_by_file = load_genome_info(folderPath, "sketch", sketches);
-	vector<uint64_t> buffer_hash_arr;
-	buffer_hash_arr.resize((size_t)1 << 20);
+	int max_hash_number = 1 << 20;
+	uint64_t * buffer_hash_arr = new uint64_t [max_hash_number];
 	for(size_t i = 0; i < sketches.size(); i++){
 		Sketch::MinHash * mh1;
 		Sketch::KSSD * kssd;
 		size_t cur_sketch_size;
 		fread(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
-		if(cur_sketch_size > buffer_hash_arr.size()){
-			buffer_hash_arr.resize(cur_sketch_size);
+		if(cur_sketch_size > max_hash_number){
+			max_hash_number = cur_sketch_size;
+			buffer_hash_arr = new uint64_t [max_hash_number];
 		}
-		int cur_hash_number = fread(buffer_hash_arr.data(), sizeof(uint64_t), cur_sketch_size, fp_hash);
+		int cur_hash_number = fread(buffer_hash_arr, sizeof(uint64_t), cur_sketch_size, fp_hash);
 		assert(cur_hash_number == cur_sketch_size);
-		vector<uint64_t> hash_arr(buffer_hash_arr.begin(), buffer_hash_arr.begin() + cur_hash_number);
+		vector<uint64_t> hash_arr(buffer_hash_arr, buffer_hash_arr+cur_hash_number);
 		if(sketch_func_id == 0){//MinHash
 			if(is_containment){
 				mh1 = new Sketch::MinHash(kmer_size, contain_compress);
@@ -347,7 +348,6 @@ bool loadSketches(string folderPath, int threads, vector<SketchInfo>& sketches, 
 		sketches[i].id = i;
 	}
 
-	fclose(fp_hash);
 	//std::sort(sketches.begin(), sketches.end(), cmpIndex);
 	return sketch_by_file;
 }
@@ -478,9 +478,12 @@ bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketch
 	fread(&sketch_by_file, sizeof(bool), 1, fp_info);
 	size_t sketch_number;
 	fread(&sketch_number, sizeof(size_t), 1, fp_info);
-	vector<char> buffer_file_name((size_t)(1 << 12) + 1);
-	vector<char> buffer_seq_name((size_t)(1 << 12) + 1);
-	vector<char> buffer_seq_comment((size_t)(1 << 16) + 1);
+	int max_file_name_length = 1 << 12;
+	int max_seq_name_length = 1 << 12;
+	int max_seq_comment_length = 1 << 16;
+	char * buffer_file_name = new char[max_file_name_length+1];
+	char * buffer_seq_name = new char[max_seq_name_length+1];
+	char * buffer_seq_comment = new char[max_seq_comment_length+1];
 	if(sketch_by_file){
 		int file_name_length, seq0_name_length, seq0_comment_length, strand;
 		uint64_t total_seq_length;
@@ -493,25 +496,28 @@ bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketch
 			fread(&seq0_comment_length, sizeof(int), 1, fp_info);
 			fread(&strand, sizeof(int), 1, fp_info);
 			fread(&total_seq_length, sizeof(uint64_t), 1, fp_info);
-			if(file_name_length + 1 > (int)buffer_file_name.size()){
-				buffer_file_name.resize((size_t)file_name_length + 1);
+			if(file_name_length > max_file_name_length){
+				max_file_name_length = file_name_length;
+				buffer_file_name = new char [max_file_name_length+1];
 			}
-			if(seq0_name_length + 1 > (int)buffer_seq_name.size()){
-				buffer_seq_name.resize((size_t)seq0_name_length + 1);
+			if(seq0_name_length > max_seq_name_length){
+				max_seq_name_length = seq0_name_length;
+				buffer_seq_name = new char [max_seq_name_length+1];
 			}
-			if(seq0_comment_length + 1 > (int)buffer_seq_comment.size()){
-				buffer_seq_comment.resize((size_t)seq0_comment_length + 1);
+			if(seq0_comment_length > max_seq_comment_length){
+				max_seq_comment_length = seq0_comment_length;
+				buffer_seq_comment = new char [max_seq_comment_length+1];
 			}
-			int cur_name_length = fread(buffer_file_name.data(), sizeof(char), file_name_length, fp_info);
+			int cur_name_length = fread(buffer_file_name, sizeof(char), file_name_length, fp_info);
 			assert(cur_name_length == file_name_length);
-			int cur_seq_name_length = fread(buffer_seq_name.data(), sizeof(char), seq0_name_length, fp_info);
-			assert(cur_seq_name_length == seq0_name_length);
-			int cur_seq_comment_length = fread(buffer_seq_comment.data(), sizeof(char), seq0_comment_length, fp_info);
+			int cur_seq_name_length = fread(buffer_seq_name, sizeof(char), seq0_name_length, fp_info);
+			assert(cur_seq_name_length = seq0_name_length);
+			int cur_seq_comment_length = fread(buffer_seq_comment, sizeof(char), seq0_comment_length, fp_info);
 			assert(cur_seq_comment_length == seq0_comment_length);
 			string file_name, seq0_name, seq0_comment;
-			file_name.assign(buffer_file_name.data(), buffer_file_name.data() + cur_name_length);
-			seq0_name.assign(buffer_seq_name.data(), buffer_seq_name.data() + cur_seq_name_length);
-			seq0_comment.assign(buffer_seq_comment.data(), buffer_seq_comment.data() + cur_seq_comment_length);
+			file_name.assign(buffer_file_name, buffer_file_name + cur_name_length);
+			seq0_name.assign(buffer_seq_name, buffer_seq_name + cur_seq_name_length);
+			seq0_comment.assign(buffer_seq_comment, buffer_seq_comment + cur_seq_comment_length);
 			SequenceInfo tmp_seq{seq0_name, seq0_comment, strand, 0};
 			Vec_SeqInfo cur_file_seqs;
 			cur_file_seqs.push_back(tmp_seq);
@@ -532,19 +538,21 @@ bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketch
 			fread(&seq_comment_length, sizeof(int), 1, fp_info);
 			fread(&strand, sizeof(int), 1, fp_info);
 			fread(&length, sizeof(int), 1, fp_info);
-			if(seq_name_length + 1 > (int)buffer_seq_name.size()){
-				buffer_seq_name.resize((size_t)seq_name_length + 1);
+			if(seq_name_length > max_seq_name_length){
+				max_seq_name_length = seq_name_length;
+				buffer_seq_name = new char [max_seq_name_length+1];
 			}
-			if(seq_comment_length + 1 > (int)buffer_seq_comment.size()){
-				buffer_seq_comment.resize((size_t)seq_comment_length + 1);
+			if(seq_comment_length > max_seq_comment_length){
+				max_seq_comment_length = seq_comment_length;
+				buffer_seq_comment = new char [max_seq_comment_length+1];
 			}
-			int cur_seq_name_length = fread(buffer_seq_name.data(), sizeof(char), seq_name_length, fp_info);
+			int cur_seq_name_length = fread(buffer_seq_name, sizeof(char), seq_name_length, fp_info);
 			assert(cur_seq_name_length == seq_name_length);
-			int cur_seq_comment_length = fread(buffer_seq_comment.data(), sizeof(char), seq_comment_length, fp_info);
+			int cur_seq_comment_length = fread(buffer_seq_comment, sizeof(char), seq_comment_length, fp_info);
 			assert(cur_seq_comment_length == seq_comment_length);
 			string seq_name, seq_comment;
-			seq_name.assign(buffer_seq_name.data(), buffer_seq_name.data() + cur_seq_name_length);
-			seq_comment.assign(buffer_seq_comment.data(), buffer_seq_comment.data() + cur_seq_comment_length);
+			seq_name.assign(buffer_seq_name, buffer_seq_name + cur_seq_name_length);
+			seq_comment.assign(buffer_seq_comment, buffer_seq_comment + cur_seq_comment_length);
 			SequenceInfo cur_seq{seq_name, seq_comment, strand, length};
 			cur_sketch_info.seqInfo = cur_seq;
 			cur_sketch_info.id = i;
