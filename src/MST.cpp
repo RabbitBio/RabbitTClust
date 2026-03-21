@@ -1305,9 +1305,12 @@ vector<EdgeInfo> compute_minhash_mst(vector<SketchInfo>& sketches, int start_ind
     // For better performance, use modifyMST() instead
   }
 
-  // CRITICAL OPTIMIZATION: Pre-cache all hash arrays to avoid repeated storeMinHashes() calls
-  // This is similar to how KSSD directly accesses hash32_arr/hash64_arr
-  cerr << "-----pre-caching MinHash sketches..." << endl;
+  // Pre-cache all hash arrays into flat vectors so the inner loop never calls
+  // storeMinHashes() again.  Right after caching we delete the MinHash objects:
+  // their data is now fully owned by cached_hashes, so we avoid keeping two
+  // copies of the same data in memory simultaneously (which was the main cause
+  // of peak-RAM spikes and subsequent swap thrashing / all-red threads in htop).
+  cerr << "-----pre-caching MinHash sketches (and freeing originals)..." << endl;
   vector<vector<uint64_t>> cached_hashes(sketches.size());
   vector<int> cached_sizes(sketches.size());
   
@@ -1320,7 +1323,17 @@ vector<EdgeInfo> compute_minhash_mst(vector<SketchInfo>& sketches, int start_ind
       cached_sizes[i] = 0;
     }
   }
-  cerr << "-----MinHash sketches cached" << endl;
+
+  // Free MinHash objects now that data lives in cached_hashes.
+  // Sketch metadata (fileName, seqInfo, etc.) is not touched.
+  // NOTE: callers must not dereference minHash after this function returns.
+  for(size_t i = 0; i < sketches.size(); i++){
+    if(sketches[i].minHash != nullptr){
+      delete sketches[i].minHash;
+      sketches[i].minHash = nullptr;
+    }
+  }
+  cerr << "-----MinHash sketches cached; original objects freed" << endl;
 
   int N = sketches.size();
   denseArr = nullptr;
