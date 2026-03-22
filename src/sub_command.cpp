@@ -2050,6 +2050,10 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		double time0 = get_sec();
 		sketchByFile = loadSketches(folder_path, threads, sketches, sketch_func_id);
 		cerr << "-----the size of sketches is: " << sketches.size() << endl;
+		if(sketchByFile)
+			sort(sketches.begin(), sketches.end(), cmpGenomeSize);
+		else
+			sort(sketches.begin(), sketches.end(), cmpSeqSize);
 		double time1 = get_sec();
 #ifdef Timer
 		cerr << "========time of load genome Infos and sketch Infos is: " << time1 - time0 << endl;
