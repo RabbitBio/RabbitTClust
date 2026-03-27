@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <atomic>
 #include "phmap.h"  // Google's Swiss Tables for faster hash maps
 #ifdef USE_MPI
 #include <mpi.h>
@@ -933,6 +934,13 @@ vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketc
 	int** intersectionArr = new int*[threads];
 	for (int i = 0; i < threads; i++) intersectionArr[i] = new int[N];
 	int subSize = 8;
+	size_t total_blocks = 0;
+	for (size_t id = (size_t)(my_rank * subSize); id < sketches.size(); id += (size_t)(subSize * comm_sz)) total_blocks++;
+	std::atomic<size_t> completed_blocks(0);
+	std::atomic<int> next_report(10);
+	if (total_blocks > 0) {
+		cerr << "-----MPI rank " << my_rank << " local MST blocks: " << total_blocks << endl;
+	}
 
 	#pragma omp parallel for num_threads(threads) schedule(dynamic)
 	for (size_t id = (size_t)(my_rank * subSize); id < sketches.size(); id += (size_t)(subSize * comm_sz)) {
@@ -993,6 +1001,18 @@ vector<EdgeInfo> compute_kssd_mst_mpi(int my_rank, int comm_sz, vector<KssdSketc
 		sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
 		vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], N);
 		mstArr[thread_id].swap(tmpMst);
+		size_t done = completed_blocks.fetch_add(1, std::memory_order_relaxed) + 1;
+		if (total_blocks > 0) {
+			int pct = (int)((100.0 * done) / total_blocks);
+			int target = next_report.load(std::memory_order_relaxed);
+			while (pct >= target && target <= 100) {
+				if (next_report.compare_exchange_weak(target, target + 10, std::memory_order_relaxed)) {
+					cerr << "-----MPI rank " << my_rank << " local MST progress: "
+					     << target << "% (" << done << "/" << total_blocks << " blocks)" << endl;
+					break;
+				}
+			}
+		}
 	}
 
 	if (!no_dense && threadsANI && denseLocalArr && denseArr && aniArr) {
@@ -1097,6 +1117,14 @@ vector<EdgeInfo> compute_minhash_mst_mpi(int my_rank, int comm_sz, vector<Sketch
 	}
 
 	int subSize = 8;
+	size_t total_blocks = 0;
+	for (size_t id = (size_t)(my_rank * subSize); id < sketches.size(); id += (size_t)(subSize * comm_sz)) total_blocks++;
+	std::atomic<size_t> completed_blocks(0);
+	std::atomic<int> next_report(10);
+	if (total_blocks > 0) {
+		cerr << "-----MPI rank " << my_rank << " local MinHash MST blocks: " << total_blocks << endl;
+	}
+
 	#pragma omp parallel for num_threads(threads) schedule(dynamic)
 	for (size_t id = (size_t)(my_rank * subSize); id < sketches.size(); id += (size_t)(subSize * comm_sz)) {
 		int thread_id = omp_get_thread_num();
@@ -1211,6 +1239,18 @@ vector<EdgeInfo> compute_minhash_mst_mpi(int my_rank, int comm_sz, vector<Sketch
 		sort(mstArr[thread_id].begin(), mstArr[thread_id].end(), cmpEdge);
 		vector<EdgeInfo> tmpMst = kruskalAlgorithm(mstArr[thread_id], N);
 		mstArr[thread_id].swap(tmpMst);
+		size_t done = completed_blocks.fetch_add(1, std::memory_order_relaxed) + 1;
+		if (total_blocks > 0) {
+			int pct = (int)((100.0 * done) / total_blocks);
+			int target = next_report.load(std::memory_order_relaxed);
+			while (pct >= target && target <= 100) {
+				if (next_report.compare_exchange_weak(target, target + 10, std::memory_order_relaxed)) {
+					cerr << "-----MPI rank " << my_rank << " local MinHash MST progress: "
+					     << target << "% (" << done << "/" << total_blocks << " blocks)" << endl;
+					break;
+				}
+			}
+		}
 	}
 
 	if (!no_dense && threadsANI && denseLocalArr && denseArr && aniArr) {
