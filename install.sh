@@ -15,25 +15,20 @@ make -j8 && make install &&
 cd ../../ &&
 
 #compile the clust-greedy
-mkdir -p build && cd build &&
-rm -rf CMakeCache.txt CMakeFiles/ Makefile cmake_install.cmake 2>/dev/null;  # Clean previous config
-cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=ON -DUSE_LEIDEN=OFF -DUSE_DBSCAN=OFF .. && 
-make -j8 && make install &&
-cd .. &&
+mkdir -p build &&
+rm -rf build/CMakeCache.txt build/CMakeFiles build/Makefile build/cmake_install.cmake 2>/dev/null;  # Clean build dir config
+cmake -S . -B build -DUSE_RABBITFX=ON -DUSE_GREEDY=ON -DUSE_LEIDEN=OFF -DUSE_DBSCAN=OFF &&
+cmake --build build -j8 && cmake --install build &&
 
 #compile the clust-mst
-cd build &&
-rm -rf CMakeCache.txt CMakeFiles/ Makefile cmake_install.cmake 2>/dev/null;  # Clean previous config
-cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF -DUSE_LEIDEN=OFF -DUSE_DBSCAN=OFF .. &&
-make -j8 && make install &&
-cd .. &&
+rm -rf build/CMakeCache.txt build/CMakeFiles build/Makefile build/cmake_install.cmake 2>/dev/null;  # Clean build dir config
+cmake -S . -B build -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF -DUSE_LEIDEN=OFF -DUSE_DBSCAN=OFF &&
+cmake --build build -j8 && cmake --install build &&
 
 #compile the clust-dbscan
-cd build &&
-rm -rf CMakeCache.txt CMakeFiles/ Makefile cmake_install.cmake 2>/dev/null;  # Clean previous config
-cmake -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF -DUSE_LEIDEN=OFF -DUSE_DBSCAN=ON .. &&
-make -j8 && make install &&
-cd ..
+rm -rf build/CMakeCache.txt build/CMakeFiles build/Makefile build/cmake_install.cmake 2>/dev/null;  # Clean build dir config
+cmake -S . -B build -DUSE_RABBITFX=ON -DUSE_GREEDY=OFF -DUSE_LEIDEN=OFF -DUSE_DBSCAN=ON &&
+cmake --build build -j8 && cmake --install build
 
 #compile the clust-leiden (DISABLED - removed leiden compilation)
 # Leiden compilation has been removed from install.sh 
