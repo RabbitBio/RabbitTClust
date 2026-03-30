@@ -419,11 +419,10 @@ int main(int argc, char * argv[]){
 			if (*option_presketched && !*option_append) {
 				clust_from_sketches_fast_MPI(my_rank, comm_sz, 10, drlevel, outputFile, folder_path, is_newick_tree, no_dense, true, isContainment, threshold, noSave, threads);
 			} else if (!*option_append) {
+				kmerSize =19;
+				isContainment = false;
 				if (my_rank == 0)
-					cerr << "-----MPI KSSD: tune_kssd_parameters (calSize may be skipped)..." << endl;
-				if (!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)) { MPI_Finalize(); return 1; }
-				if (my_rank == 0)
-					cerr << "-----MPI KSSD: starting sketch + MST (reading genomes; can take a long time on shared FS, little log until sketch phase ends)..." << endl;
+					cerr << "-----MPI KSSD: using fixed parameters kmerSize=" << kmerSize << " drlevel=" << drlevel << " threshold=" << threshold << endl;
 				clust_from_genomes_fast_MPI(my_rank, comm_sz, inputFile, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
 			} else {
 				cerr << "ERROR: --mpi does not support --append" << endl;
@@ -434,7 +433,11 @@ int main(int argc, char * argv[]){
 			if (*option_presketched && !*option_append) {
 				clust_from_sketches_MPI(my_rank, comm_sz, outputFile, folder_path, is_newick_tree, no_dense, isContainment, threshold, noSave, threads);
 			} else if (!*option_append) {
-				if (!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, isJaccard, kmerSize, threshold, containCompress, sketchSize)) { MPI_Finalize(); return 1; }
+				kmerSize = 21;
+				sketchSize = 1000;
+				isContainment = false;
+				if (my_rank == 0)
+					cerr << "-----MPI MinHash: using fixed parameters kmerSize=" << kmerSize << " sketchSize=" << sketchSize << " threshold=" << threshold << endl;
 				clust_from_genomes_MPI(my_rank, comm_sz, inputFile, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, kmerSize, sketchSize, threshold, sketchFunc, containCompress, minLen, noSave, threads);
 			} else {
 				cerr << "ERROR: --mpi does not support --append" << endl;
@@ -504,6 +507,20 @@ int main(int argc, char * argv[]){
 		clust_from_sketches(folder_path, outputFile, is_newick_tree, is_auto_threshold, is_stability, no_dense, threshold, threads, use_inverted_index, save_rep_index);
 		return 0;
 	}
+
+#ifdef USE_MPI
+	if (is_mpi) {
+		kmerSize = 21;
+		sketchSize = 1000;
+		isContainment = false;
+		if (my_rank == 0)
+			cerr << "-----MPI MinHash: fixed params kmerSize=" << kmerSize
+			     << " sketchSize=" << sketchSize << " threshold=" << threshold << endl;
+		clust_from_genomes_MPI(my_rank, comm_sz, inputFile, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, kmerSize, sketchSize, threshold, sketchFunc, containCompress, minLen, noSave, threads);
+		MPI_Finalize();
+		return 0;
+	}
+#endif
 
 	if(!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, isJaccard, kmerSize, threshold, containCompress, sketchSize)){
 		return 1;
