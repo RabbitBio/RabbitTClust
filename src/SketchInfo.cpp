@@ -449,7 +449,10 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, 
 			exit(1);
 		}
 		string line;
+		double t_list_scan_start = get_sec();
+		size_t list_lines = 0;
 		while(getline(ifs, line)){
+			list_lines++;
 			uint64_t curSize;
 			string fileSuffix = line.substr(line.length()-2);
 			if(fileSuffix == "gz")//gz file
@@ -478,6 +481,9 @@ void calSize(bool sketchByFile, string inputFile, int threads, uint64_t minLen, 
 			number++;
 		}
 		ifs.close();
+		double t_list_scan = get_sec() - t_list_scan_start;
+		cerr << "-----calSize (genome list): stat/gz-isize scan of " << list_lines
+		     << " lines took " << t_list_scan << " s" << endl;
 	}
 	else{//sketch by sequence
 		#ifdef RABBIT_FX

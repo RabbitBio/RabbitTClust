@@ -2001,7 +2001,40 @@ void clust_from_genome_dbscan(const string inputFile, string outputFile, string 
 
 #ifdef USE_MPI
 #include <mpi.h>
+#include <climits>
 #include "common.hpp"
+
+// Parallel append to one file: rank 0 must have written [0, header_bytes) via POSIX first; all ranks participate.
+static void mpi_parallel_write_sketch_payload(const string& path, size_t header_bytes, const vector<char>& payload) {
+	unsigned long long local = (unsigned long long)payload.size();
+	unsigned long long prefix = 0;
+	MPI_Exscan(&local, &prefix, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
+	MPI_Offset base = (MPI_Offset)header_bytes + (MPI_Offset)prefix;
+
+	vector<char> path_mut(path.begin(), path.end());
+	path_mut.push_back('\0');
+	MPI_File fh;
+	if (MPI_File_open(MPI_COMM_WORLD, path_mut.data(), MPI_MODE_WRONLY, MPI_INFO_NULL, &fh) != MPI_SUCCESS) {
+		cerr << "ERROR: MPI_File_open failed for parallel sketch write: " << path << endl;
+		MPI_Abort(MPI_COMM_WORLD, 1);
+	}
+
+	const char* p = payload.data();
+	size_t rem = payload.size();
+	MPI_Offset off = base;
+	while (rem > 0) {
+		int chunk = (rem > (size_t)INT_MAX) ? INT_MAX : (int)rem;
+		if (MPI_File_write_at(fh, off, const_cast<char*>(p), chunk, MPI_BYTE, MPI_STATUS_IGNORE) != MPI_SUCCESS) {
+			cerr << "ERROR: MPI_File_write_at failed: " << path << endl;
+			MPI_File_close(&fh);
+			MPI_Abort(MPI_COMM_WORLD, 1);
+		}
+		p += chunk;
+		off += chunk;
+		rem -= (size_t)chunk;
+	}
+	MPI_File_close(&fh);
+}
 
 static void SafeBcast(char* buf, size_t total_size, int root, MPI_Comm comm) {
 	const size_t chunk = 512 * 1024 * 1024;
@@ -2134,16 +2167,9 @@ void compute_kssd_sketches_mpi(int my_rank, int comm_sz, vector<KssdSketchInfo>&
 		}
 		MPI_Barrier(MPI_COMM_WORLD);
 
-		for (int rank_to_write = 0; rank_to_write < comm_sz; ++rank_to_write) {
-			if (my_rank == rank_to_write) {
-				FILE* fp_info = fopen(info_file.c_str(), "ab");
-				if (fp_info) {
-					append_binary_genome_info(fp_info, sketches, sketchByFile);
-					fclose(fp_info);
-				}
-			}
-			MPI_Barrier(MPI_COMM_WORLD);
-		}
+		vector<char> kssd_info_payload;
+		pack_binary_genome_info(kssd_info_payload, sketches, sketchByFile);
+		mpi_parallel_write_sketch_payload(info_file, sizeof(bool) + sizeof(size_t), kssd_info_payload);
 
 		string hash_file = folder_path + "/kssd.hash.sketch";
 
@@ -2156,16 +2182,9 @@ void compute_kssd_sketches_mpi(int my_rank, int comm_sz, vector<KssdSketchInfo>&
 		}
 		MPI_Barrier(MPI_COMM_WORLD);
 
-		for (int rank_to_write = 0; rank_to_write < comm_sz; ++rank_to_write) {
-			if (my_rank == rank_to_write) {
-				FILE* fp_hash = fopen(hash_file.c_str(), "ab");
-				if (fp_hash) {
-					append_binary_hash_data(fp_hash, sketches);
-					fclose(fp_hash);
-				}
-			}
-			MPI_Barrier(MPI_COMM_WORLD);
-		}
+		vector<char> kssd_hash_payload;
+		pack_binary_hash_data(kssd_hash_payload, sketches);
+		mpi_parallel_write_sketch_payload(hash_file, sizeof(KssdParameters), kssd_hash_payload);
 
 		if (my_rank == 0) cerr << "-----Successfully saved all kssd sketches into: " << folder_path << endl;
 	}
@@ -2231,6 +2250,10 @@ void clust_from_genomes_fast_MPI(int my_rank, int comm_sz, const string inputFil
 	KssdParameters info;
 	compute_kssd_sketches_mpi(my_rank, comm_sz, sketches, info, isSave, inputFile, folder_path, sketchByFile, minLen, kmerSize, drlevel, threads);
 	int half_k = info.half_k;
+	// clust_from_sketches_fast_MPI reloads from disk; release RAM sketches first to avoid
+	// holding ~2× full sketch set (common OOM on large -l lists when --no-save is off).
+	if (isSave)
+		vector<KssdSketchInfo>().swap(sketches);
 	clust_from_sketches_fast_MPI(my_rank, comm_sz, half_k, drlevel, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, threshold, noSave, threads);
 }
 
@@ -2361,18 +2384,12 @@ void compute_minhash_sketches_mpi(int my_rank, int comm_sz, vector<SketchInfo>& 
 		}
 		MPI_Barrier(MPI_COMM_WORLD);
 
-		for (int rank_to_write = 0; rank_to_write < comm_sz; ++rank_to_write) {
-			if (my_rank == rank_to_write) {
-				FILE* fp_info = fopen(info_file.c_str(), "ab");
-				if (fp_info) {
-					append_minhash_genome_info(fp_info, sketches, sketchByFile);
-					fclose(fp_info);
-				}
-			}
-			MPI_Barrier(MPI_COMM_WORLD);
-		}
+		vector<char> mh_info_payload;
+		pack_minhash_genome_info(mh_info_payload, sketches, sketchByFile);
+		mpi_parallel_write_sketch_payload(info_file, sizeof(bool) + sizeof(size_t), mh_info_payload);
 
 		string hash_file = folder_path + "/hash.sketch";
+		const size_t minhash_hash_header = sizeof(int) + sizeof(int) + sizeof(bool) + sizeof(int);
 
 		if (my_rank == 0) {
 			FILE* fp_hash = fopen(hash_file.c_str(), "wb");
@@ -2390,16 +2407,9 @@ void compute_minhash_sketches_mpi(int my_rank, int comm_sz, vector<SketchInfo>& 
 		}
 		MPI_Barrier(MPI_COMM_WORLD);
 
-		for (int rank_to_write = 0; rank_to_write < comm_sz; ++rank_to_write) {
-			if (my_rank == rank_to_write) {
-				FILE* fp_hash = fopen(hash_file.c_str(), "ab");
-				if (fp_hash) {
-					append_minhash_hash_data(fp_hash, sketches);
-					fclose(fp_hash);
-				}
-			}
-			MPI_Barrier(MPI_COMM_WORLD);
-		}
+		vector<char> mh_hash_payload;
+		pack_minhash_hash_data(mh_hash_payload, sketches);
+		mpi_parallel_write_sketch_payload(hash_file, minhash_hash_header, mh_hash_payload);
 
 		if (my_rank == 0) cerr << "-----Successfully saved all MinHash sketches into: " << folder_path << endl;
 	}
@@ -2463,6 +2473,8 @@ void clust_from_genomes_MPI(int my_rank, int comm_sz, const string inputFile, st
 	bool isSave = !noSave;
 	vector<SketchInfo> sketches;
 	compute_minhash_sketches_mpi(my_rank, comm_sz, sketches, isSave, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, threads);
+	if (isSave)
+		vector<SketchInfo>().swap(sketches);
 	clust_from_sketches_MPI(my_rank, comm_sz, outputFile, folder_path, is_newick_tree, no_dense, isContainment, threshold, noSave, threads);
 }
 #endif

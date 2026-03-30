@@ -419,7 +419,11 @@ int main(int argc, char * argv[]){
 			if (*option_presketched && !*option_append) {
 				clust_from_sketches_fast_MPI(my_rank, comm_sz, 10, drlevel, outputFile, folder_path, is_newick_tree, no_dense, true, isContainment, threshold, noSave, threads);
 			} else if (!*option_append) {
+				if (my_rank == 0)
+					cerr << "-----MPI KSSD: tune_kssd_parameters (calSize may be skipped)..." << endl;
 				if (!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)) { MPI_Finalize(); return 1; }
+				if (my_rank == 0)
+					cerr << "-----MPI KSSD: starting sketch + MST (reading genomes; can take a long time on shared FS, little log until sketch phase ends)..." << endl;
 				clust_from_genomes_fast_MPI(my_rank, comm_sz, inputFile, outputFile, folder_path, is_newick_tree, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads);
 			} else {
 				cerr << "ERROR: --mpi does not support --append" << endl;
@@ -472,9 +476,11 @@ int main(int argc, char * argv[]){
 			append_clust_mst_fast(folder_path, inputFile, outputFile, is_newick_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, minLen, noSave, threshold, threads);
 			return 0;
 		}
+		cerr << "-----KSSD: tune_kssd_parameters..." << endl;
 		if(!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)){
 			return 1;
 		}
+		cerr << "-----KSSD: starting sketch + MST (reading all genomes from list; I/O bound on shared storage)..." << endl;
 		clust_from_genome_fast(inputFile, outputFile, folder_path, is_newick_tree, is_linkage_matrix, is_auto_threshold, is_stability, no_dense, sketchByFile, isContainment, kmerSize, threshold, drlevel, minLen, noSave, threads, dedup_dist, reps_per_cluster, save_rep_index);
 		return 0;
 	}

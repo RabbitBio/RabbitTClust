@@ -1,6 +1,7 @@
 #include "Sketch_IO.h"
 #include <fstream>
 #include <sstream>
+#include <vector>
 #include "greedy.h"
 #include "MST_IO.h"
 #include <assert.h>
@@ -564,25 +565,39 @@ bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketch
 }
 
 #ifdef USE_MPI
-void append_binary_hash_data(FILE* fp_hash, const vector<KssdSketchInfo>& sketches) {
+static void sketch_io_push_bytes(vector<char>& v, const void* src, size_t n) {
+	const char* c = static_cast<const char*>(src);
+	v.insert(v.end(), c, c + n);
+}
+
+void pack_binary_hash_data(vector<char>& out, const vector<KssdSketchInfo>& sketches) {
+	out.clear();
 	if (sketches.empty()) return;
 	bool use64 = sketches[0].use64;
 	if (use64) {
 		for (const auto& sketch : sketches) {
 			size_t cur_sketch_size = sketch.hash64_arr.size();
-			fwrite(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
-			fwrite(sketch.hash64_arr.data(), sizeof(uint64_t), cur_sketch_size, fp_hash);
+			sketch_io_push_bytes(out, &cur_sketch_size, sizeof(size_t));
+			sketch_io_push_bytes(out, sketch.hash64_arr.data(), sizeof(uint64_t) * cur_sketch_size);
 		}
 	} else {
 		for (const auto& sketch : sketches) {
 			size_t cur_sketch_size = sketch.hash32_arr.size();
-			fwrite(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
-			fwrite(sketch.hash32_arr.data(), sizeof(uint32_t), cur_sketch_size, fp_hash);
+			sketch_io_push_bytes(out, &cur_sketch_size, sizeof(size_t));
+			sketch_io_push_bytes(out, sketch.hash32_arr.data(), sizeof(uint32_t) * cur_sketch_size);
 		}
 	}
 }
 
-void append_binary_genome_info(FILE* fp_info, const vector<KssdSketchInfo>& sketches, bool sketchByFile) {
+void append_binary_hash_data(FILE* fp_hash, const vector<KssdSketchInfo>& sketches) {
+	vector<char> buf;
+	pack_binary_hash_data(buf, sketches);
+	if (!buf.empty())
+		fwrite(buf.data(), 1, buf.size(), fp_hash);
+}
+
+void pack_binary_genome_info(vector<char>& out, const vector<KssdSketchInfo>& sketches, bool sketchByFile) {
+	out.clear();
 	if (sketches.empty()) return;
 	if (sketchByFile) {
 		for (size_t i = 0; i < sketches.size(); i++) {
@@ -590,33 +605,41 @@ void append_binary_genome_info(FILE* fp_info, const vector<KssdSketchInfo>& sket
 			int file_name_length = (int)sketches[i].fileName.length();
 			int seq0_name_length = (int)curFileSeqs[0].name.length();
 			int seq0_comment_length = (int)curFileSeqs[0].comment.length();
-			fwrite(&file_name_length, sizeof(int), 1, fp_info);
-			fwrite(&seq0_name_length, sizeof(int), 1, fp_info);
-			fwrite(&seq0_comment_length, sizeof(int), 1, fp_info);
-			fwrite(&curFileSeqs[0].strand, sizeof(int), 1, fp_info);
-			fwrite(&sketches[i].totalSeqLength, sizeof(uint64_t), 1, fp_info);
-			fwrite(sketches[i].fileName.c_str(), sizeof(char), file_name_length, fp_info);
-			fwrite(curFileSeqs[0].name.c_str(), sizeof(char), seq0_name_length, fp_info);
-			fwrite(curFileSeqs[0].comment.c_str(), sizeof(char), seq0_comment_length, fp_info);
-			fwrite(&sketches[i].use64, sizeof(bool), 1, fp_info);
+			sketch_io_push_bytes(out, &file_name_length, sizeof(int));
+			sketch_io_push_bytes(out, &seq0_name_length, sizeof(int));
+			sketch_io_push_bytes(out, &seq0_comment_length, sizeof(int));
+			sketch_io_push_bytes(out, &curFileSeqs[0].strand, sizeof(int));
+			sketch_io_push_bytes(out, &sketches[i].totalSeqLength, sizeof(uint64_t));
+			sketch_io_push_bytes(out, sketches[i].fileName.c_str(), (size_t)file_name_length);
+			sketch_io_push_bytes(out, curFileSeqs[0].name.c_str(), (size_t)seq0_name_length);
+			sketch_io_push_bytes(out, curFileSeqs[0].comment.c_str(), (size_t)seq0_comment_length);
+			sketch_io_push_bytes(out, &sketches[i].use64, sizeof(bool));
 		}
 	} else {
 		for (size_t i = 0; i < sketches.size(); i++) {
 			const SequenceInfo& curSeq = sketches[i].seqInfo;
 			int seq_name_length = (int)curSeq.name.length();
 			int seq_comment_length = (int)curSeq.comment.length();
-			fwrite(&seq_name_length, sizeof(int), 1, fp_info);
-			fwrite(&seq_comment_length, sizeof(int), 1, fp_info);
-			fwrite(&curSeq.strand, sizeof(int), 1, fp_info);
-			fwrite(&curSeq.length, sizeof(int), 1, fp_info);
-			fwrite(curSeq.name.c_str(), sizeof(char), seq_name_length, fp_info);
-			fwrite(curSeq.comment.c_str(), sizeof(char), seq_comment_length, fp_info);
-			fwrite(&sketches[i].use64, sizeof(bool), 1, fp_info);
+			sketch_io_push_bytes(out, &seq_name_length, sizeof(int));
+			sketch_io_push_bytes(out, &seq_comment_length, sizeof(int));
+			sketch_io_push_bytes(out, &curSeq.strand, sizeof(int));
+			sketch_io_push_bytes(out, &curSeq.length, sizeof(int));
+			sketch_io_push_bytes(out, curSeq.name.c_str(), (size_t)seq_name_length);
+			sketch_io_push_bytes(out, curSeq.comment.c_str(), (size_t)seq_comment_length);
+			sketch_io_push_bytes(out, &sketches[i].use64, sizeof(bool));
 		}
 	}
 }
 
-void append_minhash_genome_info(FILE* fp, const vector<SketchInfo>& sketches, bool sketchByFile) {
+void append_binary_genome_info(FILE* fp_info, const vector<KssdSketchInfo>& sketches, bool sketchByFile) {
+	vector<char> buf;
+	pack_binary_genome_info(buf, sketches, sketchByFile);
+	if (!buf.empty())
+		fwrite(buf.data(), 1, buf.size(), fp_info);
+}
+
+void pack_minhash_genome_info(vector<char>& out, const vector<SketchInfo>& sketches, bool sketchByFile) {
+	out.clear();
 	if (sketches.empty()) return;
 	if (sketchByFile) {
 		for (size_t i = 0; i < sketches.size(); i++) {
@@ -624,39 +647,56 @@ void append_minhash_genome_info(FILE* fp, const vector<SketchInfo>& sketches, bo
 			int file_name_length = (int)sketches[i].fileName.length();
 			int seq0_name_length = (int)curFileSeqs[0].name.length();
 			int seq0_comment_length = (int)curFileSeqs[0].comment.length();
-			fwrite(&file_name_length, sizeof(int), 1, fp);
-			fwrite(&seq0_name_length, sizeof(int), 1, fp);
-			fwrite(&seq0_comment_length, sizeof(int), 1, fp);
-			fwrite(&curFileSeqs[0].strand, sizeof(int), 1, fp);
-			fwrite(&sketches[i].totalSeqLength, sizeof(uint64_t), 1, fp);
-			fwrite(sketches[i].fileName.c_str(), sizeof(char), file_name_length, fp);
-			fwrite(curFileSeqs[0].name.c_str(), sizeof(char), seq0_name_length, fp);
-			fwrite(curFileSeqs[0].comment.c_str(), sizeof(char), seq0_comment_length, fp);
+			sketch_io_push_bytes(out, &file_name_length, sizeof(int));
+			sketch_io_push_bytes(out, &seq0_name_length, sizeof(int));
+			sketch_io_push_bytes(out, &seq0_comment_length, sizeof(int));
+			sketch_io_push_bytes(out, &curFileSeqs[0].strand, sizeof(int));
+			sketch_io_push_bytes(out, &sketches[i].totalSeqLength, sizeof(uint64_t));
+			sketch_io_push_bytes(out, sketches[i].fileName.c_str(), (size_t)file_name_length);
+			sketch_io_push_bytes(out, curFileSeqs[0].name.c_str(), (size_t)seq0_name_length);
+			sketch_io_push_bytes(out, curFileSeqs[0].comment.c_str(), (size_t)seq0_comment_length);
 		}
 	} else {
 		for (size_t i = 0; i < sketches.size(); i++) {
 			SequenceInfo curSeq = sketches[i].seqInfo;
 			int seq_name_length = (int)curSeq.name.length();
 			int seq_comment_length = (int)curSeq.comment.length();
-			fwrite(&seq_name_length, sizeof(int), 1, fp);
-			fwrite(&seq_comment_length, sizeof(int), 1, fp);
-			fwrite(&curSeq.strand, sizeof(int), 1, fp);
-			fwrite(&curSeq.length, sizeof(int), 1, fp);
-			fwrite(curSeq.name.c_str(), sizeof(char), seq_name_length, fp);
-			fwrite(curSeq.comment.c_str(), sizeof(char), seq_comment_length, fp);
+			sketch_io_push_bytes(out, &seq_name_length, sizeof(int));
+			sketch_io_push_bytes(out, &seq_comment_length, sizeof(int));
+			sketch_io_push_bytes(out, &curSeq.strand, sizeof(int));
+			sketch_io_push_bytes(out, &curSeq.length, sizeof(int));
+			sketch_io_push_bytes(out, curSeq.name.c_str(), (size_t)seq_name_length);
+			sketch_io_push_bytes(out, curSeq.comment.c_str(), (size_t)seq_comment_length);
 		}
 	}
 }
 
-void append_minhash_hash_data(FILE* fp, const vector<SketchInfo>& sketches) {
+void append_minhash_genome_info(FILE* fp, const vector<SketchInfo>& sketches, bool sketchByFile) {
+	vector<char> buf;
+	pack_minhash_genome_info(buf, sketches, sketchByFile);
+	if (!buf.empty())
+		fwrite(buf.data(), 1, buf.size(), fp);
+}
+
+void pack_minhash_hash_data(vector<char>& out, const vector<SketchInfo>& sketches) {
+	out.clear();
 	for (size_t i = 0; i < sketches.size(); i++) {
 		vector<uint64_t> hashArr = sketches[i].minHash->storeMinHashes();
 		size_t cur_sketch_size = hashArr.size();
-		fwrite(&cur_sketch_size, sizeof(size_t), 1, fp);
-		fwrite(hashArr.data(), sizeof(uint64_t), cur_sketch_size, fp);
+		sketch_io_push_bytes(out, &cur_sketch_size, sizeof(size_t));
+		sketch_io_push_bytes(out, hashArr.data(), sizeof(uint64_t) * cur_sketch_size);
 	}
 }
+
+void append_minhash_hash_data(FILE* fp, const vector<SketchInfo>& sketches) {
+	vector<char> buf;
+	pack_minhash_hash_data(buf, sketches);
+	if (!buf.empty())
+		fwrite(buf.data(), 1, buf.size(), fp);
+}
 #endif
+
+
 
 
 
