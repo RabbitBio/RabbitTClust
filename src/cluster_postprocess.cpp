@@ -14,6 +14,10 @@ static inline uint64_t get_seq_len(const KssdSketchInfo& s, bool sketchByFile) {
   return sketchByFile ? s.totalSeqLength : (uint64_t)s.seqInfo.length;
 }
 
+static inline uint64_t get_seq_len(const SketchInfo& s, bool sketchByFile) {
+  return sketchByFile ? s.totalSeqLength : (uint64_t)s.seqInfo.length;
+}
+
 static vector<vector<pair<int, double>>> build_adj_from_forest(int N, const vector<EdgeInfo>& forest) {
   vector<vector<pair<int, double>>> adj(N);
   adj.reserve(N);
@@ -49,14 +53,17 @@ static void distances_from(int start,
   }
 }
 
-std::vector<std::vector<int>> build_dedup_candidates_per_cluster(
+namespace {
+// Shared core used by both Kssd / MinHash overloads: sketches are abstracted away
+// into a plain `seq_lens` vector (used only for tie-breaking when two candidate
+// medoids have identical total tree distance).
+std::vector<std::vector<int>> build_dedup_candidates_per_cluster_core(
     const std::vector<std::vector<int>>& clusters,
     const std::vector<EdgeInfo>& forest,
-    const std::vector<KssdSketchInfo>& sketches,
-    bool sketchByFile,
+    const std::vector<uint64_t>& seq_lens,
     double dedup_dist,
     std::vector<int>& node_to_rep) {
-  const int N = (int)sketches.size();
+  const int N = (int)seq_lens.size();
   node_to_rep.assign(N, -1);
 
   // No-op: identity mapping, candidates = clusters
@@ -112,7 +119,7 @@ std::vector<std::vector<int>> build_dedup_candidates_per_cluster(
         }
       }
 
-      uint64_t candLen = get_seq_len(sketches[cand], sketchByFile);
+      uint64_t candLen = (cand >= 0 && cand < (int)seq_lens.size()) ? seq_lens[cand] : 0;
       // Choose if: smaller total distance, or tie + longer sequence, or tie + smaller id
       if (totalDist < minTotalDist ||
           (totalDist == minTotalDist && (candLen > chosenLen || (candLen == chosenLen && cand < chosenRep)))) {
@@ -147,6 +154,31 @@ std::vector<std::vector<int>> build_dedup_candidates_per_cluster(
     candidates.push_back(std::move(cand));
   }
   return candidates;
+}
+}  // namespace
+
+std::vector<std::vector<int>> build_dedup_candidates_per_cluster(
+    const std::vector<std::vector<int>>& clusters,
+    const std::vector<EdgeInfo>& forest,
+    const std::vector<KssdSketchInfo>& sketches,
+    bool sketchByFile,
+    double dedup_dist,
+    std::vector<int>& node_to_rep) {
+  std::vector<uint64_t> lens(sketches.size());
+  for (size_t i = 0; i < sketches.size(); i++) lens[i] = get_seq_len(sketches[i], sketchByFile);
+  return build_dedup_candidates_per_cluster_core(clusters, forest, lens, dedup_dist, node_to_rep);
+}
+
+std::vector<std::vector<int>> build_dedup_candidates_per_cluster(
+    const std::vector<std::vector<int>>& clusters,
+    const std::vector<EdgeInfo>& forest,
+    const std::vector<SketchInfo>& sketches,
+    bool sketchByFile,
+    double dedup_dist,
+    std::vector<int>& node_to_rep) {
+  std::vector<uint64_t> lens(sketches.size());
+  for (size_t i = 0; i < sketches.size(); i++) lens[i] = get_seq_len(sketches[i], sketchByFile);
+  return build_dedup_candidates_per_cluster_core(clusters, forest, lens, dedup_dist, node_to_rep);
 }
 
 static int farthest_node(int start,

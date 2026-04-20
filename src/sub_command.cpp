@@ -1,6 +1,9 @@
 #include "sub_command.h"
 #include <assert.h>
 #include "cluster_postprocess.h"
+#ifndef GREEDY_CLUST
+#include "mst_state.h"
+#endif
 #include <fstream>
 #include <sstream>
 #include <iomanip>
@@ -752,8 +755,566 @@ void mh_repdb_stats(string db_path) {
 #endif
 
 #ifndef GREEDY_CLUST
-void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads){
+
+// =====================================================================
+// MST RepDB workflow functions (build / query / assign / append / stats)
+//
+// These mirror the greedy RepDB API but operate on MinHashMstState /
+// KssdMstState, so the stored database captures MST-medoid representatives
+// plus the inverted-index produced by `--save-rep`. `--db <path>` addresses a
+// single serialised state file (produced by MinHashMstState::save /
+// KssdMstState::save). The on-disk format is completely independent from
+// greedy's RepDB file, so the two databases must not be mixed.
+// =====================================================================
+
+namespace {
+
+// KSSD: sketches + MST -> initial state + save to db_path.
+// Uses the same compute_kssd_mst -> generateForest -> generateClusterWithBfs
+// pipeline as clust-mst --fast --save-rep. An in-memory KssdInvertedIndex is
+// always passed to compute_kssd_mst so MST construction runs on the fast,
+// inverted-index path (matches the --save-rep behaviour of
+// compute_kssd_clusters).
+void build_and_save_kssd_mst_db(
+    vector<KssdSketchInfo>& sketches, KssdParameters& info,
+    const string& db_path, const string& output_file,
+    bool sketch_by_file, bool no_dense, bool is_containment,
+    double threshold, int threads,
+    KssdInvertedIndex* prebuilt_index /* may be nullptr: build from sketches */)
+{
+    int kmer_size = info.half_k * 2;
+    cerr << "===== MST RepDB Build (KSSD) =====" << endl;
+    cerr << "  Genomes:    " << sketches.size() << endl;
+    cerr << "  Threshold:  " << threshold << endl;
+    cerr << "  Kmer size:  " << kmer_size << endl;
+
+    KssdInvertedIndex local_index;
+    KssdInvertedIndex* idx_ptr = prebuilt_index;
+    if (idx_ptr == nullptr) {
+        // Pre-sketched path: build in-memory inverted index from the loaded
+        // sketches (matches what compute_kssd_sketches_with_index produces
+        // during the from-genome path).
+        bool use64 = info.half_k - info.drlevel > 8;
+        local_index.init(use64);
+        double t0 = get_sec();
+        if (use64) {
+            for (size_t i = 0; i < sketches.size(); i++) {
+                for (uint64_t h : sketches[i].hash64_arr) local_index.hash_map_64[h].push_back((uint32_t)i);
+            }
+        } else {
+            for (size_t i = 0; i < sketches.size(); i++) {
+                for (uint32_t h : sketches[i].hash32_arr) local_index.hash_map_32[h].push_back((uint32_t)i);
+            }
+        }
+        double t1 = get_sec();
+        cerr << "-----built in-memory KSSD inverted index in " << (t1 - t0) << " seconds" << endl;
+        idx_ptr = &local_index;
+    }
+
+    int** denseArr = nullptr;
+    uint64_t* aniArr = nullptr;
+    int denseSpan = DENSE_SPAN;
+    // folder_path is only used by compute_kssd_mst when idx_ptr == nullptr (it
+    // falls back to on-disk `kssd.sketch.index`). Since we always pass a real
+    // index, an empty folder is fine here.
+    string mst_folder_unused;
+    vector<EdgeInfo> mst = compute_kssd_mst(sketches, info, mst_folder_unused, 0,
+                                            no_dense, is_containment, threads,
+                                            denseArr, denseSpan, aniArr,
+                                            threshold, idx_ptr);
+    vector<EdgeInfo> forest = generateForest(mst, threshold);
+    vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
+
+    KssdMstState state = KssdInitialMstState(sketches, info, forest, tmpClust, threshold, sketch_by_file);
+
+    if (!state.save(db_path)) {
+        cerr << "ERROR: failed to save MST RepDB state to: " << db_path << endl;
+        return;
+    }
+
+    if (!output_file.empty()) {
+        printKssdResult(tmpClust, sketches, sketch_by_file, output_file, threshold);
+        cerr << "-----write the cluster result into: " << output_file << endl;
+    }
+
+    cerr << "\n===== MST RepDB Build Summary (KSSD) =====" << endl;
+    cerr << "  Total genomes:    " << sketches.size() << endl;
+    cerr << "  Representatives:  " << state.representatives.size() << endl;
+    if (!sketches.empty()) {
+        cerr << "  Compression:      " << std::fixed << std::setprecision(2)
+             << (1.0 - (double)state.representatives.size() / sketches.size()) * 100.0 << "%" << endl;
+    }
+    cerr << "  RepDB saved to:   " << db_path << endl;
+    cerr << "==========================================" << endl;
+}
+
+// MinHash: analogous build helper. `contain_compress_hint` is the CLI-supplied
+// containment compress factor when known (>0 from the genome build path) or 0
+// when loading pre-sketched input (not recoverable from a serialised sketch).
+// A MinHashInvertedIndex is always passed to compute_minhash_mst (built here
+// from sketches if the caller did not provide one) so MST generation uses the
+// inverted-index fast path rather than the O(N^2) fallback.
+void build_and_save_minhash_mst_db(
+    vector<SketchInfo>& sketches,
+    const string& db_path, const string& output_file,
+    bool sketch_by_file, bool no_dense,
+    double threshold, int threads,
+    MinHashInvertedIndex* prebuilt_index /* may be nullptr */,
+    int contain_compress_hint = 0)
+{
+    if (sketches.empty()) {
+        cerr << "ERROR: no sketches loaded for MST RepDB build" << endl;
+        return;
+    }
+    int kmer_size = sketches[0].minHash->getKmerSize();
+    int sketch_size = sketches[0].minHash->getSketchSize();
+    bool is_containment = sketches[0].isContainment;
+    int contain_compress = contain_compress_hint;
+
+    cerr << "===== MST RepDB Build (MinHash) =====" << endl;
+    cerr << "  Genomes:     " << sketches.size() << endl;
+    cerr << "  Threshold:   " << threshold << endl;
+    cerr << "  Kmer size:   " << kmer_size << endl;
+    cerr << "  Sketch size: " << sketch_size << endl;
+    cerr << "  Containment: " << (is_containment ? "yes" : "no") << endl;
+
+    MinHashInvertedIndex local_index;
+    MinHashInvertedIndex* idx_ptr = prebuilt_index;
+    if (idx_ptr == nullptr) {
+        // Build an in-memory inverted index from loaded sketches (parallel
+        // thread-local maps merged at the end; same pattern as the
+        // --save-rep bootstrap).
+        double t0 = get_sec();
+        vector<phmap::flat_hash_map<uint64_t, vector<uint32_t>>> thread_local_indices(threads);
+        #pragma omp parallel num_threads(threads)
+        {
+            int tid = omp_get_thread_num();
+            auto& m = thread_local_indices[tid];
+            #pragma omp for schedule(dynamic, 100)
+            for (size_t i = 0; i < sketches.size(); i++) {
+                if (!sketches[i].minHash) continue;
+                sketches[i].id = (int)i;
+                vector<uint64_t> h = sketches[i].minHash->storeMinHashes();
+                for (uint64_t x : h) m[x].push_back((uint32_t)i);
+            }
+        }
+        for (auto& m : thread_local_indices) {
+            for (auto& kv : m) {
+                auto& v = local_index.hash_map[kv.first];
+                v.insert(v.end(), kv.second.begin(), kv.second.end());
+            }
+        }
+        double t1 = get_sec();
+        cerr << "-----built in-memory MinHash inverted index in " << (t1 - t0) << " seconds" << endl;
+        idx_ptr = &local_index;
+    }
+
+    int** denseArr = nullptr;
+    uint64_t* aniArr = nullptr;
+    int denseSpan = DENSE_SPAN;
+    vector<EdgeInfo> mst = compute_minhash_mst(sketches, 0, no_dense, is_containment,
+                                               threads, denseArr, denseSpan, aniArr,
+                                               threshold, kmer_size, idx_ptr);
+    vector<EdgeInfo> forest = generateForest(mst, threshold);
+    vector<vector<int>> tmpClust = generateClusterWithBfs(forest, sketches.size());
+
+    MinHashMstState state = MinHashInitialMstState(
+        sketches, forest, tmpClust,
+        threshold, kmer_size, sketch_size, contain_compress, is_containment, sketch_by_file);
+
+    if (!state.save(db_path)) {
+        cerr << "ERROR: failed to save MST RepDB state to: " << db_path << endl;
+        return;
+    }
+
+    if (!output_file.empty()) {
+        printResult(tmpClust, sketches, sketch_by_file, output_file);
+        cerr << "-----write the cluster result into: " << output_file << endl;
+    }
+
+    cerr << "\n===== MST RepDB Build Summary (MinHash) =====" << endl;
+    cerr << "  Total genomes:    " << sketches.size() << endl;
+    cerr << "  Representatives:  " << state.representatives.size() << endl;
+    if (!sketches.empty()) {
+        cerr << "  Compression:      " << std::fixed << std::setprecision(2)
+             << (1.0 - (double)state.representatives.size() / sketches.size()) * 100.0 << "%" << endl;
+    }
+    cerr << "  RepDB saved to:   " << db_path << endl;
+    cerr << "=============================================" << endl;
+}
+
+} // namespace (MST RepDB build helpers)
+
+// ---- KSSD MST RepDB ----------------------------------------------------------
+
+void mst_repdb_build_from_sketch_fast(string folder_path, string db_path, string output_file, bool no_dense, bool is_containment, double threshold, int threads) {
+    vector<KssdSketchInfo> sketches;
+    KssdParameters info = {};
+    bool sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
+    // No in-memory index on this path; build_and_save_kssd_mst_db will
+    // reconstruct one from the loaded sketches.
+    build_and_save_kssd_mst_db(sketches, info, db_path, output_file,
+                               sketchByFile, no_dense, is_containment, threshold, threads,
+                               /*prebuilt_index=*/nullptr);
+}
+
+void mst_repdb_build_from_genome_fast(string input_file, string db_path, string output_file, bool sketch_by_file, int min_len, int kmer_size, int drlevel, bool no_dense, bool is_containment, double threshold, int threads) {
+    vector<KssdSketchInfo> sketches;
+    KssdParameters info = {};
+    // Build sketches AND the in-memory inverted index in a single pass (same
+    // function the --save-rep path uses). Not saving sketches to disk here —
+    // the RepDB file itself is self-contained.
+    KssdInvertedIndex inverted_index;
+    string folder_path;
+    compute_kssd_sketches_with_index(sketches, info, inverted_index,
+                                     /*isSave=*/false, input_file, folder_path,
+                                     sketch_by_file, min_len, kmer_size, drlevel, threads);
+    build_and_save_kssd_mst_db(sketches, info, db_path, output_file,
+                               sketch_by_file, no_dense, is_containment, threshold, threads,
+                               &inverted_index);
+}
+
+void mst_repdb_query_fast(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int topk, int threads) {
+    KssdMstState state;
+    if (!state.load(db_path)) { cerr << "ERROR: failed to load MST RepDB from: " << db_path << endl; exit(1); }
+
+    int kmer_size = state.kmer_size > 0 ? state.kmer_size : state.half_k * 2;
+    vector<KssdSketchInfo> queries;
+    KssdParameters qinfo = {};
+    string qfolder;
+    compute_kssd_sketches(queries, qinfo, /*isSave=*/false, input_file, qfolder,
+                          sketch_by_file, min_len, kmer_size, state.drlevel, threads);
+
+    cerr << "===== MST RepDB Query (KSSD) =====" << endl;
+    cerr << "  Query genomes:  " << queries.size() << endl;
+    cerr << "  Top-k:          " << topk << endl;
+    cerr << "  DB reps:        " << state.representatives.size() << endl;
+
+    FILE* fp = fopen(output_file.c_str(), "w");
+    if (!fp) { cerr << "ERROR: cannot open output file: " << output_file << endl; exit(1); }
+    fprintf(fp, "#query\trank\trep_name\tdistance\tcluster_id\tcluster_size\n");
+
+    for (size_t i = 0; i < queries.size(); i++) {
+        auto results = KssdMstQueryTopK(state, queries[i], topk, threads);
+        string qname = queries[i].fileName;
+        if (qname.empty()) qname = "query_" + std::to_string(i);
+        if (results.empty()) {
+            fprintf(fp, "%s\t0\tno_match\t-1\t-1\t0\n", qname.c_str());
+        } else {
+            for (int r = 0; r < (int)results.size(); r++) {
+                fprintf(fp, "%s\t%d\t%s\t%.6f\t%d\t%d\n",
+                    qname.c_str(), r + 1,
+                    results[r].rep_name.c_str(),
+                    results[r].distance,
+                    results[r].cluster_id,
+                    results[r].cluster_size);
+            }
+        }
+        if ((i + 1) % 10000 == 0) cerr << "---queried: " << (i + 1) << " / " << queries.size() << endl;
+    }
+    fclose(fp);
+    cerr << "===== Query Results =====" << endl;
+    cerr << "  Output: " << output_file << endl;
+    cerr << "=========================" << endl;
+}
+
+void mst_repdb_assign_fast(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads) {
+    KssdMstState state;
+    if (!state.load(db_path)) { cerr << "ERROR: failed to load MST RepDB from: " << db_path << endl; exit(1); }
+
+    int kmer_size = state.kmer_size > 0 ? state.kmer_size : state.half_k * 2;
+    vector<KssdSketchInfo> queries;
+    KssdParameters qinfo = {};
+    string qfolder;
+    compute_kssd_sketches(queries, qinfo, /*isSave=*/false, input_file, qfolder,
+                          sketch_by_file, min_len, kmer_size, state.drlevel, threads);
+
+    cerr << "===== MST RepDB Assignment (KSSD) =====" << endl;
+    cerr << "  Query genomes:  " << queries.size() << endl;
+    cerr << "  DB reps:        " << state.representatives.size() << endl;
+    cerr << "  Threshold:      " << state.threshold << endl;
+
+    FILE* fp = fopen(output_file.c_str(), "w");
+    if (!fp) { cerr << "ERROR: cannot open output file: " << output_file << endl; exit(1); }
+    fprintf(fp, "#query\tassigned_cluster\trep_name\tdistance\tcluster_size\tstatus\n");
+
+    int assigned = 0, unassigned = 0;
+    for (size_t i = 0; i < queries.size(); i++) {
+        auto result = KssdMstAssign(state, queries[i], threads);
+        string qname = queries[i].fileName;
+        if (qname.empty()) qname = "query_" + std::to_string(i);
+        if (result.rep_idx >= 0) {
+            fprintf(fp, "%s\t%d\t%s\t%.6f\t%d\tassigned\n",
+                qname.c_str(), result.cluster_id,
+                result.rep_name.c_str(), result.distance, result.cluster_size);
+            assigned++;
+        } else {
+            fprintf(fp, "%s\t-1\tunassigned\t-1\t0\tnovel\n", qname.c_str());
+            unassigned++;
+        }
+        if ((i + 1) % 10000 == 0) cerr << "---assigned: " << (i + 1) << " / " << queries.size() << endl;
+    }
+    fclose(fp);
+    cerr << "===== Assignment Results =====" << endl;
+    if (!queries.empty()) {
+        cerr << "  Assigned:    " << assigned << " (" << std::fixed << std::setprecision(1)
+             << (100.0 * assigned / queries.size()) << "%)" << endl;
+        cerr << "  Novel:       " << unassigned << " (" << std::fixed << std::setprecision(1)
+             << (100.0 * unassigned / queries.size()) << "%)" << endl;
+    }
+    cerr << "  Output:      " << output_file << endl;
+    cerr << "==============================" << endl;
+}
+
+void mst_repdb_append_fast(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads) {
+    KssdMstState state;
+    if (!state.load(db_path)) { cerr << "ERROR: failed to load MST RepDB from: " << db_path << endl; exit(1); }
+
+    int kmer_size = state.kmer_size > 0 ? state.kmer_size : state.half_k * 2;
+    vector<KssdSketchInfo> new_sketches;
+    KssdParameters ninfo = {};
+    string nfolder;
+    compute_kssd_sketches(new_sketches, ninfo, /*isSave=*/false, input_file, nfolder,
+                          sketch_by_file, min_len, kmer_size, state.drlevel, threads);
+
+    int old_reps = (int)state.representatives.size();
+    int old_n = state.N;
+    cerr << "===== MST RepDB Append (KSSD) =====" << endl;
+    cerr << "  Existing reps:    " << old_reps << endl;
+    cerr << "  Existing genomes: " << old_n << endl;
+    cerr << "  New genomes:      " << new_sketches.size() << endl;
+
+    auto live = KssdMstAppendCluster(state, new_sketches, threads);
+
+    if (!state.save(db_path)) {
+        cerr << "ERROR: failed to save updated MST RepDB state to: " << db_path << endl;
+    }
+    if (!output_file.empty()) {
+        printMstStateClusterResult(live, state.member_names, state.member_lens,
+                                   state.sketch_by_file, output_file, state.threshold);
+        cerr << "-----write the cluster result into: " << output_file << endl;
+    }
+
+    int new_reps = (int)state.representatives.size();
+    cerr << "\n===== Append Summary (KSSD) =====" << endl;
+    cerr << "  New rep slots added: " << (new_reps - old_reps) << endl;
+    cerr << "  Total rep slots:     " << new_reps << endl;
+    cerr << "  Live clusters:       " << live.size() << endl;
+    cerr << "  Total genomes:       " << state.N << endl;
+    cerr << "  RepDB updated:       " << db_path << endl;
+    cerr << "==================================" << endl;
+}
+
+void mst_repdb_stats_fast(string db_path) {
+    KssdMstState state;
+    if (!state.load(db_path)) { cerr << "ERROR: failed to load MST RepDB from: " << db_path << endl; exit(1); }
+    KssdMstPrintStats(state, std::cout);
+}
+
+// ---- MinHash MST RepDB -------------------------------------------------------
+
+void mst_repdb_build_from_sketch(string folder_path, string db_path, string output_file, bool no_dense, double threshold, int threads) {
+    vector<SketchInfo> sketches;
+    int sketch_func_id = 0;
+    bool sketchByFile = loadSketches(folder_path, threads, sketches, sketch_func_id);
+    // Try to load a pre-existing in-memory inverted index from the sketch
+    // folder; fall back to building one from sketches inside the helper.
+    MinHashInvertedIndex inverted_index;
+    bool loaded_idx = loadMinHashIndex(folder_path, inverted_index);
+    if (loaded_idx) cerr << "-----loaded pre-existing MinHash inverted index from: " << folder_path << endl;
+    build_and_save_minhash_mst_db(sketches, db_path, output_file,
+                                  sketchByFile, no_dense, threshold, threads,
+                                  loaded_idx ? &inverted_index : nullptr);
+}
+
+void mst_repdb_build_from_genome(string input_file, string db_path, string output_file, bool sketch_by_file, int min_len, int kmer_size, int sketch_size, string sketch_func, bool is_containment, int contain_compress, bool no_dense, double threshold, int threads) {
+    vector<SketchInfo> sketches;
+    string folder_path;
+    // Build sketches AND the in-memory inverted index in one pass. Matches the
+    // --save-rep code path (clust_from_genomes / compute_sketches).
+    MinHashInvertedIndex inverted_index;
+    compute_sketches(sketches, input_file, folder_path, sketch_by_file, min_len,
+                     kmer_size, sketch_size, sketch_func, is_containment, contain_compress,
+                     /*isSave=*/false, threads, &inverted_index);
+    build_and_save_minhash_mst_db(sketches, db_path, output_file,
+                                  sketch_by_file, no_dense, threshold, threads,
+                                  &inverted_index,
+                                  is_containment ? contain_compress : 0);
+}
+
+void mst_repdb_query(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int topk, int threads) {
+    MinHashMstState state;
+    if (!state.load(db_path)) { cerr << "ERROR: failed to load MST RepDB from: " << db_path << endl; exit(1); }
+
+    vector<SketchInfo> queries;
+    string qfolder;
+    compute_sketches(queries, input_file, qfolder, sketch_by_file, min_len,
+                     state.kmer_size, state.sketch_size, "MinHash",
+                     state.is_containment, state.contain_compress > 0 ? state.contain_compress : 1000,
+                     /*isSave=*/false, threads, /*inverted_index=*/nullptr);
+
+    cerr << "===== MST RepDB Query (MinHash) =====" << endl;
+    cerr << "  Query genomes:  " << queries.size() << endl;
+    cerr << "  Top-k:          " << topk << endl;
+    cerr << "  DB reps:        " << state.representatives.size() << endl;
+
+    FILE* fp = fopen(output_file.c_str(), "w");
+    if (!fp) { cerr << "ERROR: cannot open output file: " << output_file << endl; exit(1); }
+    fprintf(fp, "#query\trank\trep_name\tdistance\tcluster_id\tcluster_size\n");
+
+    for (size_t i = 0; i < queries.size(); i++) {
+        auto results = MinHashMstQueryTopK(state, queries[i], topk, threads);
+        string qname = queries[i].fileName;
+        if (qname.empty()) qname = "query_" + std::to_string(i);
+        if (results.empty()) {
+            fprintf(fp, "%s\t0\tno_match\t-1\t-1\t0\n", qname.c_str());
+        } else {
+            for (int r = 0; r < (int)results.size(); r++) {
+                fprintf(fp, "%s\t%d\t%s\t%.6f\t%d\t%d\n",
+                    qname.c_str(), r + 1,
+                    results[r].rep_name.c_str(),
+                    results[r].distance,
+                    results[r].cluster_id,
+                    results[r].cluster_size);
+            }
+        }
+        if ((i + 1) % 10000 == 0) cerr << "---queried: " << (i + 1) << " / " << queries.size() << endl;
+    }
+    fclose(fp);
+    cerr << "===== Query Results =====" << endl;
+    cerr << "  Output: " << output_file << endl;
+    cerr << "=========================" << endl;
+}
+
+void mst_repdb_assign(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads) {
+    MinHashMstState state;
+    if (!state.load(db_path)) { cerr << "ERROR: failed to load MST RepDB from: " << db_path << endl; exit(1); }
+
+    vector<SketchInfo> queries;
+    string qfolder;
+    compute_sketches(queries, input_file, qfolder, sketch_by_file, min_len,
+                     state.kmer_size, state.sketch_size, "MinHash",
+                     state.is_containment, state.contain_compress > 0 ? state.contain_compress : 1000,
+                     /*isSave=*/false, threads, /*inverted_index=*/nullptr);
+
+    cerr << "===== MST RepDB Assignment (MinHash) =====" << endl;
+    cerr << "  Query genomes:  " << queries.size() << endl;
+    cerr << "  DB reps:        " << state.representatives.size() << endl;
+    cerr << "  Threshold:      " << state.threshold << endl;
+
+    FILE* fp = fopen(output_file.c_str(), "w");
+    if (!fp) { cerr << "ERROR: cannot open output file: " << output_file << endl; exit(1); }
+    fprintf(fp, "#query\tassigned_cluster\trep_name\tdistance\tcluster_size\tstatus\n");
+
+    int assigned = 0, unassigned = 0;
+    for (size_t i = 0; i < queries.size(); i++) {
+        auto result = MinHashMstAssign(state, queries[i], threads);
+        string qname = queries[i].fileName;
+        if (qname.empty()) qname = "query_" + std::to_string(i);
+        if (result.rep_idx >= 0) {
+            fprintf(fp, "%s\t%d\t%s\t%.6f\t%d\tassigned\n",
+                qname.c_str(), result.cluster_id,
+                result.rep_name.c_str(), result.distance, result.cluster_size);
+            assigned++;
+        } else {
+            fprintf(fp, "%s\t-1\tunassigned\t-1\t0\tnovel\n", qname.c_str());
+            unassigned++;
+        }
+        if ((i + 1) % 10000 == 0) cerr << "---assigned: " << (i + 1) << " / " << queries.size() << endl;
+    }
+    fclose(fp);
+    cerr << "===== Assignment Results =====" << endl;
+    if (!queries.empty()) {
+        cerr << "  Assigned:    " << assigned << " (" << std::fixed << std::setprecision(1)
+             << (100.0 * assigned / queries.size()) << "%)" << endl;
+        cerr << "  Novel:       " << unassigned << " (" << std::fixed << std::setprecision(1)
+             << (100.0 * unassigned / queries.size()) << "%)" << endl;
+    }
+    cerr << "  Output:      " << output_file << endl;
+    cerr << "==============================" << endl;
+}
+
+void mst_repdb_append(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads) {
+    MinHashMstState state;
+    if (!state.load(db_path)) { cerr << "ERROR: failed to load MST RepDB from: " << db_path << endl; exit(1); }
+
+    vector<SketchInfo> new_sketches;
+    string nfolder;
+    compute_sketches(new_sketches, input_file, nfolder, sketch_by_file, min_len,
+                     state.kmer_size, state.sketch_size, "MinHash",
+                     state.is_containment, state.contain_compress > 0 ? state.contain_compress : 1000,
+                     /*isSave=*/false, threads, /*inverted_index=*/nullptr);
+
+    int old_reps = (int)state.representatives.size();
+    int old_n = state.N;
+    cerr << "===== MST RepDB Append (MinHash) =====" << endl;
+    cerr << "  Existing reps:    " << old_reps << endl;
+    cerr << "  Existing genomes: " << old_n << endl;
+    cerr << "  New genomes:      " << new_sketches.size() << endl;
+
+    auto live = MinHashMstAppendCluster(state, new_sketches, threads);
+
+    if (!state.save(db_path)) {
+        cerr << "ERROR: failed to save updated MST RepDB state to: " << db_path << endl;
+    }
+    if (!output_file.empty()) {
+        printMstStateClusterResult(live, state.member_names, state.member_lens,
+                                   state.sketch_by_file, output_file, state.threshold);
+        cerr << "-----write the cluster result into: " << output_file << endl;
+    }
+
+    int new_reps = (int)state.representatives.size();
+    cerr << "\n===== Append Summary (MinHash) =====" << endl;
+    cerr << "  New rep slots added: " << (new_reps - old_reps) << endl;
+    cerr << "  Total rep slots:     " << new_reps << endl;
+    cerr << "  Live clusters:       " << live.size() << endl;
+    cerr << "  Total genomes:       " << state.N << endl;
+    cerr << "  RepDB updated:       " << db_path << endl;
+    cerr << "=====================================" << endl;
+}
+
+void mst_repdb_stats(string db_path) {
+    MinHashMstState state;
+    if (!state.load(db_path)) { cerr << "ERROR: failed to load MST RepDB from: " << db_path << endl; exit(1); }
+    MinHashMstPrintStats(state, std::cout);
+}
+
+// =====================================================================
+// End MST RepDB workflow
+// =====================================================================
+
+void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads, bool save_rep_index){
 	bool isSave = !no_save;
+
+	// --- Fast path: --save-rep state exists, use inverted-index append. ---
+	{
+		string state_path = folder_path + "/mst_cluster_state.bin";
+		struct stat stbuf;
+		if (stat(state_path.c_str(), &stbuf) == 0) {
+			cerr << "===== clust-mst --fast append (inverted-index state) =====" << endl;
+			KssdMstState st;
+			if (!st.load(state_path)) {
+				cerr << "ERROR: failed to load " << state_path << ", falling back to classic append" << endl;
+			} else {
+				// Sketch the new inputs with the same params as the stored state.
+				int kmer_size = st.half_k * 2;
+				vector<KssdSketchInfo> new_sketches;
+				KssdParameters new_info = {};
+				string tmp_folder;
+				compute_kssd_sketches(new_sketches, new_info, /*isSave=*/false, input_file, tmp_folder,
+				                      sketch_by_file, min_len, kmer_size, st.drlevel, threads);
+				// Update threshold in state? No — keep persistent threshold from initial run.
+				auto live = KssdMstAppendCluster(st, new_sketches, threads);
+				printMstStateClusterResult(live, st.member_names, st.member_lens,
+				                           st.sketch_by_file, output_file, st.threshold);
+				cerr << "-----write the cluster result into: " << output_file << endl;
+				cerr << "-----the cluster number of: " << output_file << " is: " << live.size() << endl;
+				if (!no_save && save_rep_index) st.save(state_path);
+				return;
+			}
+		}
+	}
+
 	int sketch_func_id_0; 
 	vector<KssdSketchInfo> pre_sketches; 
 	KssdParameters pre_info;
@@ -968,7 +1529,36 @@ void append_clust_mst_fast(string folder_path, string input_file, string output_
 
 }
 
-void append_clust_mst(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads){
+void append_clust_mst(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads, bool save_rep_index){
+	// --- Fast path: --save-rep state exists, use inverted-index append. ---
+	{
+		string state_path = folder_path + "/mst_cluster_state.bin";
+		struct stat stbuf;
+		if (stat(state_path.c_str(), &stbuf) == 0) {
+			cerr << "===== clust-mst append (inverted-index state) =====" << endl;
+			MinHashMstState st;
+			if (!st.load(state_path)) {
+				cerr << "ERROR: failed to load " << state_path << ", falling back to classic append" << endl;
+			} else {
+				// Sketch the new inputs using the stored params.
+				string sketch_func = "MinHash";
+				vector<SketchInfo> new_sketches;
+				string tmp_folder;
+				compute_sketches(new_sketches, input_file, tmp_folder, sketch_by_file,
+				                 min_len, st.kmer_size, st.sketch_size, sketch_func,
+				                 st.is_containment, st.contain_compress, /*isSave=*/false,
+				                 threads);
+				auto live = MinHashMstAppendCluster(st, new_sketches, threads);
+				printMstStateClusterResult(live, st.member_names, st.member_lens,
+				                           st.sketch_by_file, output_file, st.threshold);
+				cerr << "-----write the cluster result into: " << output_file << endl;
+				cerr << "-----the cluster number of: " << output_file << " is: " << live.size() << endl;
+				if (!no_save && save_rep_index) st.save(state_path);
+				return;
+			}
+		}
+	}
+
 	int sketch_func_id_0; 
 	vector<SketchInfo> pre_sketches; 
 	bool pre_sketch_by_file = loadSketches(folder_path, threads, pre_sketches, sketch_func_id_0); 
@@ -1489,6 +2079,13 @@ void compute_kssd_clusters(vector<KssdSketchInfo>& sketches, const KssdParameter
 	cerr << "-----write the cluster result into: " << outputFile << endl;
 	cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
 
+	// --save-rep: persist KSSD MST state for later --append runs.
+	if(save_rep_index && isSave){
+		KssdMstState mst_state = KssdInitialMstState(
+			sketches, info, forest, tmpClust, threshold, sketchByFile);
+		mst_state.save(folder_path + "/mst_cluster_state.bin");
+	}
+
 	if(dedup_dist > 0 || reps_per_cluster > 0){
 		vector<int> node_to_rep;
 		vector<vector<int>> candidates = build_dedup_candidates_per_cluster(tmpClust, forest, sketches, sketchByFile, dedup_dist, node_to_rep);
@@ -1976,6 +2573,13 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		cerr << "-----write the cluster result into: " << outputFile << endl;
 		cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
 
+		// --save-rep: persist KSSD MST state for later --append runs.
+		if(save_rep_index){
+			KssdMstState mst_state = KssdInitialMstState(
+				sketches, info, forest, tmpClust, threshold, sketchByFile);
+			mst_state.save(folder_path + "/mst_cluster_state.bin");
+		}
+
 		if(dedup_dist > 0 || reps_per_cluster > 0){
 			vector<int> node_to_rep;
 			vector<vector<int>> candidates = build_dedup_candidates_per_cluster(tmpClust, forest, sketches, sketchByFile, dedup_dist, node_to_rep);
@@ -2206,6 +2810,18 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		cerr << "-----write the cluster result into: " << outputFile << endl;
 		cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
 
+		// --save-rep: persist MinHash MST state for later --append runs.
+		if(save_rep_index && sketch_func_id == 0 && !sketches.empty() && sketches[0].minHash != nullptr){
+			int kmer_size_state = sketches[0].minHash->getKmerSize();
+			int sketch_size_state = sketches[0].minHash->getSketchSize();
+			bool is_containment_state = sketches[0].isContainment;
+			MinHashMstState mst_state = MinHashInitialMstState(
+				sketches, forest, tmpClust,
+				threshold, kmer_size_state, sketch_size_state,
+				/*contain_compress=*/0, is_containment_state, sketchByFile);
+			mst_state.save(folder_path + "/mst_cluster_state.bin");
+		}
+
 		if(!no_dense){
 			int alpha = 2;
 			int denseIndex = threshold / 0.01;
@@ -2435,6 +3051,21 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		printResult(tmpClust, sketches, sketchByFile, outputFile, threshold);
 		cerr << "-----write the cluster result into: " << outputFile << endl;
 		cerr << "-----the cluster number of: " << outputFile << " is: " << tmpClust.size() << endl;
+
+#ifndef GREEDY_CLUST
+		// --save-rep: serialise a MinHash MST state (1 tree-medoid per cluster + rep
+		// inverted index) so that subsequent --append runs can skip the Kruskal path.
+		if(save_rep_index && isSave && sketch_func_id == 0 && !sketches.empty() && sketches[0].minHash != nullptr){
+			int kmer_size_state = sketches[0].minHash->getKmerSize();
+			int sketch_size_state = sketches[0].minHash->getSketchSize();
+			bool is_containment_state = sketches[0].isContainment;
+			MinHashMstState mst_state = MinHashInitialMstState(
+				sketches, forest, tmpClust,
+				threshold, kmer_size_state, sketch_size_state,
+				/*contain_compress=*/0, is_containment_state, sketchByFile);
+			mst_state.save(folder_path + "/mst_cluster_state.bin");
+		}
+#endif
 
 		//tune cluster by noise cluster
 		if(!no_dense){

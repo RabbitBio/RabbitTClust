@@ -18,6 +18,15 @@ std::vector<std::vector<int>> build_dedup_candidates_per_cluster(
     double dedup_dist,
     std::vector<int>& node_to_rep);
 
+// MinHash overload: lengths come from SketchInfo (totalSeqLength / seqInfo.length).
+std::vector<std::vector<int>> build_dedup_candidates_per_cluster(
+    const std::vector<std::vector<int>>& clusters,
+    const std::vector<EdgeInfo>& forest,
+    const std::vector<SketchInfo>& sketches,
+    bool sketchByFile,
+    double dedup_dist,
+    std::vector<int>& node_to_rep);
+
 // Select up to k representative ids per cluster, aiming to cover diversity.
 // Uses farthest-first traversal (k-center heuristic) on the tree metric induced by the forest.
 //

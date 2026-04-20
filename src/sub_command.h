@@ -33,8 +33,26 @@ void clust_from_sketches(string folder_path, string outputFile, bool is_newick_t
 void clust_from_mst(string folder_path, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, double threshold, int threads);
 void clust_from_mst_fast(string folder_path, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool no_dense, double threshold, int threads);
 
-void append_clust_mst(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads);
-void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads);
+void append_clust_mst(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads, bool save_rep_index);
+void append_clust_mst_fast(string folder_path, string input_file, string output_file, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool no_dense, bool sketch_by_file, bool isContainment, int min_len, bool no_save, double threshold, int threads, bool save_rep_index);
+
+// MST RepDB (MinHash, without --fast) -- mirrors greedy's mh_repdb_* API but
+// persists an MST-medoid inverted-index state (mst_state.h) instead of the
+// greedy RepDB format. Used via `clust-mst --db <path> --build/--query/...`.
+void mst_repdb_build_from_sketch(string folder_path, string db_path, string output_file, bool no_dense, double threshold, int threads);
+void mst_repdb_build_from_genome(string input_file, string db_path, string output_file, bool sketch_by_file, int min_len, int kmer_size, int sketch_size, string sketch_func, bool is_containment, int contain_compress, bool no_dense, double threshold, int threads);
+void mst_repdb_query(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int topk, int threads);
+void mst_repdb_assign(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads);
+void mst_repdb_append(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads);
+void mst_repdb_stats(string db_path);
+
+// MST RepDB (KSSD, with --fast).
+void mst_repdb_build_from_sketch_fast(string folder_path, string db_path, string output_file, bool no_dense, bool is_containment, double threshold, int threads);
+void mst_repdb_build_from_genome_fast(string input_file, string db_path, string output_file, bool sketch_by_file, int min_len, int kmer_size, int drlevel, bool no_dense, bool is_containment, double threshold, int threads);
+void mst_repdb_query_fast(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int topk, int threads);
+void mst_repdb_assign_fast(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads);
+void mst_repdb_append_fast(string db_path, string input_file, string output_file, bool sketch_by_file, int min_len, int threads);
+void mst_repdb_stats_fast(string db_path);
 
 void append_clust_greedy(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads, bool save_rep_index);
 void append_clust_greedy_fast(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads, bool save_rep_index);

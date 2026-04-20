@@ -120,7 +120,7 @@ int main(int argc, char * argv[]){
 	auto flag_input_list = app.add_flag("-l, --list", sketchByFile, "input is genome list, one genome per line");
 	auto flag_no_save = app.add_flag("-e, --no-save", noSave, "not save the intermediate files, such as sketches or MST");
 	bool save_rep_index = false;
-	auto flag_save_rep = app.add_flag("--save-rep", save_rep_index, "save representative inverted index for incremental clustering (greedy only)");
+	auto flag_save_rep = app.add_flag("--save-rep", save_rep_index, "save representative inverted index for incremental clustering (greedy or mst)");
 	auto option_threshold = app.add_option("-d, --threshold", threshold, "set the distance threshold for clustering");
 	auto option_output = app.add_option("-o, --output", outputFile, "set the output name of cluster result");
 	auto option_input = app.add_option("-i, --input", inputFile, "set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)");
@@ -208,6 +208,44 @@ int main(int argc, char * argv[]){
 	auto option_dedup_dist = app.add_option("--dedup-dist", dedup_dist, "within each cluster, collapse near-duplicate nodes connected by forest edges with dist <= dedup-dist; output to <output>.dedup");
 	auto option_reps_per_cluster = app.add_option("--reps-per-cluster", reps_per_cluster, "select up to k representatives per cluster (after optional dedup); output to <output>.reps");
 	auto option_buildDB = app.add_option("--buildDB", buildDB_folder, "build a reusable KSSD sketch+index database into the given folder and exit (clust-mst --fast only)");
+
+	// MST RepDB mode (mirrors the greedy --db workflow, but stores / consumes the
+	// MST-medoid inverted-index state produced by --save-rep).
+	auto option_repdb = app.add_option("--db", repdb_path,
+		"MST RepDB file path for representative database operations.\n"
+		"  Usage: [--fast] --db <path> <action> [options]\n"
+		"  Actions:\n"
+		"    --build   Build MST RepDB (requires --presketched <folder> or -i <list> -l)\n"
+		"    --query   Find top-k nearest reps for input genomes (read-only)\n"
+		"    --assign  Assign input genomes to clusters (read-only, threshold-based)\n"
+		"    --append  Add new genomes, update MST RepDB\n"
+		"    --stats   Print MST RepDB statistics report (no -o needed)\n"
+		"  Examples (KSSD mode with --fast):\n"
+		"    ./clust-mst --fast --db rep.mstdb --build --presketched sketch_dir -d 0.05 -o res.cluster\n"
+		"    ./clust-mst --fast --db rep.mstdb --query -i new.fna -o query.tsv --top-k 10\n"
+		"    ./clust-mst --fast --db rep.mstdb --assign -i list.txt -l -o assign.tsv\n"
+		"    ./clust-mst --fast --db rep.mstdb --append list.txt -l -o updated.cluster\n"
+		"    ./clust-mst --fast --db rep.mstdb --stats\n"
+		"  Examples (MinHash mode without --fast):\n"
+		"    ./clust-mst --db rep.mstdb --build --presketched sketch_dir -d 0.05 -o res.cluster\n"
+		"    ./clust-mst --db rep.mstdb --query -i new.fna -o query.tsv --top-k 10\n"
+		"    ./clust-mst --db rep.mstdb --stats");
+	auto flag_repdb_build = app.add_flag("--build", repdb_build_flag, "Build MST RepDB from clustering result (use with --db)");
+	auto flag_repdb_query = app.add_flag("--query", repdb_query_flag, "Query: return top-k nearest representatives with distances (use with --db, read-only)");
+	auto flag_repdb_assign = app.add_flag("--assign", repdb_assign_flag, "Assign: classify genomes into existing clusters or mark as novel (use with --db, read-only)");
+	auto flag_repdb_stats = app.add_flag("--stats", repdb_stats_flag, "Print MST RepDB statistics: reps, compression, cluster distribution, etc. (use with --db)");
+	auto option_topk = app.add_option("--top-k", topk, "Number of top matches to return in --query mode (default 5)");
+
+	flag_repdb_build->needs(option_repdb);
+	flag_repdb_query->needs(option_repdb);
+	flag_repdb_assign->needs(option_repdb);
+	flag_repdb_stats->needs(option_repdb);
+	option_topk->needs(flag_repdb_query);
+
+	flag_repdb_build->excludes(flag_repdb_query)->excludes(flag_repdb_assign)->excludes(flag_repdb_stats);
+	flag_repdb_query->excludes(flag_repdb_build)->excludes(flag_repdb_assign)->excludes(flag_repdb_stats);
+	flag_repdb_assign->excludes(flag_repdb_build)->excludes(flag_repdb_query)->excludes(flag_repdb_stats);
+	flag_repdb_stats->excludes(flag_repdb_build)->excludes(flag_repdb_query)->excludes(flag_repdb_assign);
 #endif
 	auto option_append = app.add_option("--append", inputFile, "append genome file or file list with the pre-generated sketch or MST files");
 
@@ -489,7 +527,79 @@ int main(int argc, char * argv[]){
 		threshold = 0.05;  // Default threshold for MST clustering
 		cerr << "-----use default threshold: " << threshold << endl;
 	}
-	
+
+	// ===== MST RepDB mode: --db <path> =====
+	if (!repdb_path.empty()) {
+		if (is_fast) {
+			// KSSD MST RepDB path.
+			if (repdb_stats_flag) {
+				mst_repdb_stats_fast(repdb_path);
+				return 0;
+			}
+			if (repdb_build_flag) {
+				if (*option_presketched) {
+					mst_repdb_build_from_sketch_fast(folder_path, repdb_path, outputFile, no_dense, isContainment, threshold, threads);
+				} else if (*option_input) {
+					if (!isSetKmer) { kmerSize = 21; cerr << "-----use default kmerSize: " << kmerSize << endl; }
+					mst_repdb_build_from_genome_fast(inputFile, repdb_path, outputFile, sketchByFile, minLen, kmerSize, drlevel, no_dense, isContainment, threshold, threads);
+				} else {
+					cerr << "ERROR: --build requires --presketched <folder> or -i <genome_list> -l" << endl;
+					return 1;
+				}
+				return 0;
+			}
+			if (repdb_query_flag) {
+				if (!*option_input) { cerr << "ERROR: --query requires -i <input_file>" << endl; return 1; }
+				mst_repdb_query_fast(repdb_path, inputFile, outputFile, sketchByFile, minLen, topk, threads);
+				return 0;
+			}
+			if (repdb_assign_flag) {
+				if (!*option_input) { cerr << "ERROR: --assign requires -i <input_file>" << endl; return 1; }
+				mst_repdb_assign_fast(repdb_path, inputFile, outputFile, sketchByFile, minLen, threads);
+				return 0;
+			}
+			if (*option_append) {
+				mst_repdb_append_fast(repdb_path, inputFile, outputFile, sketchByFile, minLen, threads);
+				return 0;
+			}
+		} else {
+			// MinHash MST RepDB path.
+			if (repdb_stats_flag) {
+				mst_repdb_stats(repdb_path);
+				return 0;
+			}
+			if (repdb_build_flag) {
+				if (*option_presketched) {
+					mst_repdb_build_from_sketch(folder_path, repdb_path, outputFile, no_dense, threshold, threads);
+				} else if (*option_input) {
+					if (!isSetKmer) { kmerSize = 21; cerr << "-----use default kmerSize: " << kmerSize << endl; }
+					if (!*option_sketch_size) { sketchSize = 1000; }
+					mst_repdb_build_from_genome(inputFile, repdb_path, outputFile, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, no_dense, threshold, threads);
+				} else {
+					cerr << "ERROR: --build requires --presketched <folder> or -i <genome_list> -l" << endl;
+					return 1;
+				}
+				return 0;
+			}
+			if (repdb_query_flag) {
+				if (!*option_input) { cerr << "ERROR: --query requires -i <input_file>" << endl; return 1; }
+				mst_repdb_query(repdb_path, inputFile, outputFile, sketchByFile, minLen, topk, threads);
+				return 0;
+			}
+			if (repdb_assign_flag) {
+				if (!*option_input) { cerr << "ERROR: --assign requires -i <input_file>" << endl; return 1; }
+				mst_repdb_assign(repdb_path, inputFile, outputFile, sketchByFile, minLen, threads);
+				return 0;
+			}
+			if (*option_append) {
+				mst_repdb_append(repdb_path, inputFile, outputFile, sketchByFile, minLen, threads);
+				return 0;
+			}
+		}
+		cerr << "ERROR: --db requires one of: --build, --query, --assign, --append, --stats" << endl;
+		return 1;
+	}
+
 	if(is_fast){
 		if(!buildDB_folder.empty()){
 			if(!sketchByFile){
@@ -516,7 +626,7 @@ int main(int argc, char * argv[]){
 			return 1;
 		}
 		if(*option_append && (*option_presketched || *option_premsted)){
-			append_clust_mst_fast(folder_path, inputFile, outputFile, is_newick_tree, is_phylip_tree, is_nexus_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, minLen, noSave, threshold, threads);
+			append_clust_mst_fast(folder_path, inputFile, outputFile, is_newick_tree, is_phylip_tree, is_nexus_tree, is_linkage_matrix, no_dense, sketchByFile, isContainment, minLen, noSave, threshold, threads, save_rep_index);
 			return 0;
 		}
 		if(!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)){
@@ -535,7 +645,7 @@ int main(int argc, char * argv[]){
 		return 1;
 	}
 	if(*option_append && (*option_premsted || *option_presketched)){
-		append_clust_mst(folder_path, inputFile, outputFile, is_newick_tree, is_phylip_tree, is_nexus_tree, is_linkage_matrix, no_dense, sketchByFile, minLen, noSave, threshold, threads);
+		append_clust_mst(folder_path, inputFile, outputFile, is_newick_tree, is_phylip_tree, is_nexus_tree, is_linkage_matrix, no_dense, sketchByFile, minLen, noSave, threshold, threads, save_rep_index);
 		return 0;
 	}
 //======clust-mst=========================================================================
