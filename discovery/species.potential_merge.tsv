@@ -1,0 +1,4 @@
+label_a	label_b	rep_cluster_id	size	count_a	count_b	|A|_in_clust	|B|_in_clust	frac_a	frac_b	t_strict	stable_in_range
+Bordetella bronchiseptica D756	Bordetella parapertussis Bpp5	1458	126	31	95	44	95	0.704545	1	0.01	True
+Yersinia pestis subsp. microtus bv. Xilingolensis	Yersinia pseudotuberculosis B-7194	90	399	341	58	341	60	1	0.966667	0.01	True
+Hafnia paralvei ATCC 29927	Hafnia sp.	6940	26	21	5	25	6	0.84	0.833333	0.01	True

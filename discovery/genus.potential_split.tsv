@@ -1,0 +1,17 @@
+label	n_covered	n_in_groundtruth	n_clusters	t_loose	cluster_sizes
+Oxalobacter	18	24	3	0.18	9,8,1
+Exiguobacterium	170	303	3	0.18	77,92,1
+Anabaena	22	44	2	0.18	8,14
+Cellulophaga	23	48	5	0.18	9,10,2,1,1
+Acidiphilium	15	40	2	0.18	8,7
+Ehrlichia	37	46	3	0.18	1,15,21
+Williamsia	15	33	3	0.18	7,7,1
+Oenococcus	33	374	4	0.18	13,14,5,1
+Rossellomorea	37	98	4	0.18	20,2,14,1
+Aquirufa	48	62	3	0.18	23,23,2
+Agarivorans	16	25	3	0.18	1,9,6
+Secundilactobacillus	17	43	5	0.18	7,1,2,6,1
+Methylobacter	17	31	3	0.18	10,6,1
+Anaplasma	24	55	4	0.18	10,11,1,2
+Agrococcus	41	58	2	0.18	20,21
+Sodalis	27	35	4	0.18	1,10,15,1

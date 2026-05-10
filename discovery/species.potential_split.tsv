@@ -1,0 +1,13 @@
+label	n_covered	n_in_groundtruth	n_clusters	t_loose	cluster_sizes
+Anaerorhabdus sp.	16	19	3	0.1	8,6,2
+Enterobacter sp.	24	51	4	0.1	9,1,3,11
+Acetobacter sp.	18	23	5	0.1	1,9,5,1,2
+Guptibacillus hwajinpoensis	12	17	3	0.1	5,6,1
+Akkermansia sp.	34	149	2	0.1	16,18
+Cytobacillus oceanisediminis 2691	14	23	4	0.1	7,5,1,1
+Synechococcus elongatus M14.2	17	21	2	0.1	8,9
+Snodgrassella alvi wkB2	30	68	2	0.1	20,10
+Streptomyces venezuelae ATCC 10712	28	33	4	0.1	2,9,16,1
+Candidatus Karelsulcia muelleri PSPU	91	93	3	0.1	50,40,1
+uncultured Dubosiella sp.	82	106	2	0.1	41,41
+Yersinia frederiksenii ATCC 33641	14	22	2	0.1	8,6

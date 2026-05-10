@@ -40,3 +40,5 @@
 !benchmark/analysis/
 !benchmark/analysis/*
 
+!discovery/
+!discovery/**
