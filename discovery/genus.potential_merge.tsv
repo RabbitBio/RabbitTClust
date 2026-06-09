@@ -1,3 +1,7 @@
 label_a	label_b	rep_cluster_id	size	count_a	count_b	|A|_in_clust	|B|_in_clust	frac_a	frac_b	t_strict	stable_in_range
-Escherichia	Shigella	46	19763	18000	1763	18342	1764	0.981354	0.999433	0.03	True
-Caldibacillus	Caldifermentibacillus	3745	22	6	16	8	16	0.75	1	0.03	True
+Escherichia	Shigella	37	19708	17945	1763	18342	1764	0.978356	0.999433	0.02	True
+Pasteurella	Phocoenobacter	17687	55	45	10	391	33	0.11509	0.30303	0.02	True
+Roseibium	Labrenzia	4323	17	11	6	48	11	0.229167	0.545455	0.02	True
+Oscillibacter	Dysosmobacter	2832	24	9	15	44	17	0.204545	0.882353	0.02	True
+Caldibacillus	Caldifermentibacillus	3754	22	6	16	8	16	0.75	1	0.02	True
+Absiella	Amedibacillus	8062	12	6	5	13	10	0.461538	0.5	0.02	True
