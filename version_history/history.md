@@ -1,4 +1,11 @@
-# Latest version: `v.2.3.0` 
+# Latest version: [`v2.4.0`](v.2.4.0.md)
+
+The source snapshot used for the JBHI study is archived as the
+[`v2.4-JBHI`](https://github.com/RabbitBio/RabbitTClust/releases/tag/v2.4-JBHI)
+release.
+
+## `v.2.3.0`
+
 * add `--fast` option for `clust-mst` to use the more efficient Kssd sketch strategy when computing the all-vs-all genome distances.
     * The `--fast` option can work together with `--append`, `--presketched`, and `--premsted` options.
     * the `--drlevel` is used for setting the dimention reduction level for Kssd sketches. Default value is 3, which is corresponding to a dimention reduction of $1 / 2^{(4*3)} = 1/4096$.

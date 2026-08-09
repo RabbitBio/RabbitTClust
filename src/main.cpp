@@ -58,13 +58,13 @@ using namespace std;
 
 int main(int argc, char * argv[]){
 	#ifdef GREEDY_CLUST
-		CLI::App app{"clust-greedy v.2.2.1, greedy incremental clustering module for RabbitTClust"};
+		CLI::App app{"clust-greedy v2.4.0, greedy incremental clustering module for RabbitTClust"};
 	#elif defined(LEIDEN_CLUST)
-		CLI::App app{"clust-leiden v.2.2.1, Graph-based community detection (Louvain) clustering module for RabbitTClust"};
+		CLI::App app{"clust-leiden v2.4.0, graph-based community detection module for RabbitTClust"};
 	#elif defined(DBSCAN_CLUST)
-		CLI::App app{"clust-dbscan v.2.2.1, DBSCAN density-based clustering module for RabbitTClust"};
+		CLI::App app{"clust-dbscan v2.4.0, DBSCAN density-based clustering module for RabbitTClust"};
 	#else
-		CLI::App app{"clust-mst v.2.2.1, minimum-spanning-tree-based module for RabbitTClust"};
+		CLI::App app{"clust-mst v2.4.0, minimum-spanning-tree-based module for RabbitTClust"};
 	#endif
 	//section 1: init parameters
 	int argIndex = 1;
@@ -670,6 +670,5 @@ int main(int argc, char * argv[]){
 
 	return 0;
 }//end main
-
 
 
