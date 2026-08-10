@@ -1,51 +1,51 @@
 label_a	label_b	rep_cluster_id	size	count_a	count_b	|A|_in_clust	|B|_in_clust	frac_a	frac_b	t_strict	stable_in_range
-Pseudomonas fragi NBRC 3458	Pseudomonas bubulae	6375	19	9	8	27	9	0.333333	0.888889	0.02	True
-Ralstonia solanacearum P673	blood disease bacterium A2-HR MARDI	1677	23	12	11	95	11	0.126316	1	0.02	True
-Pseudomonas syringae pv. actinidifoliorum	Pseudomonas syringae pv. antirrhini str. 126	705	105	85	10	307	59	0.276873	0.169492	0.02	True
-Pseudomonas syringae pv. actinidifoliorum	Pseudomonas fragariae (ex Marin et al. 2024)	232	47	37	8	307	9	0.120521	0.888889	0.02	True
-Agrobacterium tumefaciens LBA4213 (Ach5)	Agrobacterium radiobacter	5311	45	36	8	157	10	0.229299	0.8	0.02	True
-Rhizobium leguminosarum bv. viciae VF39	Rhizobium johnstonii	206	56	47	9	300	9	0.156667	1	0.02	True
-Bordetella parapertussis Bpp5	Bordetella pertussis CHLA-11	1176	1020	95	885	95	885	1	1	0.02	True
-Pectobacterium carotovorum subsp. carotovorum ICMP 5702	Pectobacterium aroidearum	508	25	5	20	47	20	0.106383	1	0.02	True
-Escherichia coli O2:H16	Shigella sonnei 1DT-1	37	19711	17895	1168	17955	1168	0.996658	1	0.02	True
-Serratia marcescens BIDMC 81	Serratia nevei	2436	201	174	22	830	27	0.209639	0.814815	0.02	True
-Yersinia pestis subsp. microtus bv. Xilingolensis	Yersinia pseudotuberculosis B-7194	102	404	341	60	341	60	1	1	0.02	True
-Aeromonas media WS	Aeromonas rivipollensis	7320	22	10	9	34	10	0.294118	0.9	0.02	True
-Bacteroides fragilis str. 1007-1-F #6	Bacteroides hominis	865	78	39	29	288	30	0.135417	0.966667	0.02	True
-Fusobacterium nucleatum W1481	Fusobacterium animalis ChDC F324	837	63	8	52	70	59	0.114286	0.881356	0.02	True
-Faecalibacterium cf. prausnitzii KLE1255	Faecalibacterium duncaniae	8058	22	13	5	84	13	0.154762	0.384615	0.02	True
-Bacillus amyloliquefaciens EBL11	Bacillus velezensis NJN-6	285	977	129	795	185	796	0.697297	0.998744	0.02	True
-Bacillus cereus D17	Bacillus thuringiensis serovar morrisoni str. 4AA1	157	1246	784	417	1029	693	0.761905	0.601732	0.02	True
-Lactobacillus gasseri DSM 14869	Lactobacillus paragasseri	605	58	19	34	75	34	0.253333	1	0.02	True
-Mycobacterium intracellulare MIN_061107_1834	Mycobacterium paraintracellulare	1574	76	54	15	55	15	0.981818	1	0.02	True
-Mycobacterium marinum MB2	Mycobacterium ulcerans subsp. shinshuense	287	92	75	9	75	9	1	1	0.02	True
-Carnobacterium maltaromaticum DSM 20342	Carnobacterium sp.	1849	33	20	13	23	19	0.869565	0.684211	0.02	True
-Campylobacter upsaliensis DSM 5365	Campylobacter felis	3174	107	101	6	113	6	0.893805	1	0.02	True
-Pseudomonas savastanoi pv. phaseolicola 1644R	Pseudomonas amygdali pv. loropetali	240	244	104	123	107	126	0.971963	0.97619	0.02	True
-Veillonella parvula ACS-068-V-Sch12	Veillonella sp.	940	39	30	6	38	38	0.789474	0.157895	0.02	True
-Borreliella garinii SZ	Borreliella bavariensis	1150	30	20	10	20	10	1	1	0.02	True
-Bacteroides sp.	Bacteroides xylanisolvens CL03T12C04	881	96	7	83	63	133	0.111111	0.62406	0.02	True
-Anaerococcus vaginalis ATCC 51170	Anaerococcus obesiensis	925	10	5	5	8	6	0.625	0.833333	0.02	True
-[Ruminococcus] torques CAG:61	Mediterraneibacter faecis	1223	11	5	6	35	12	0.142857	0.5	0.02	True
+Pseudomonas fragi	Pseudomonas bubulae	6375	19	9	8	27	9	0.333333	0.888889	0.02	True
+Ralstonia solanacearum	Ralstonia syzygii	1677	23	12	11	95	11	0.126316	1	0.02	True
+Pseudomonas syringae	Pseudomonas syringae pv. tomato	705	105	85	10	307	59	0.276873	0.169492	0.02	True
+Pseudomonas syringae	Pseudomonas fragariae (ex Marin et al. 2024)	232	47	37	8	307	9	0.120521	0.888889	0.02	True
+Agrobacterium tumefaciens	Agrobacterium radiobacter	5311	45	36	8	157	10	0.229299	0.8	0.02	True
+Rhizobium leguminosarum	Rhizobium johnstonii	206	56	47	9	300	9	0.156667	1	0.02	True
+Bordetella parapertussis	Bordetella pertussis	1176	1020	95	885	95	885	1	1	0.02	True
+Pectobacterium carotovorum	Pectobacterium aroidearum	508	25	5	20	47	20	0.106383	1	0.02	True
+Escherichia coli	Shigella sonnei	37	19711	17895	1168	17955	1168	0.996658	1	0.02	True
+Serratia marcescens	Serratia nevei	2436	201	174	22	830	27	0.209639	0.814815	0.02	True
+Yersinia pestis	Yersinia pseudotuberculosis	102	404	341	60	341	60	1	1	0.02	True
+Aeromonas media	Aeromonas rivipollensis	7320	22	10	9	34	10	0.294118	0.9	0.02	True
+Bacteroides fragilis	Bacteroides hominis	865	78	39	29	288	30	0.135417	0.966667	0.02	True
+Fusobacterium nucleatum	Fusobacterium animalis	837	63	8	52	70	59	0.114286	0.881356	0.02	True
+Faecalibacterium prausnitzii	Faecalibacterium duncaniae	8058	22	13	5	84	13	0.154762	0.384615	0.02	True
+Bacillus amyloliquefaciens	Bacillus velezensis	285	977	129	795	185	796	0.697297	0.998744	0.02	True
+Bacillus cereus	Bacillus thuringiensis	157	1246	784	417	1029	693	0.761905	0.601732	0.02	True
+Lactobacillus gasseri	Lactobacillus paragasseri	605	58	19	34	75	34	0.253333	1	0.02	True
+Mycobacterium intracellulare	Mycobacterium paraintracellulare	1574	76	54	15	55	15	0.981818	1	0.02	True
+Mycobacterium marinum	Mycobacterium ulcerans	287	92	75	9	75	9	1	1	0.02	True
+Carnobacterium maltaromaticum	Carnobacterium sp.	1849	33	20	13	23	19	0.869565	0.684211	0.02	True
+Campylobacter upsaliensis	Campylobacter felis	3174	107	101	6	113	6	0.893805	1	0.02	True
+Pseudomonas savastanoi pv. phaseolicola	Pseudomonas amygdali pv. morsprunorum	240	244	104	123	107	126	0.971963	0.97619	0.02	True
+Veillonella parvula	Veillonella sp.	940	39	30	6	38	38	0.789474	0.157895	0.02	True
+Borreliella garinii	Borreliella bavariensis	1150	30	20	10	20	10	1	1	0.02	True
+Bacteroides sp.	Bacteroides xylanisolvens	881	96	7	83	63	133	0.111111	0.62406	0.02	True
+Anaerococcus vaginalis	Anaerococcus obesiensis	925	10	5	5	8	6	0.625	0.833333	0.02	True
+[Ruminococcus] torques	Mediterraneibacter faecis	1223	11	5	6	35	12	0.142857	0.5	0.02	True
 Streptomyces murinus	Streptomyces griseofuscus	6177	53	20	28	20	28	1	1	0.02	True
-Enterococcus avium ATCC 14025	Enterococcus sp. HMSC072H05	2362	115	103	9	103	9	1	1	0.02	True
+Enterococcus avium	Enterococcus sp. HMSC072H05	2362	115	103	9	103	9	1	1	0.02	True
 Caldibacillus thermoamylovorans	Caldifermentibacillus hisashii	3754	22	6	16	6	16	1	1	0.02	True
-Dietzia maris	Dietzia kunjamensis subsp. schimae	9036	16	7	6	7	6	1	1	0.02	True
-Veillonella atypica KON	Veillonella sp.	1830	23	10	12	11	38	0.909091	0.315789	0.02	True
+Dietzia maris	Dietzia kunjamensis	9036	16	7	6	7	6	1	1	0.02	True
+Veillonella atypica	Veillonella sp.	1830	23	10	12	11	38	0.909091	0.315789	0.02	True
 Ruminococcus sp.	Ruminococcus bicirculans (ex Wegman et al. 2014)	2713	91	8	70	67	70	0.119403	1	0.02	True
-Streptomyces bottropensis ATCC 25435	Streptomyces stelliscabiei	1972	22	10	11	10	11	1	1	0.02	True
+Streptomyces bottropensis	Streptomyces stelliscabiei	1972	22	10	11	10	11	1	1	0.02	True
 Streptomyces cavourensis	Streptomyces bacillaris	4229	80	10	60	10	60	1	1	0.02	True
 Streptomyces werraensis	Streptomyces sp. enrichment culture	20176	31	26	5	26	46	1	0.108696	0.02	True
-Pseudomonas monteilii SB3101	Pseudomonas kurunegalensis	7167	14	6	6	28	9	0.214286	0.666667	0.02	True
-Dorea longicatena AGR2136	Dorea amylophila	4309	20	11	6	35	10	0.314286	0.6	0.02	True
-Pectobacterium brasiliense ICMP 19477	Pectobacterium sp. CHL-2024	1708	123	107	13	118	13	0.90678	1	0.02	True
-Streptococcus pasteurianus ATCC 43144	Streptococcus gallolyticus subsp. gallolyticus DSM 16831	655	32	25	5	25	49	1	0.102041	0.02	True
-Stutzerimonas chloritidismutans AW-1	Stutzerimonas kunmingensis	1590	61	8	46	9	46	0.888889	1	0.02	True
-Vibrio crassostreae 9ZC88	Vibrio sp. F12	4288	78	69	5	75	5	0.92	1	0.02	True
-Alistipes onderdonkii subsp. vulgaris	Alistipes sp.	6475	41	34	5	49	25	0.693878	0.2	0.02	True
-Xanthomonas perforans 91-118	Xanthomonas euvesicatoria pv. polysciadis	152	186	97	58	97	58	1	1	0.02	True
-Hafnia paralvei ATCC 29927	Hafnia sp.	4953	26	21	5	25	6	0.84	0.833333	0.02	True
-Bacillus safensis subsp. safensis	Bacillus sp. WP8	3620	47	34	8	216	8	0.157407	1	0.02	True
+Pseudomonas monteilii	Pseudomonas kurunegalensis	7167	14	6	6	28	9	0.214286	0.666667	0.02	True
+Dorea longicatena	Dorea amylophila	4309	20	11	6	35	10	0.314286	0.6	0.02	True
+Pectobacterium brasiliense	Pectobacterium sp. CHL-2024	1708	123	107	13	118	13	0.90678	1	0.02	True
+Streptococcus pasteurianus	Streptococcus gallolyticus	655	32	25	5	25	49	1	0.102041	0.02	True
+Stutzerimonas chloritidismutans	Stutzerimonas kunmingensis	1590	61	8	46	9	46	0.888889	1	0.02	True
+Vibrio crassostreae	Vibrio sp. F12	4288	78	69	5	75	5	0.92	1	0.02	True
+Alistipes onderdonkii	Alistipes sp.	6475	41	34	5	49	25	0.693878	0.2	0.02	True
+Xanthomonas perforans	Xanthomonas euvesicatoria	152	186	97	58	97	58	1	1	0.02	True
+Hafnia paralvei	Hafnia sp.	4953	26	21	5	25	6	0.84	0.833333	0.02	True
+Bacillus safensis	Bacillus sp. WP8	3620	47	34	8	216	8	0.157407	1	0.02	True
 Planktomarina temperata	Planktomarina sp.	3430	16	8	8	8	10	1	0.8	0.02	True
 Butyricimonas paravirosa	Butyricimonas sp. An62	11184	19	10	6	10	6	1	1	0.02	True
 Candidatus Methylopumilus planktonicus	Candidatus Methylopumilus universalis	9587	39	10	29	19	39	0.526316	0.74359	0.02	True
