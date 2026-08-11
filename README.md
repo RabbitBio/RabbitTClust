@@ -14,6 +14,9 @@ RabbitTClust is a fast and memory-efficient genome clustering tool based on sket
 It enables processing of large-scale datasets by combining dimensionality reduction techniques with streaming and parallelization on modern multi-core platforms.
 RabbitTClust supports classical single-linkage hierarchical (clust-mst), greedy incremental clustering (clust-greedy), and graph-based clustering (clust-leiden) algorithms for different scenarios. 
 
+## Benchmark data
+The RefSeq bacterial genomes used in the large-scale benchmark were obtained from the [NCBI RefSeq bacteria repository](https://ftp.ncbi.nlm.nih.gov/genomes/refseq/bacteria/). Assembly metadata and per-assembly download paths are available in the corresponding [assembly summary](https://ftp.ncbi.nlm.nih.gov/genomes/refseq/bacteria/assembly_summary.txt).
+
 ## Installation
 `RabbitTClust v2.4.0` supports 64-bit Linux systems.
 
