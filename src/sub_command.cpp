@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <cmath>
 #include <limits>
+#include <algorithm>
 #include <unordered_set>
 #include <sys/stat.h>  // For stat()
 #include <omp.h>  // For OpenMP functions
@@ -20,6 +21,88 @@
 using namespace std;
 
 #ifdef GREEDY_CLUST
+namespace {
+
+// Greedy MinHash clustering is order dependent. Order fresh and pre-sketched
+// inputs by genome length before selecting sketches[0] as the first
+// representative. The original input ID provides a deterministic tie-breaker.
+// Return the old-vector-position -> new-vector-position permutation so a
+// precomputed full inverted index can be kept consistent with the reordered
+// sketches.
+vector<uint32_t> order_minhash_sketches_for_greedy(
+	vector<SketchInfo>& sketches,
+	bool sketch_by_file)
+{
+	vector<size_t> order(sketches.size());
+	for(size_t i = 0; i < order.size(); ++i) order[i] = i;
+
+	auto genome_length = [&](size_t i) -> uint64_t {
+		return sketch_by_file
+			? sketches[i].totalSeqLength
+			: static_cast<uint64_t>(sketches[i].seqInfo.length);
+	};
+
+	sort(order.begin(), order.end(), [&](size_t lhs, size_t rhs) {
+		uint64_t lhs_length = genome_length(lhs);
+		uint64_t rhs_length = genome_length(rhs);
+		if(lhs_length != rhs_length) return lhs_length > rhs_length;
+		if(sketches[lhs].id != sketches[rhs].id)
+			return sketches[lhs].id < sketches[rhs].id;
+		return lhs < rhs;
+	});
+
+	vector<uint32_t> old_to_new(sketches.size());
+	vector<SketchInfo> ordered;
+	ordered.reserve(sketches.size());
+	for(size_t new_pos = 0; new_pos < order.size(); ++new_pos) {
+		size_t old_pos = order[new_pos];
+		old_to_new[old_pos] = static_cast<uint32_t>(new_pos);
+		ordered.push_back(std::move(sketches[old_pos]));
+		ordered.back().id = static_cast<int>(new_pos);
+	}
+	sketches.swap(ordered);
+	return old_to_new;
+}
+
+void align_minhash_index_with_sketch_order(
+	MinHashInvertedIndex* inverted_index,
+	const vector<uint32_t>& old_to_new,
+	const vector<SketchInfo>& sketches)
+{
+	if(inverted_index == nullptr) return;
+
+	// File-list and serial sketching paths build postings while sketches are
+	// generated. Remap those old vector positions instead of rebuilding the
+	// full index. Sorting each posting restores canonical increasing-ID order.
+	if(!inverted_index->hash_map.empty()) {
+		for(auto& entry : inverted_index->hash_map) {
+			auto& postings = entry.second;
+			for(uint32_t& genome_id : postings) {
+				if(genome_id >= old_to_new.size()) {
+					cerr << "ERROR: MinHash inverted index contains an out-of-range genome ID"
+					     << endl;
+					exit(1);
+				}
+				genome_id = old_to_new[genome_id];
+			}
+			sort(postings.begin(), postings.end());
+		}
+		return;
+	}
+
+	// The thread-pool sequence path finishes sketches out of order and does
+	// not build postings inline. Build the index once, after the final order is
+	// known, so all posting IDs match vector positions.
+	for(size_t i = 0; i < sketches.size(); ++i) {
+		if(sketches[i].minHash == nullptr) continue;
+		vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
+		for(uint64_t hash : hashes)
+			inverted_index->hash_map[hash].push_back(static_cast<uint32_t>(i));
+	}
+}
+
+} // namespace
+
 void append_clust_greedy(string folder_path, string input_file, string output_file, bool sketch_by_file, int min_len, bool no_save, double threshold, int threads, bool save_rep_index){
 	bool isSave = !no_save;
 	
@@ -2654,10 +2737,13 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		double time0 = get_sec();
 		sketchByFile = loadSketches(folder_path, threads, sketches, sketch_func_id);
 		cerr << "-----the size of sketches is: " << sketches.size() << endl;
-		if(sketchByFile)
+		if(sketch_func_id == 0) {
+			order_minhash_sketches_for_greedy(sketches, sketchByFile);
+		} else if(sketchByFile) {
 			sort(sketches.begin(), sketches.end(), cmpGenomeSize);
-		else
+		} else {
 			sort(sketches.begin(), sketches.end(), cmpSeqSize);
+		}
 		double time1 = get_sec();
 #ifdef Timer
 		cerr << "========time of load genome Infos and sketch Infos is: " << time1 - time0 << endl;
@@ -2869,6 +2955,14 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 				exit(1);
 			}
 		}//end sketch by file
+#ifdef GREEDY_CLUST
+		if(sketchFunc == "MinHash") {
+			vector<uint32_t> old_to_new =
+				order_minhash_sketches_for_greedy(sketches, sketchByFile);
+			align_minhash_index_with_sketch_order(
+				inverted_index, old_to_new, sketches);
+		}
+#endif
 		cerr << "-----the size of sketches (number of genomes or sequences) is: " << sketches.size() << endl;
 		double t1 = get_sec();
 #ifdef Timer

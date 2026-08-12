@@ -842,10 +842,11 @@ bool sketchSequences(string inputFile, int kmerSize, int sketchSize, int minLen,
 	kseq_destroy(ks1);
 
 	if(inverted_index != nullptr && sketchFunc == "MinHash") {
-		// Ensure IDs match positions and build index for RABBIT_FX path
-		// (non-RABBIT_FX path already built inline during the while loop)
+		// Build the index for the RABBIT_FX path. Keep each sketch's original
+		// input ID here so the caller can use it as a deterministic tie-breaker
+		// when ordering equal-length genomes. Index postings still refer to the
+		// current vector positions and are remapped after that ordering step.
 		for(size_t i = 0; i < sketches.size(); i++){
-			sketches[i].id = i;
 #ifdef RABBIT_FX
 			if(sketches[i].minHash != nullptr) {
 				vector<uint64_t> hashes = sketches[i].minHash->storeMinHashes();
@@ -962,7 +963,6 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 			tmpSketchInfo.fileSeqs = curFileSeqs;
 			if(totalLength >= minLen) {  //filter the poor quality genome assemblies whose length less than minLen(fastANI paper)
 				actual_id = sketches.size();  // Actual index in sketches vector
-				tmpSketchInfo.id = actual_id;
 				sketches.push_back(tmpSketchInfo);
 				
 				if(inverted_index != nullptr && tmpSketchInfo.minHash != nullptr) {
@@ -979,12 +979,10 @@ bool sketchFiles(string inputFile, uint64_t minLen, int kmerSize, int sketchSize
 		kseq_destroy(ks1);
 	}//end for
 
-	// Ensure IDs match positions (they should already be correct from generation)
-	if(inverted_index != nullptr) {
-		for(size_t i = 0; i < sketches.size(); i++){
-			sketches[i].id = i;
-		}
-	} else {
+	// With an index, keep the original file-list ID until the caller has
+	// ordered the sketches and remapped the posting lists. Without an index,
+	// retain the existing direct ordering behavior.
+	if(inverted_index == nullptr) {
 		sort(sketches.begin(), sketches.end(), cmpGenomeSize);
 	}
 
@@ -1549,6 +1547,5 @@ bool loadMinHashIndex(const string folder_path, MinHashInvertedIndex& inverted_i
 	cerr << "-----loaded MinHash inverted index: " << hash_number << " unique hashes, " << total_size << " entries" << endl;
 	return true;
 }
-
 
 
