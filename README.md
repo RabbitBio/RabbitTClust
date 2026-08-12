@@ -15,7 +15,7 @@ It enables processing of large-scale datasets by combining dimensionality reduct
 RabbitTClust supports classical single-linkage hierarchical (clust-mst), greedy incremental clustering (clust-greedy), and graph-based clustering (clust-leiden) algorithms for different scenarios. 
 
 ## Benchmark data
-The RefSeq bacterial genomes used in the large-scale benchmark were obtained from the [NCBI RefSeq bacteria repository](https://ftp.ncbi.nlm.nih.gov/genomes/refseq/bacteria/). Assembly metadata and per-assembly download paths are available in the corresponding [assembly summary](https://ftp.ncbi.nlm.nih.gov/genomes/refseq/bacteria/assembly_summary.txt).
+The large-scale bacterial benchmark in this study uses the bacterial collection from [NCBI RefSeq Release 233](https://ncbiinsights.ncbi.nlm.nih.gov/2026/02/19/refseq-release-233/), not the continuously updated RefSeq bacteria directory. The version-pinned, release-wide accession catalog is available in the [NCBI RefSeq archive](https://ftp.ncbi.nlm.nih.gov/refseq/release/release-catalog/archive/RefSeq-release233.catalog.gz); bacterial records are identified by `bacteria` in the RefSeq release-directory field. Do not substitute the live `assembly_summary.txt`, because its contents change as RefSeq is updated.
 
 ## Installation
 `RabbitTClust v2.4.0` supports 64-bit Linux systems.
