@@ -34,6 +34,7 @@
 !benchmark/evaluation/Makefile
 !benchmark/evaluation/README.md
 !benchmark/evaluation/getNMI.py
+!benchmark/evaluation/get_recall.py
 !benchmark/evaluation/src/
 !benchmark/evaluation/src/*
 *.pdf
