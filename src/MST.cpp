@@ -1017,224 +1017,65 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
   return mst;
 }
 
-// string build_kssd_newick_tree(vector<pair<int, double>>* G, bool* visited, const vector<KssdSketchInfo>& sketches, bool sketch_by_file, int node){
-// 	visited[node] = true;
-// 	//if(G[node].size() == 0)	return to_string(node);
-// 	string name;
-// 	if(sketch_by_file) name = sketches[node].fileName;
-// 	else name = sketches[node].seqInfo.name;
-// 	if(G[node].size() == 0){
-// 		return name;
-// 	}
-// 	string children("");
-// 	for(auto x : G[node]){
-// 		int cur_node = x.first;
-// 		double dist = x.second;
-// 		if(!visited[cur_node]){
-// 			string child = build_kssd_newick_tree(G, visited, sketches, sketch_by_file, cur_node);
-// 			children += child + ':' + to_string(dist) + ',';
-// 		}
-// 	}
-// 	//if(children.length() == 0) return to_string(node);
-// 	if(children.length() == 0) return name;
-// 	//children = '(' + children.substr(0, children.length()-1) + ')' + to_string(node);
-// 	children = '(' + children.substr(0, children.length()-1) + ')' + name;
-// 	return children;
-// }
-static string build_newick_tree_recursive(
+template <typename SketchType>
+static string build_mst_newick_tree_recursive(
     int node,
-    const vector<vector<pair<int,double>>>& children,
-    const vector<SketchInfo>& sketches,
+    int parent,
+    const vector<vector<pair<int,double>>>& adjacency,
+    const vector<SketchType>& sketches,
     bool sketch_by_file)
 {
-  if (children[node].empty()) {
-    string name = sketch_by_file ? sketches[node].fileName
-      : sketches[node].seqInfo.name;
-    return name;
+  const string name = sketch_by_file ? sketches[node].fileName
+    : sketches[node].seqInfo.name;
+
+  string children;
+  for (const auto& neighbor : adjacency[node]) {
+    const int child = neighbor.first;
+    if (child == parent) continue;
+
+    if (!children.empty()) children += ",";
+    children += build_mst_newick_tree_recursive(
+        child, node, adjacency, sketches, sketch_by_file);
+    // This branch is the corresponding MST edge, so retain its distance.
+    children += ":" + to_string(neighbor.second);
   }
 
-  string s = "(";
-  for (size_t i = 0; i < children[node].size(); ++i) {
-    int child = children[node][i].first;
-    double bl  = children[node][i].second;
-    if (i > 0) s += ",";
-    s += build_newick_tree_recursive(child, children, sketches, sketch_by_file);
-    s += ":" + to_string(bl);
-  }
-  s += ")";  
-  return s;
+  if (children.empty()) return name;
+
+  // Internal vertices are genomes too; keep their names as internal labels.
+  return "(" + children + ")" + name;
 }
 
+template <typename SketchType>
+static string get_mst_newick_tree(
+    const vector<SketchType>& sketches,
+    const vector<EdgeInfo>& mst,
+    bool sketch_by_file)
+{
+  const int N = sketches.size();
+  if (N == 0) return ";";
 
-// string get_kssd_newick_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file){
-// 	int vertice_number = sketches.size();
-// 	vector<pair<int, double>>* G = new vector<pair<int, double>> [vertice_number];
-// 	for(auto f : mst){
-// 		int u = f.preNode;
-// 		int v = f.sufNode;
-// 		double dist = f.dist;
-// 		G[u].push_back(make_pair(v, dist));
-// 		G[v].push_back(make_pair(u, dist));
-// 	}
-// 	bool* visited = new bool[vertice_number];
-// 	memset(visited, 0, vertice_number*sizeof(bool));
+  vector<vector<pair<int,double>>> adjacency(N);
+  for (const auto& edge : mst) {
+    adjacency[edge.preNode].push_back({edge.sufNode, edge.dist});
+    adjacency[edge.sufNode].push_back({edge.preNode, edge.dist});
+  }
 
-// 	string newick_tree = build_kssd_newick_tree(G, visited, sketches, sketch_by_file, 0);
-// 	newick_tree += ';';
+  // Rooting changes only the Newick orientation, not the MST topology or lengths.
+  return build_mst_newick_tree_recursive(
+      0, -1, adjacency, sketches, sketch_by_file) + ";";
+}
 
-// 	return newick_tree;
-// }
 
 string get_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file){
-  int N = sketches.size();
-  if (N == 0) return ";";
-  if (N == 1) {
-    string name = sketch_by_file ? sketches[0].fileName
-      : sketches[0].seqInfo.name;
-    return name + ";";
-  }
-
-  vector<EdgeInfo> edges = mst;
-  sort(edges.begin(), edges.end(),
-      [](const EdgeInfo& a, const EdgeInfo& b){
-      return a.dist < b.dist;
-      });
-
-  int maxNodes = 2 * N - 1;
-  vector<vector<pair<int,double>>> children(maxNodes);
-  vector<double> height(maxNodes, 0.0);  
-  vector<int> repNode(maxNodes, -1);     
-  for (int i = 0; i < N; ++i) {
-    repNode[i] = i;  
-  }
-
-  DSU dsu(N);
-  int nextNode = N;  
-
-  for (const auto& e : edges) {
-    int u = e.preNode;
-    int v = e.sufNode;
-    double w = e.dist;
-
-    int ru = dsu.find(u);
-    int rv = dsu.find(v);
-    if (ru == rv) continue; 
-
-    int nodeU = repNode[ru];
-    int nodeV = repNode[rv];
-
-    double hU = height[nodeU];
-    double hV = height[nodeV];
-    double h  = w;  
-
-    double blU = max(0.0, h - hU);
-    double blV = max(0.0, h - hV);
-
-    int newNode = nextNode++;
-    children[newNode].push_back({nodeU, blU});
-    children[newNode].push_back({nodeV, blV});
-    height[newNode] = h;
-
-    int rNew = dsu.unite(ru, rv);
-    repNode[rNew] = newNode;
-  }
-
-  int rootRep = dsu.find(0);
-  int root    = repNode[rootRep];
-
-  string newick_tree = build_newick_tree_recursive(root, children, sketches, sketch_by_file);
-  newick_tree += ";";
-  return newick_tree;
-}
-
-static std::string build_kssd_newick_tree(
-    int node,
-    const std::vector<std::vector<std::pair<int,double>>>& children,
-    const std::vector<KssdSketchInfo>& sketches,
-    bool sketch_by_file)
-{
-  if (children[node].empty()) {
-    std::string name = sketch_by_file ? sketches[node].fileName
-      : sketches[node].seqInfo.name;
-    return name;
-  }
-
-  std::string s = "(";
-  for (size_t i = 0; i < children[node].size(); ++i) {
-    int child = children[node][i].first;
-    double bl  = children[node][i].second;
-    if (i > 0) s += ",";
-    s += build_kssd_newick_tree(child, children, sketches, sketch_by_file);
-    s += ":" + std::to_string(bl);
-  }
-  s += ")"; 
-  return s;
+  return get_mst_newick_tree(sketches, mst, sketch_by_file);
 }
 
 std::string get_kssd_newick_tree(const std::vector<KssdSketchInfo>& sketches,
     const std::vector<EdgeInfo>& mst,
     bool sketch_by_file)
 {
-  int N = sketches.size();
-  if (N == 0) return ";";
-  if (N == 1) {
-    std::string name = sketch_by_file ? sketches[0].fileName
-      : sketches[0].seqInfo.name;
-    return name + ";";
-  }
-
-  std::vector<EdgeInfo> edges = mst;
-  std::sort(edges.begin(), edges.end(),
-      [](const EdgeInfo& a, const EdgeInfo& b){
-      return a.dist < b.dist;
-      });
-
-
-  int maxNodes = 2 * N - 1;
-  std::vector<std::vector<std::pair<int,double>>> children(maxNodes);
-  std::vector<double> height(maxNodes, 0.0);     
-  std::vector<int> repNode(maxNodes, -1);       
-  for (int i = 0; i < N; ++i) {
-    repNode[i] = i;   
-  }
-
-  DSU dsu(N);
-  int nextNode = N;      
-
-  for (const auto& e : edges) {
-    int u = e.preNode;
-    int v = e.sufNode;
-    double w = e.dist;
-
-    int ru = dsu.find(u);
-    int rv = dsu.find(v);
-    if (ru == rv) continue; 
-
-    int nodeU = repNode[ru];
-    int nodeV = repNode[rv];
-
-    double hU = height[nodeU];
-    double hV = height[nodeV];
-    double h  = w;  
-
-    double blU = std::max(0.0, h - hU);
-    double blV = std::max(0.0, h - hV);
-
-    int newNode = nextNode++;
-    children[newNode].push_back({nodeU, blU});
-    children[newNode].push_back({nodeV, blV});
-    height[newNode] = h;
-
-    int rNew = dsu.unite(ru, rv);
-    repNode[rNew] = newNode;
-  }
-
-  int rootRep = dsu.find(0);
-  int root    = repNode[rootRep];
-
-  std::string newick_tree = build_kssd_newick_tree(root, children, sketches, sketch_by_file);
-  newick_tree += ";";
-  return newick_tree;
+  return get_mst_newick_tree(sketches, mst, sketch_by_file);
 }
 
 // 从 MST 构造 single-linkage linkage matrix
@@ -2373,4 +2214,3 @@ void printThresholdAnalysis(const vector<EdgeInfo>& mst,
   fclose(fp);
   cerr << "-----write threshold analysis into: " << output_file << endl;
 }
-
