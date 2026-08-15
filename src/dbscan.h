@@ -50,16 +50,16 @@ DBSCANResult KssdDBSCAN(
 );
 
 /**
- * @brief DBSCAN clustering for MinHash sketches
+ * @brief Exact all-pairs DBSCAN for any SketchInfo-backed algorithm
  * 
- * @param sketches Input MinHash sketches
+ * @param sketches Input sketches
  * @param eps Epsilon (distance threshold) for neighborhood
  * @param minPts Minimum number of points required to form a cluster
- * @param sketch_func_id Sketch function ID (0 for MinHash)
+ * @param sketch_func_id SketchFunctionId value
  * @param threads Number of threads for parallel computation
  * @return DBSCANResult containing clusters and noise points
  */
-DBSCANResult MinHashDBSCAN(
+DBSCANResult SketchDBSCAN(
     vector<SketchInfo>& sketches,
     double eps,
     int minPts,
@@ -99,4 +99,3 @@ void printKssdDBSCANResult(
 );
 
 #endif // H_DBSCAN
-

@@ -69,6 +69,49 @@ make -j8 && make install
 
 After installing igraph, return to the RabbitTClust directory and run `./install.sh` again to compile `clust-leiden`.
 ## Usage
+
+### Sketch selection
+
+Use `--sketch` to select the sketch implementation. The default remains RabbitTClust's original `minhash` mode.
+
+| `--sketch` value | Implementation and similarity estimator |
+| --- | --- |
+| `minhash` | Original RabbitTClust MinHash (default) |
+| `kssd` | RabbitSketch KSSD; tune sampling with `--drlevel 0..3` |
+| `fastkmv` | FastKMV bottom-k sketch |
+| `probminhash` | Frequency-weighted ProbMinHash; estimates probability/weighted Jaccard |
+| `bindash` | BinDash b-bit sketch |
+| `hll` | HyperLogLog joint estimator |
+| `setsketch` | SetSketch joint estimator |
+
+All seven choices work with fresh FASTA or genome-list input in `clust-greedy`, `clust-mst`, and `clust-dbscan`. `--fast` remains available as a deprecated alias for `--sketch kssd`. For DBSCAN, KSSD retains its inverted-index accelerator; the other sketches use an exact all-pairs neighborhood search.
+
+`-s/--sketch-size` is the requested sketch/register budget. BinDash rounds it up to a multiple of 64, while HLL and SetSketch round it up to a power of two with a minimum of 1024 registers. Distances are reported on the Mash-distance scale; ProbMinHash first estimates frequency-weighted Jaccard. Containment mode is limited to MinHash and KSSD.
+
+The common CLI defaults are `-k 19`, `-s 1000`, `-d 0.05`, `-m 10000`, and all detected CPUs. The effective sketch defaults are:
+
+| Sketch | Effective default configuration |
+| --- | --- |
+| MinHash | 1,000 hashes; the legacy automatic tuner may change MinHash parameters when neither `-k` nor `-s` is supplied |
+| KSSD | CLI `k=19` is represented as an even `k=20`; `--drlevel 3` (sampling 1/4096); `-s` does not apply |
+| FastKMV | 1,000 bottom-k values; seed 42 |
+| ProbMinHash | 1,000 registers; frequency-weighted ProbMinHash4; seed 42; unlimited register updates (`max_L=0`); canonical k-mer occurrences sampled at 1/8 before frequency aggregation |
+| BinDash | 1,024 bins (16 groups of 64); 16 bits per bin; seed 42 |
+| HLL | 1,024 registers (`p=10`); Ertl joint-MLE Jaccard estimator |
+| SetSketch | 1,024 registers (`p=10`); base 2, `a=5`; joint-MLE Jaccard estimator |
+
+Persistent `--presketched`, `--append`, RepDB, and `--save-rep` workflows currently remain limited to MinHash and KSSD. The five additional implementations run in memory.
+
+```bash
+# MinHash is the default; these two commands are equivalent.
+./clust-greedy -l -i bacteria.list -o minhash.cluster
+./clust-greedy --sketch minhash -l -i bacteria.list -o minhash.cluster
+
+# Select another RabbitSketch implementation.
+./clust-mst --sketch probminhash -s 1024 -l -i bacteria.list -o probminhash.cluster
+./clust-dbscan --sketch setsketch -s 1024 --eps 0.05 --minpts 5 -l -i bacteria.list -o setsketch.cluster
+```
+
 ```bash
 # clust-mst, minimum-spanning-tree-based module for RabbitTClust
 Usage: ./clust-mst [OPTIONS]
@@ -85,9 +128,10 @@ Options:
   -i,--input TEXT Excludes: --append
                               set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)
   --presketched TEXT          clustering by the pre-generated sketch files rather than genomes
+  --sketch TEXT               sketch algorithm: minhash, kssd, fastkmv, probminhash, bindash, hll, or setsketch (default: minhash)
   --premsted TEXT             clustering by the pre-generated mst files rather than genomes for clust-mst
   --newick-tree               output the newick tree format file for clust-mst
-  --fast                      use the kssd algorithm for sketching and distance computing for clust-mst
+  --fast                      deprecated alias for --sketch kssd
   --dense                     optional: enable density/ANI stats and MST noise-removal pass (high memory; default is off)
   --dedup-dist FLOAT          within each cluster, collapse near-duplicate nodes connected by forest edges with dist <= dedup-dist; output to <output>.dedup
   --reps-per-cluster INT      select up to k representatives per cluster (after optional dedup); output to <output>.reps
@@ -109,6 +153,7 @@ Options:
   -i,--input TEXT Excludes: --append
                               set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)
   --presketched TEXT          clustering by the pre-generated sketch files rather than genomes
+  --sketch TEXT               sketch algorithm: minhash, kssd, fastkmv, probminhash, bindash, hll, or setsketch (default: minhash)
   --append TEXT Excludes: --input
                               append genome file or file list with the pre-generated sketch or MST files
   --save-rep                  save representative inverted index for incremental clustering (note: may slightly affect performance)

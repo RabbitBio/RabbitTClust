@@ -2,6 +2,10 @@
 #define H_SKETCH_INFO
 
 #include "Sketch.h"
+#include "BinDash.h"
+#include "SetSketch.h"
+#include "fastkmv.h"
+#include "probmh.h"
 #include "phmap.h"
 #include <iostream>
 #include <string>
@@ -15,44 +19,67 @@ using namespace std;
 struct SequenceInfo{
 	string name;
 	string comment;
-	int strand;
-	int length;
+	int strand = 0;
+	int length = 0;
 };
 
 typedef vector<SequenceInfo> Vec_SeqInfo;
 struct SketchInfo{
-	int id;
+	int id = -1;
 	string fileName;//for sketch files;
-	uint64_t totalSeqLength;
+	uint64_t totalSeqLength = 0;
 	Vec_SeqInfo fileSeqs;//for sketch files;
 	SequenceInfo seqInfo;//for sketch sequence;
 	bool isContainment = false;
+	int kmerSize = 0;
+	int sketchSize = 0;
 	
-	Sketch::MinHash* minHash;
-	Sketch::KSSD* KSSD;
-	Sketch::WMinHash* WMinHash;
-	Sketch::HyperLogLog* HLL;
-	Sketch::OrderMinHash * OMH;
+	Sketch::MinHash* minHash = nullptr;
+	Sketch::Kssd* KSSD = nullptr;
+	Sketch::WMinHash* WMinHash = nullptr;
+	Sketch::HyperLogLog* HLL = nullptr;
+	Sketch::OrderMinHash * OMH = nullptr;
+	Sketch::FastKMV* fastKMV = nullptr;
+	Sketch::ProbMinHash4* probMinHash = nullptr;
+	Sketch::BinDash* binDash = nullptr;
+	Sketch::SetSketch* setSketch = nullptr;
 };
 
+enum SketchFunctionId {
+	SKETCH_MINHASH = 0,
+	SKETCH_KSSD = 1,
+	SKETCH_WMH = 2,
+	SKETCH_HLL = 3,
+	SKETCH_OMH = 4,
+	SKETCH_FASTKMV = 5,
+	SKETCH_PROBMINHASH = 6,
+	SKETCH_BINDASH = 7,
+	SKETCH_SETSKETCH = 8
+};
+
+string canonicalSketchName(const string& name);
+int sketchFunctionId(const string& name);
+bool isGenericRabbitSketch(int sketch_func_id);
+double sketchDistance(const SketchInfo& lhs, const SketchInfo& rhs, int sketch_func_id);
+
 struct KssdSketchInfo{
-	int id;
+	int id = -1;
 	string fileName;
-	uint64_t totalSeqLength;
+	uint64_t totalSeqLength = 0;
 	Vec_SeqInfo fileSeqs;
 	SequenceInfo seqInfo;
-	bool use64;
+	bool use64 = false;
 	vector<uint32_t> hash32_arr;
 	vector<uint64_t> hash64_arr;
-  uint32_t sketchsize;
+	uint32_t sketchsize = 0;
 };
 
 struct KssdParameters{
-	int id;
-	int half_k;
-	int half_subk;
-	int drlevel;
-	int genomeNumber;
+	int id = 0;
+	int half_k = 0;
+	int half_subk = 0;
+	int drlevel = 0;
+	int genomeNumber = 0;
 };
 
 // Inverted index structure for incremental building during sketch generation

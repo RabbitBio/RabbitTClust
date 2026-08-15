@@ -296,25 +296,9 @@ vector<vector<int>> greedyCluster(vector<SketchInfo>& sketches, int sketch_func_
   for(int j = 1; j < numGenomes; j++){
     map<double, int> distMapCenter;
 #pragma omp parallel for num_threads(threads)
-    for(int i = 0; i < representiveArr.size(); i++){
-      int repId = representiveArr[i];
-      double dist;
-      if(sketch_func_id == 0){
-        if(sketches[repId].isContainment){
-          dist = sketches[repId].minHash->containDistance(sketches[j].minHash);
-          //std::cout << "Calculated distance: " << dist << std::endl;
-        }
-        //dist = 1.0 - sketches[repId].minHash->containJaccard(sketches[j].minHash);
-        else
-          dist = sketches[repId].minHash->distance(sketches[j].minHash);
-      }
-      else if(sketch_func_id == 1){
-        dist = sketches[repId].KSSD->distance(sketches[j].KSSD);
-      }
-      else{
-        cerr << "can only support MinHash and KSSD with greedy incremental clust" << endl;
-        exit(1);
-      }
+	for(int i = 0; i < representiveArr.size(); i++){
+	  int repId = representiveArr[i];
+	  const double dist = sketchDistance(sketches[repId], sketches[j], sketch_func_id);
       if(dist <= threshold){
         clustLabels[j] = 1;
 #pragma omp critical
@@ -3146,4 +3130,3 @@ void MinHashClusterState::print_stats(std::ostream& out) const {
 
 
 #endif
-

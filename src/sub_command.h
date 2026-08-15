@@ -94,4 +94,5 @@ void clust_from_pregraph_leiden(string folder_path, string outputFile, double re
 // DBSCAN clustering functions
 void clust_from_genome_dbscan(const string inputFile, string outputFile, string folder_path, bool sketchByFile, const int kmerSize, const int drlevel, const int minLen, bool noSave, double eps, int minPts, int threads, int knn_k = 0, int max_posting = 0);
 void clust_from_sketch_dbscan(string folder_path, string outputFile, bool sketchByFile, double eps, int minPts, int threads, int knn_k = 0, int max_posting = 0);
-
+void clust_from_genome_dbscan_generic(const string inputFile, string outputFile, string folder_path, bool sketchByFile, int kmerSize, int sketchSize, string sketchFunc, bool isContainment, int containCompress, int minLen, bool noSave, double eps, int minPts, int threads);
+void clust_from_sketch_dbscan_generic(string folder_path, string outputFile, double eps, int minPts, int threads);

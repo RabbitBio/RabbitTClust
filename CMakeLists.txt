@@ -57,15 +57,46 @@ if(USE_DBSCAN)
 	set(CMAKE_CXX_FLAGS "-D DBSCAN_CLUST ${CMAKE_CXX_FLAGS}")
 endif()
 
+set(CMAKE_CXX_FLAGS "-D THREADPOOL_MINHASH ${CMAKE_CXX_FLAGS}")
 if(USE_RABBITFX)
 	set(CMAKE_CXX_FLAGS "-D RABBIT_FX ${CMAKE_CXX_FLAGS}")
-	include_directories(src RabbitSketch/build/include RabbitFX/build/include)
-	link_directories(RabbitSketch/build/lib RabbitFX/build/lib)
+	include_directories(src RabbitSketch/src RabbitFX/build/include)
+	link_directories(RabbitFX/build/lib)
 else()
-	set(CMAKE_CXX_FLAGS "-D THREADPOOL_MINHASH ${CMAKE_CXX_FLAGS}")
-	include_directories(src RabbitSketch/build/include)
-	link_directories(RabbitSketch/build/lib)
+	include_directories(src RabbitSketch/src)
 endif()
+
+# Build the pinned RabbitSketch submodule as part of RabbitTClust.  The
+# upstream project used to hard-code -std=c++20 and install only a subset of
+# its public headers; embedding the sources here keeps one compiler/ISA setup
+# for both projects and exposes every sketch selected by --sketch.
+set(RABBIT_SKETCH_SOURCES
+	RabbitSketch/src/BinDash.cpp
+	RabbitSketch/src/HyperLogLog.cpp
+	RabbitSketch/src/Kssd.cpp
+	RabbitSketch/src/MinHash.cpp
+	RabbitSketch/src/MurmurHash3.cpp
+	RabbitSketch/src/OrderMinHash.cpp
+	RabbitSketch/src/SetSketch.cpp
+	RabbitSketch/src/WeightedMinHash.cpp
+	RabbitSketch/src/common.cpp
+	RabbitSketch/src/fastkmv.cpp
+	RabbitSketch/src/histoSketch.cpp
+	RabbitSketch/src/probmh.cpp
+	RabbitSketch/src/probmh_op.cpp
+	RabbitSketch/src/shuffle.cpp
+	RabbitSketch/src/xxhash.c
+)
+add_library(rabbitsketch_embedded STATIC ${RABBIT_SKETCH_SOURCES})
+target_include_directories(rabbitsketch_embedded PUBLIC RabbitSketch/src)
+target_compile_definitions(rabbitsketch_embedded PRIVATE NOPYTHON)
+# RabbitTClust's DEBUG macro controls its own diagnostics. RabbitSketch also
+# uses DEBUG for very verbose estimator dumps, so keep it out of this target.
+target_compile_options(rabbitsketch_embedded PRIVATE -UDEBUG)
+set_target_properties(rabbitsketch_embedded PROPERTIES
+	CXX_STANDARD 17
+	CXX_STANDARD_REQUIRED ON
+	POSITION_INDEPENDENT_CODE ON)
 
 # Add igraph include directories for Leiden (DISABLED)
 # if(USE_LEIDEN)
@@ -89,9 +120,9 @@ list(REMOVE_ITEM DIR_SRCS "src/leiden.cpp")
 if(USE_GREEDY)
 add_executable(clust-greedy ${DIR_SRCS})
 if(USE_RABBITFX)
-	target_link_libraries(clust-greedy rabbitsketch_static rabbitfx z)
+	target_link_libraries(clust-greedy rabbitsketch_embedded rabbitfx z)
 else()
-	target_link_libraries(clust-greedy rabbitsketch_static z)
+	target_link_libraries(clust-greedy rabbitsketch_embedded z)
 endif()
 
 # elseif(USE_LEIDEN)  # DISABLED
@@ -105,17 +136,17 @@ endif()
 elseif(USE_DBSCAN)
 add_executable(clust-dbscan ${DIR_SRCS})
 if(USE_RABBITFX)
-	target_link_libraries(clust-dbscan rabbitsketch_static rabbitfx z)
+	target_link_libraries(clust-dbscan rabbitsketch_embedded rabbitfx z)
 else()
-	target_link_libraries(clust-dbscan rabbitsketch_static z)
+	target_link_libraries(clust-dbscan rabbitsketch_embedded z)
 endif()
 
 else()
 add_executable(clust-mst ${DIR_SRCS})
 if(USE_RABBITFX)
-	target_link_libraries(clust-mst rabbitsketch_static rabbitfx z)
+	target_link_libraries(clust-mst rabbitsketch_embedded rabbitfx z)
 else()
-	target_link_libraries(clust-mst rabbitsketch_static z)
+	target_link_libraries(clust-mst rabbitsketch_embedded z)
 endif()
 endif()
 
@@ -130,4 +161,3 @@ install(TARGETS clust-dbscan DESTINATION ./)
 else()
 install(TARGETS clust-mst DESTINATION ./)
 endif()
-

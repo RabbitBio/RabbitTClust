@@ -10,6 +10,7 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
+#include <memory>
 #include <unordered_set>
 #include <sys/stat.h>  // For stat()
 #include <omp.h>  // For OpenMP functions
@@ -2025,7 +2026,8 @@ void clust_from_genome_fast(const string inputFile, string outputFile, string fo
 	
 #ifndef GREEDY_CLUST	
 	// Write index to files (index already built during sketch generation)
-	transSketchesFromIndex(inverted_index, info, folder_path);
+	if(isSave)
+		transSketchesFromIndex(inverted_index, info, folder_path);
 #else
 #endif
 	// Pass memory index to compute_kssd_clusters, which will pass it to compute_kssd_mst
@@ -2385,12 +2387,21 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 	void clust_from_genomes(string inputFile, string outputFile, bool is_newick_tree, bool is_phylip_tree, bool is_nexus_tree, bool is_linkage_matrix, bool is_auto_threshold, bool is_stability, bool sketchByFile, bool no_dense, int kmerSize, int sketchSize, double threshold, string sketchFunc, bool isContainment, int containCompress, int minLen, string folder_path, bool noSave, int threads, bool use_inverted_index, bool save_rep_index){
 		bool isSave = !noSave;
 		vector<SketchInfo> sketches;
-		int sketch_func_id;
-		if(sketchFunc == "MinHash")	sketch_func_id = 0;
-		else if(sketchFunc == "KSSD") sketch_func_id = 1;
+		const int sketch_func_id = sketchFunctionId(sketchFunc);
+		if(sketch_func_id < 0){
+			cerr << "ERROR: unsupported sketch algorithm: " << sketchFunc << endl;
+			exit(1);
+		}
+		if(isGenericRabbitSketch(sketch_func_id) && isSave){
+			cerr << "-----NOTE: persistent --presketched files are not yet available for "
+			     << sketchFunc << "; running this clustering in memory" << endl;
+			isSave = false;
+		}
 
-		MinHashInvertedIndex minhash_index;
-		MinHashInvertedIndex* idx_ptr = (sketch_func_id == 0) ? &minhash_index : nullptr;
+		unique_ptr<MinHashInvertedIndex> minhash_index;
+		if(sketch_func_id == SKETCH_MINHASH)
+			minhash_index.reset(new MinHashInvertedIndex());
+		MinHashInvertedIndex* idx_ptr = minhash_index.get();
 
 		compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen, kmerSize, sketchSize, sketchFunc, isContainment, containCompress, isSave, threads, idx_ptr);
 
@@ -3024,11 +3035,6 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 		// Use inverted index optimization for MinHash MST
 		vector<EdgeInfo> mst;
 		if(sketch_func_id == 0 && sketches.size() > 0 && sketches[0].minHash != nullptr) {
-			int kmer_size_from_file = 21;
-			int sketch_func_id_check, contain_compress, sketch_size, half_k, half_subk, drlevel;
-			bool is_containment_from_file;
-			read_sketch_parameters(folder_path, sketch_func_id_check, kmer_size_from_file, is_containment_from_file, contain_compress, sketch_size, half_k, half_subk, drlevel);
-			
 			MinHashInvertedIndex local_index;
 			MinHashInvertedIndex* idx_ptr = inverted_index;
 
@@ -3072,12 +3078,8 @@ void compute_kssd_sketches_with_index(vector<KssdSketchInfo>& sketches, KssdPara
 
 			cerr << "-----MinHash inverted index: " << idx_ptr->hash_map.size() << " unique hashes" << endl;
 			
-			int kmer_size = kmer_size_from_file;
-			bool is_containment = is_containment_from_file;
-			if(kmer_size <= 0) {
-				kmer_size = sketches[0].minHash->getKmerSize();
-				is_containment = sketches[0].isContainment;
-			}
+			const int kmer_size = sketches[0].minHash->getKmerSize();
+			const bool is_containment = sketches[0].isContainment;
 			
 			mst = compute_minhash_mst(sketches, 0, no_dense, is_containment, threads, denseArr, denseSpan, aniArr, threshold, kmer_size, idx_ptr);
 			
@@ -3323,6 +3325,53 @@ void clust_from_pregraph_leiden(string folder_path, string outputFile,
 #ifdef DBSCAN_CLUST
 // ==================== DBSCAN Clustering Functions ====================
 
+void clust_from_sketch_dbscan_generic(string folder_path, string outputFile,
+                                      double eps, int minPts, int threads) {
+    vector<SketchInfo> sketches;
+    int sketch_func_id = -1;
+    const bool sketch_by_file = loadSketches(folder_path, threads, sketches, sketch_func_id);
+    if(sketch_func_id != SKETCH_MINHASH) {
+        cerr << "ERROR: this persistent sketch folder is not a MinHash DBSCAN input" << endl;
+        return;
+    }
+
+    DBSCANResult result = SketchDBSCAN(sketches, eps, minPts, sketch_func_id, threads);
+    printDBSCANResult(result, sketches, sketch_by_file, outputFile, eps, minPts);
+    cerr << "-----write the cluster result into: " << outputFile << endl;
+    cerr << "-----the cluster number of " << outputFile << " is: " << result.num_clusters << endl;
+    cerr << "-----the noise point number is: " << result.num_noise << endl;
+}
+
+void clust_from_genome_dbscan_generic(const string inputFile, string outputFile,
+                                      string folder_path, bool sketchByFile,
+                                      int kmerSize, int sketchSize, string sketchFunc,
+                                      bool isContainment, int containCompress, int minLen,
+                                      bool noSave, double eps, int minPts, int threads) {
+    bool isSave = !noSave;
+    const int sketch_func_id = sketchFunctionId(sketchFunc);
+    if(sketch_func_id < 0 || sketch_func_id == SKETCH_KSSD) {
+        cerr << "ERROR: unsupported generic DBSCAN sketch: " << sketchFunc << endl;
+        return;
+    }
+    if(isGenericRabbitSketch(sketch_func_id) && isSave) {
+        cerr << "-----NOTE: persistent --presketched files are not yet available for "
+             << sketchFunc << "; running DBSCAN in memory" << endl;
+        isSave = false;
+    }
+
+    vector<SketchInfo> sketches;
+    compute_sketches(sketches, inputFile, folder_path, sketchByFile, minLen,
+                     kmerSize, sketchSize, sketchFunc, isContainment,
+                     containCompress, isSave, threads, nullptr);
+    cerr << "-----the size of sketches is: " << sketches.size() << endl;
+
+    DBSCANResult result = SketchDBSCAN(sketches, eps, minPts, sketch_func_id, threads);
+    printDBSCANResult(result, sketches, sketchByFile, outputFile, eps, minPts);
+    cerr << "-----write the cluster result into: " << outputFile << endl;
+    cerr << "-----the cluster number of " << outputFile << " is: " << result.num_clusters << endl;
+    cerr << "-----the noise point number is: " << result.num_noise << endl;
+}
+
 void clust_from_sketch_dbscan(string folder_path, string outputFile, bool sketchByFile, double eps, int minPts, int threads, int knn_k, int max_posting) {
 	vector<KssdSketchInfo> sketches;
 	KssdParameters info;
@@ -3330,7 +3379,7 @@ void clust_from_sketch_dbscan(string folder_path, string outputFile, bool sketch
 	double time0 = get_sec();
 	bool loaded_sketchByFile = loadKssdSketches(folder_path, threads, sketches, info);
 	if(loaded_sketchByFile != sketchByFile) {
-		cerr << "Warning: sketch format mismatch" << endl;
+		cerr << "-----NOTE: using the input layout recorded in the KSSD sketch folder" << endl;
 	}
 	cerr << "-----the size of sketches is: " << sketches.size() << endl;
 	double time1 = get_sec();
@@ -3344,7 +3393,7 @@ void clust_from_sketch_dbscan(string folder_path, string outputFile, bool sketch
 	DBSCANResult result = KssdDBSCAN(sketches, eps, minPts, kmer_size, threads, knn_k, max_posting);
 	
 	// Print results
-	printKssdDBSCANResult(result, sketches, sketchByFile, outputFile, eps, minPts);
+	printKssdDBSCANResult(result, sketches, loaded_sketchByFile, outputFile, eps, minPts);
 	cerr << "-----write the cluster result into: " << outputFile << endl;
 	cerr << "-----the cluster number of " << outputFile << " is: " << result.num_clusters << endl;
 	cerr << "-----the noise point number is: " << result.num_noise << endl;

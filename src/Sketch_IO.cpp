@@ -183,7 +183,8 @@ void saveSketches(vector<SketchInfo>& sketches, string folderPath, bool sketchBy
 		sketch_func_id = 0;
 	}
 	else if(sketchFunc == "KSSD"){
-		sketch_func_id = 1;
+		cerr << "ERROR: KSSD uses the dedicated saveKssdSketches format" << endl;
+		exit(1);
 	}
 	else{
 		cerr << "ERROR: saveSketches(), noexistent hash function: " << sketchFunc << endl;
@@ -200,21 +201,6 @@ void saveSketches(vector<SketchInfo>& sketches, string folderPath, bool sketchBy
 		//-----saving hash number and hash values for each sketch
 		for(int i = 0; i < sketches.size(); i++){
 			vector<uint64_t> hashArr = sketches[i].minHash->storeMinHashes();
-			size_t cur_sketch_size = hashArr.size();
-			fwrite(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
-			fwrite(hashArr.data(), sizeof(uint64_t), cur_sketch_size, fp_hash);
-		}
-	}
-	else if(sketch_func_id == 1){
-		int half_k, half_subk, drlevel;
-		half_k = sketches[0].KSSD->get_half_k();
-		half_subk = sketches[0].KSSD->get_half_subk();
-		drlevel = sketches[0].KSSD->get_drlevel();
-		fwrite(&half_k, sizeof(int), 1, fp_hash);
-		fwrite(&half_subk, sizeof(int), 1, fp_hash);
-		fwrite(&drlevel, sizeof(int), 1, fp_hash);
-		for(int i = 0; i < sketches.size(); i++){
-			vector<uint64_t> hashArr = sketches[i].KSSD->storeHashes();
 			size_t cur_sketch_size = hashArr.size();
 			fwrite(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
 			fwrite(hashArr.data(), sizeof(uint64_t), cur_sketch_size, fp_hash);
@@ -312,14 +298,11 @@ bool loadSketches(string folderPath, int threads, vector<SketchInfo>& sketches, 
 		fread(&drlevel, sizeof(int), 1, fp_hash);
 	}
 
-	Sketch::KSSDParameters kssdPara(half_k, half_subk, drlevel);
-
 	bool sketch_by_file = load_genome_info(folderPath, "sketch", sketches);
 	int max_hash_number = 1 << 20;
 	uint64_t * buffer_hash_arr = new uint64_t [max_hash_number];
 	for(size_t i = 0; i < sketches.size(); i++){
 		Sketch::MinHash * mh1;
-		Sketch::KSSD * kssd;
 		size_t cur_sketch_size;
 		fread(&cur_sketch_size, sizeof(size_t), 1, fp_hash);
 		if(cur_sketch_size > max_hash_number){
@@ -341,9 +324,8 @@ bool loadSketches(string folderPath, int threads, vector<SketchInfo>& sketches, 
 			sketches[i].minHash = mh1;
 		}
 		else if(sketch_func_id == 1){
-			kssd = new Sketch::KSSD(kssdPara);
-			kssd->loadHashes(hash_arr);
-			sketches[i].KSSD = kssd;
+			cerr << "ERROR: legacy generic KSSD sketches are unsupported; use the dedicated KSSD folder" << endl;
+			exit(1);
 		}
 		sketches[i].id = i;
 	}
@@ -384,7 +366,6 @@ bool load_kssd_genome_info(string folderPath, string type, vector<KssdSketchInfo
 			//SketchInfo cur_sketch_info;
 			KssdSketchInfo cur_sketch_info;
 			//Sketch::MinHash * mh1;
-			//Sketch::KSSD * kssd;
 			fread(&file_name_length, sizeof(int), 1, fp_info);
 			fread(&seq0_name_length, sizeof(int), 1, fp_info);
 			fread(&seq0_comment_length, sizeof(int), 1, fp_info);
@@ -490,7 +471,7 @@ bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketch
 		for(int i = 0; i < sketch_number; i++){
 			SketchInfo cur_sketch_info;
 			Sketch::MinHash * mh1;
-			Sketch::KSSD * kssd;
+			Sketch::Kssd * kssd;
 			fread(&file_name_length, sizeof(int), 1, fp_info);
 			fread(&seq0_name_length, sizeof(int), 1, fp_info);
 			fread(&seq0_comment_length, sizeof(int), 1, fp_info);
@@ -533,7 +514,7 @@ bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketch
 		for(int i = 0; i < sketch_number; i++){
 			SketchInfo cur_sketch_info;
 			Sketch::MinHash * mh1;
-			Sketch::KSSD * kssd;
+			Sketch::Kssd * kssd;
 			fread(&seq_name_length, sizeof(int), 1, fp_info);
 			fread(&seq_comment_length, sizeof(int), 1, fp_info);
 			fread(&strand, sizeof(int), 1, fp_info);
@@ -562,8 +543,6 @@ bool load_genome_info(string folderPath, string type, vector<SketchInfo>& sketch
 	fclose(fp_info);
 	return sketch_by_file;
 }
-
-
 
 
 

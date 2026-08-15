@@ -15,12 +15,9 @@ else
     echo "[install.sh] MPI not found on PATH -- building without MPI support"
 fi
 
-#make rabbitSketch library
-cd RabbitSketch &&
-mkdir -p build && cd build &&
-cmake -DCXXAPI=ON -DCMAKE_INSTALL_PREFIX=. .. &&
-make -j8 && make install &&
-cd ../../ &&
+# RabbitSketch is compiled directly into each RabbitTClust target by the root
+# CMake project.  This avoids a second compiler configuration and makes all
+# --sketch implementations available without relying on installed headers.
 
 #make rabbitFX library
 cd RabbitFX && 

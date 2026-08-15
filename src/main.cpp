@@ -125,7 +125,10 @@ int main(int argc, char * argv[]){
 	auto option_output = app.add_option("-o, --output", outputFile, "set the output name of cluster result");
 	auto option_input = app.add_option("-i, --input", inputFile, "set the input file, single FASTA genome file (without -l option) or genome list file (with -l option)");
 	auto option_presketched = app.add_option("--presketched", folder_path, "clustering by the pre-generated sketch files rather than genomes");
-	auto flag_is_fast = app.add_flag("--fast", is_fast, "use the kssd algorithm for sketching and distance computing");
+	auto option_sketch = app.add_option(
+		"--sketch", sketchFunc,
+		"sketch algorithm: minhash, kssd, fastkmv, probminhash, bindash, hll, or setsketch (default: minhash)");
+	auto flag_is_fast = app.add_flag("--fast", is_fast, "deprecated alias for --sketch kssd");
 	auto flag_inverted_index = app.add_flag("--inverted-index", use_inverted_index, "use inverted index optimization for greedy clustering (MinHash only)");
 #if defined(GREEDY_CLUST) || (!defined(LEIDEN_CLUST) && !defined(DBSCAN_CLUST))
 	auto flag_dense = app.add_flag("--dense", dense, "enable density maps, ANI histogram, and MST noise-removal pass (high memory; default: off)");
@@ -156,7 +159,7 @@ int main(int argc, char * argv[]){
 	auto flag_repdb_assign = app.add_flag("--assign", repdb_assign_flag, "Assign: classify genomes into existing clusters or mark as novel (use with --db, read-only)");
 	auto flag_repdb_stats = app.add_flag("--stats", repdb_stats_flag, "Print RepDB statistics: reps, compression, cluster distribution, etc. (use with --db)");
 	auto option_topk = app.add_option("--top-k", topk, "Number of top matches to return in --query mode (default 5)");
-	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
+	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimension-reduction level for KSSD sketches in [0, 3] (default: 3, sampling: 1/4096)");
 
 	flag_repdb_build->needs(option_repdb);
 	flag_repdb_query->needs(option_repdb);
@@ -178,9 +181,9 @@ int main(int argc, char * argv[]){
 	int dbscan_max_posting = 0;  // max posting list size to keep (0 = disabled)
 	auto option_dbscan_eps = app.add_option("--eps", dbscan_eps, "DBSCAN epsilon parameter (distance threshold, default 0.05)");
 	auto option_dbscan_minpts = app.add_option("--minpts", dbscan_minpts, "DBSCAN minPts parameter (minimum points to form cluster, default 5)");
-	auto option_dbscan_knn = app.add_option("--knn", dbscan_knn, "k-NN pre-filtering: keep only k nearest neighbors per point (0=disabled, recommended: 500-1000, default 0)");
-	auto option_dbscan_max_posting = app.add_option("--max-posting", dbscan_max_posting, "DBSCAN inverted-index pruning: drop hash keys with posting size > max-posting (0=disabled)");
-	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
+	auto option_dbscan_knn = app.add_option("--knn", dbscan_knn, "KSSD-only k-NN pre-filtering: keep k nearest neighbors per point (0=disabled)");
+	auto option_dbscan_max_posting = app.add_option("--max-posting", dbscan_max_posting, "KSSD-only inverted-index pruning: drop postings larger than this value (0=disabled)");
+	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimension-reduction level for KSSD sketches in [0, 3] (default: 3, sampling: 1/4096)");
 #elif defined(LEIDEN_CLUST)
 	double leiden_resolution = 1.0;
 	bool use_louvain = false;  // Default: use Leiden (this is clust-leiden!)
@@ -195,7 +198,7 @@ int main(int argc, char * argv[]){
 	auto flag_use_louvain = app.add_flag("--louvain", use_louvain, "Use Louvain algorithm (RECOMMENDED: fast & optimized, auto-enables all optimizations: edge-parallel + warm-start + knn=1000)");
 	auto option_knn = app.add_option("--knn", knn_k, "k-NN filtering: keep only k nearest neighbors per node (default: 1000 for --louvain, 500 for --leiden; use 0 to disable)");
 	auto option_pregraph = app.add_option("--pregraph", pregraph_path, "Cluster from pre-built graph (for fast resolution adjustment)");
-	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
+	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimension-reduction level for KSSD sketches in [0, 3] (default: 3, sampling: 1/4096)");
 #elif !defined(GREEDY_CLUST)
 	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
 	auto flag_newick_tree = app.add_flag("--newick-tree", is_newick_tree, "output the newick tree format file for clust-mst");
@@ -204,7 +207,7 @@ int main(int argc, char * argv[]){
 	auto flag_linkage_matrix = app.add_flag("--linkage-matrix", is_linkage_matrix, "output the single-linkage linkage matrix for clust-mst");
 	auto flag_auto_threshold = app.add_flag("--auto-threshold", is_auto_threshold, "automatically select optimal threshold based on MST edge length distribution");
 	auto flag_stability = app.add_flag("--stability", is_stability, "evaluate threshold stability by measuring clustering consistency under small perturbations (works with --auto-threshold or user-specified threshold)");
-	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimention reduction level for Kssd sketches, default 3 with a dimention reduction of 1/4096");
+	auto option_drlevel = app.add_option("--drlevel", drlevel, "set the dimension-reduction level for KSSD sketches in [0, 3] (default: 3, sampling: 1/4096)");
 	auto option_dedup_dist = app.add_option("--dedup-dist", dedup_dist, "within each cluster, collapse near-duplicate nodes connected by forest edges with dist <= dedup-dist; output to <output>.dedup");
 	auto option_reps_per_cluster = app.add_option("--reps-per-cluster", reps_per_cluster, "select up to k representatives per cluster (after optional dedup); output to <output>.reps");
 	auto option_buildDB = app.add_option("--buildDB", buildDB_folder, "build a reusable KSSD sketch+index database into the given folder and exit (clust-mst --fast only)");
@@ -252,6 +255,48 @@ int main(int argc, char * argv[]){
 	option_append->excludes(option_input);
 
 	CLI11_PARSE(app, argc, argv);
+
+	string canonical_sketch = canonicalSketchName(sketchFunc);
+	if(canonical_sketch.empty()){
+		cerr << "ERROR: invalid --sketch value '" << sketchFunc << "'. Choose one of: "
+		     << "minhash, kssd, fastkmv, probminhash, bindash, hll, setsketch" << endl;
+		return 1;
+	}
+	if(is_fast){
+		if(option_sketch->count() > 0 && canonical_sketch != "KSSD"){
+			cerr << "ERROR: --fast is an alias for --sketch kssd and conflicts with --sketch "
+			     << sketchFunc << endl;
+			return 1;
+		}
+		canonical_sketch = "KSSD";
+		cerr << "-----WARNING: --fast is deprecated; use --sketch kssd" << endl;
+	}
+	sketchFunc = canonical_sketch;
+	const int selected_sketch_id = sketchFunctionId(sketchFunc);
+	is_fast = (selected_sketch_id == SKETCH_KSSD);
+	cerr << "-----use sketch algorithm: " << sketchFunc << endl;
+	if(is_fast && (drlevel < 0 || drlevel > 3)){
+		cerr << "ERROR: invalid drlevel " << drlevel << ", should be in [0, 3]" << endl;
+		return 1;
+	}
+	if(!buildDB_folder.empty() && !is_fast){
+		cerr << "ERROR: --buildDB requires --sketch kssd" << endl;
+		return 1;
+	}
+
+	if(isGenericRabbitSketch(selected_sketch_id)){
+		if(*option_containment){
+			cerr << "ERROR: --containment is currently supported only by minhash and kssd" << endl;
+			return 1;
+		}
+		if(!repdb_path.empty() || *option_append || *option_presketched || save_rep_index){
+			cerr << "ERROR: --db, --append, --presketched, and --save-rep currently support only minhash and kssd" << endl;
+			return 1;
+		}
+		// All RabbitSketch alternatives use a fixed register/sketch budget.
+		// Prevent the legacy greedy MinHash tuner from switching to containment.
+		isJaccard = true;
+	}
 
 	const bool no_dense = !dense;
 
@@ -464,8 +509,8 @@ int main(int argc, char * argv[]){
 	}
 	
 	if(is_fast){
-		if(drlevel < 0 || drlevel > 8){
-			cerr << "ERROR: invalid drlevel " << drlevel << ", should be in [0, 8]" << endl;
+		if(drlevel < 0 || drlevel > 3){
+			cerr << "ERROR: invalid drlevel " << drlevel << ", should be in [0, 3]" << endl;
 			return 1;
 		}
 		clust_from_genome_leiden(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, threshold, leiden_resolution, !use_louvain, use_parallel_louvain, use_edge_parallel, use_warm_start, knn_k, threads);
@@ -477,12 +522,6 @@ int main(int argc, char * argv[]){
 //======clust-leiden======================================================================
 #elif defined(DBSCAN_CLUST)
 //======clust-dbscan======================================================================
-	// DBSCAN requires --fast (KSSD)
-	if(!is_fast){
-		cerr << "ERROR: clust-dbscan requires --fast option" << endl;
-		return 1;
-	}
-	
 	cerr << "-----Using DBSCAN clustering" << endl;
 	cerr << "-----DBSCAN parameters: eps=" << dbscan_eps << ", minPts=" << dbscan_minpts;
 	if(dbscan_knn > 0) {
@@ -493,18 +532,11 @@ int main(int argc, char * argv[]){
 	}
 	cerr << endl;
 	
-	if(!isSetKmer){
-		kmerSize = 19;
-		cerr << "-----use default kmerSize: " << kmerSize << endl;
-	}
-	
-	if(drlevel < 0 || drlevel > 8){
-		cerr << "ERROR: invalid drlevel " << drlevel << ", should be in [0, 8]" << endl;
-		return 1;
-	}
-	
 	if(*option_presketched && !*option_append){
-		clust_from_sketch_dbscan(folder_path, outputFile, sketchByFile, dbscan_eps, dbscan_minpts, threads, dbscan_knn, dbscan_max_posting);
+		if(is_fast)
+			clust_from_sketch_dbscan(folder_path, outputFile, sketchByFile, dbscan_eps, dbscan_minpts, threads, dbscan_knn, dbscan_max_posting);
+		else
+			clust_from_sketch_dbscan_generic(folder_path, outputFile, dbscan_eps, dbscan_minpts, threads);
 		return 0;
 	}
 	
@@ -513,11 +545,31 @@ int main(int argc, char * argv[]){
 		return 1;
 	}
 	
-	if(!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel)){
-		return 1;
+	if(is_fast){
+		if(!isSetKmer){
+			kmerSize = 19;
+			cerr << "-----use default kmerSize: " << kmerSize << endl;
+		}
+		if(drlevel < 0 || drlevel > 3){
+			cerr << "ERROR: invalid drlevel " << drlevel << ", should be in [0, 3]" << endl;
+			return 1;
+		}
+		if(!tune_kssd_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen, isContainment, kmerSize, threshold, drlevel))
+			return 1;
+		clust_from_genome_dbscan(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, dbscan_eps, dbscan_minpts, threads, dbscan_knn, dbscan_max_posting);
+		return 0;
 	}
-	
-	clust_from_genome_dbscan(inputFile, outputFile, folder_path, sketchByFile, kmerSize, drlevel, minLen, noSave, dbscan_eps, dbscan_minpts, threads, dbscan_knn, dbscan_max_posting);
+
+	if(dbscan_knn > 0 || dbscan_max_posting > 0)
+		cerr << "-----WARNING: --knn and --max-posting are KSSD-only and are ignored for " << sketchFunc << endl;
+	if(!tune_parameters(sketchByFile, isSetKmer, inputFile, threads, minLen,
+	                   isContainment, isJaccard, kmerSize, threshold,
+	                   containCompress, sketchSize))
+		return 1;
+	clust_from_genome_dbscan_generic(inputFile, outputFile, folder_path, sketchByFile,
+	                                  kmerSize, sketchSize, sketchFunc, isContainment,
+	                                  containCompress, minLen, noSave, dbscan_eps,
+	                                  dbscan_minpts, threads);
 	return 0;
 //======clust-dbscan======================================================================
 #else
@@ -670,5 +722,3 @@ int main(int argc, char * argv[]){
 
 	return 0;
 }//end main
-
-

@@ -853,33 +853,7 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
     int thread_id = omp_get_thread_num();
     for(int i = id; i < id+subSize; i++){
       for(int j = max(i+1, start_index); j < sketches.size(); j++){
-        double tmpDist;
-        if(sketch_func_id == 0)
-        {
-          if(sketches[i].isContainment)
-          {
-            //tmpDist = 1.0 - sketches[i].minHash->containJaccard(sketches[j].minHash);
-            tmpDist = sketches[i].minHash->containDistance(sketches[j].minHash);
-          }
-          else
-          {
-            tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
-          }
-        }
-        else if(sketch_func_id == 1){
-          tmpDist = sketches[i].KSSD->distance(sketches[j].KSSD);
-        }
-        else if(sketch_func_id == 2){
-          tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
-        }
-        else if(sketch_func_id == 3){
-          tmpDist = sketches[i].HLL->distance(*sketches[j].HLL);
-        }
-        else if(sketch_func_id == 4){
-          tmpDist = sketches[i].OMH->distance(*sketches[j].OMH);
-        }
-        else	
-          break;
+		const double tmpDist = sketchDistance(sketches[i], sketches[j], sketch_func_id);
 
         if(!no_dense){
           int t0 = (int)(std::lower_bound(distRadius, distRadius + denseSpan, tmpDist) - distRadius);
@@ -946,26 +920,7 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
     for(int i = sketches.size()-tailNum; i < sketches.size(); i++){
       for(int j = i+1; j < sketches.size(); j++){
         //double tmpDist = 1.0 - minHashes[i].minHash->jaccard(minHashes[j].minHash);
-        double tmpDist;
-        if(sketch_func_id == 0){
-          if(sketches[i].isContainment)
-            //tmpDist = 1.0 - sketches[i].minHash->containJaccard(sketches[j].minHash);
-            tmpDist = sketches[i].minHash->containDistance(sketches[j].minHash);
-          else
-          {
-            tmpDist = sketches[i].minHash->distance(sketches[j].minHash);
-          }
-        }
-        else if(sketch_func_id == 1)
-          tmpDist = sketches[i].KSSD->distance(sketches[j].KSSD);
-        else if(sketch_func_id == 2) 
-          tmpDist = sketches[i].WMinHash->distance(sketches[j].WMinHash);
-        else if(sketch_func_id == 3)
-          tmpDist = sketches[i].HLL->distance(*sketches[j].HLL);
-        else if(sketch_func_id == 4)
-          tmpDist = sketches[i].OMH->distance(*sketches[j].OMH);
-        else	
-          break;
+		const double tmpDist = sketchDistance(sketches[i], sketches[j], sketch_func_id);
 
         if(!no_dense){
           int t0 = (int)(std::lower_bound(distRadius, distRadius + denseSpan, tmpDist) - distRadius);

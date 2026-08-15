@@ -680,9 +680,9 @@ vector<int> findNeighborsKSSD(
 }
 
 /**
- * @brief Find all points within epsilon distance of a given point (MinHash)
+ * @brief Find all points within epsilon distance of a given point
  */
-vector<int> findNeighborsMinHash(
+vector<int> findNeighborsSketch(
     const vector<SketchInfo>& sketches,
     int point_idx,
     double eps,
@@ -696,17 +696,7 @@ vector<int> findNeighborsMinHash(
     for(size_t i = 0; i < sketches.size(); i++) {
         if(i == point_idx) continue;
         
-        double dist;
-        if(sketch_func_id == 0) {
-            if(point.isContainment) {
-                dist = point.minHash->containDistance(sketches[i].minHash);
-            } else {
-                dist = point.minHash->distance(sketches[i].minHash);
-            }
-        } else {
-            // Unsupported sketch type
-            continue;
-        }
+        const double dist = sketchDistance(point, sketches[i], sketch_func_id);
         
         if(dist <= eps) {
             #pragma omp critical
@@ -982,9 +972,9 @@ DBSCANResult KssdDBSCAN(
 }
 
 /**
- * @brief DBSCAN clustering for MinHash sketches
+ * @brief Exact all-pairs DBSCAN for SketchInfo-backed algorithms
  */
-DBSCANResult MinHashDBSCAN(
+DBSCANResult SketchDBSCAN(
     vector<SketchInfo>& sketches,
     double eps,
     int minPts,
@@ -1004,7 +994,8 @@ DBSCANResult MinHashDBSCAN(
     vector<int> labels(n, -1);
     int cluster_id = 0;
     
-    cerr << "-----Running DBSCAN clustering (MinHash)..." << endl;
+    cerr << "-----Running exact all-pairs DBSCAN ("
+         << sketch_func_id << ")..." << endl;
     cerr << "-----Parameters: eps=" << eps << ", minPts=" << minPts << endl;
     
     // Process each point
@@ -1012,9 +1003,10 @@ DBSCANResult MinHashDBSCAN(
         if(labels[i] != -1) continue;  // Already processed
         
         // Find neighbors
-        vector<int> neighbors = findNeighborsMinHash(sketches, i, eps, sketch_func_id, threads);
+        vector<int> neighbors = findNeighborsSketch(sketches, i, eps, sketch_func_id, threads);
         
-        if(neighbors.size() < minPts) {
+        // DBSCAN minPts includes the query point itself.
+        if((int)neighbors.size() + 1 < minPts) {
             // Not a core point, mark as noise (may be reassigned later)
             labels[i] = -2;
             continue;
@@ -1045,9 +1037,9 @@ DBSCANResult MinHashDBSCAN(
             labels[q] = cluster_id;
             
             // Find neighbors of q
-            vector<int> q_neighbors = findNeighborsMinHash(sketches, q, eps, sketch_func_id, threads);
+            vector<int> q_neighbors = findNeighborsSketch(sketches, q, eps, sketch_func_id, threads);
             
-            if(q_neighbors.size() >= minPts) {
+            if((int)q_neighbors.size() + 1 >= minPts) {
                 // q is also a core point, add its neighbors to seed set
                 for(int neighbor : q_neighbors) {
                     if(labels[neighbor] == -1 || labels[neighbor] == -2) {
@@ -1314,4 +1306,3 @@ void printKssdDBSCANResult(
     
     fclose(fp);
 }
-
