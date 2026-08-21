@@ -12,7 +12,7 @@ https://anaconda.org/bioconda/rabbittclust/badges/downloads.svg)](https://anacon
 # `RabbitTClust v2.4.0`
 RabbitTClust is a fast and memory-efficient genome clustering tool based on sketch-based distance estimations.
 It enables processing of large-scale datasets by combining dimensionality reduction techniques with streaming and parallelization on modern multi-core platforms.
-RabbitTClust supports classical single-linkage hierarchical (clust-mst), greedy incremental clustering (clust-greedy), and graph-based clustering (clust-leiden) algorithms for different scenarios. 
+RabbitTClust supports classical single-linkage hierarchical (clust-mst), greedy incremental clustering (clust-greedy), directed FracMinHash containment graphs (clust-containment), and graph-based clustering (clust-leiden) algorithms for different scenarios.
 
 ## Benchmark data
 The large-scale bacterial benchmark in this study uses the bacterial collection from [NCBI RefSeq Release 233](https://ncbiinsights.ncbi.nlm.nih.gov/2026/02/19/refseq-release-233/), not the continuously updated RefSeq bacteria directory. The version-pinned, release-wide accession catalog is available in the [NCBI RefSeq archive](https://ftp.ncbi.nlm.nih.gov/refseq/release/release-catalog/archive/RefSeq-release233.catalog.gz); bacterial records are identified by `bacteria` in the RefSeq release-directory field. Do not substitute the live `assembly_summary.txt`, because its contents change as RefSeq is updated.
@@ -42,7 +42,7 @@ cd RabbitTClust
 ./install.sh
 ```
 
-This will compile `clust-mst` and `clust-greedy` by default. If igraph is detected, `clust-leiden` will also be compiled.
+This will compile `clust-mst`, `clust-greedy`, and `clust-containment` by default. If igraph is detected, `clust-leiden` will also be compiled.
 
 #### Optional: Install igraph for clust-leiden
 The `clust-leiden` module requires the [igraph](https://igraph.org/) library. If igraph is not found during installation, you will see a warning message, but `clust-mst` and `clust-greedy` will still be available.
@@ -112,6 +112,51 @@ Persistent `--presketched`, `--append`, RepDB, and `--save-rep` workflows curren
 ./clust-dbscan --sketch setsketch -s 1024 --eps 0.05 --minpts 5 -l -i bacteria.list -o setsketch.cluster
 ```
 
+### Directed FracMinHash containment-SCC
+
+`clust-containment` is intended for relationships that a symmetric distance
+cannot express. For FracMinHash sets `S_A` and `S_B`, it creates `A -> B` when
+`|S_A ∩ S_B| / |S_A|` passes the cutoff. Thus a short or incomplete
+assembly can point to a more complete container without forcing the reverse
+relationship. Exact full-sketch intersections verify every retained candidate;
+the inverted index is used only to recall and sparsify candidates.
+
+```bash
+# RefSeq bacterial assembly preset (the CLI defaults shown explicitly).
+./clust-containment -l -i bacteria.list -o bacteria.containment.cluster \
+  -k 19 --scaled 10000 -d 0.02 -t 64 \
+  --candidate-hashes 128 --max-candidates 256 --max-neighbors 64
+
+# Reuse the native FracMinHash cache for another graph threshold.
+./clust-containment --load-sketch bacteria.containment.cluster.fmh \
+  -o bacteria.containment.d030.cluster -d 0.03 -t 64 -e
+```
+
+The distance-form cutoff is `exp(-k*d)`; `--containment-threshold` can set it
+directly. The default `d=0.02` is a conservative operating point calibrated on
+RefSeq Release 233 assemblies. In fragment-recruitment or MAG screening tasks,
+a looser threshold may be appropriate and should be validated for that input.
+
+The main output is the strict strongly connected component clustering at the
+requested path. Additional outputs preserve information that ordinary flat
+clustering discards:
+
+| Output | Meaning |
+| --- | --- |
+| `.scc.tsv`, `.members.tsv` | SCC sizes, representatives, membership, degrees, and containment roles |
+| `.dag.tsv` | one representative directed relation per pair of SCCs (the acyclic containment hierarchy) |
+| `.assignment.tsv` | whether an SCC reaches one unique container sink or multiple ambiguous sinks |
+| `.flat.cluster` | optional unique-sink projection; ambiguous SCCs remain separate |
+| `.reciprocal.cluster` | components formed only from candidate pairs passing containment in both directions |
+| `.mutual.cluster` | components of the actual mutual sparse-neighbor graph |
+| `.weak.cluster` | weak components after ignoring direction; useful as a permissive upper bound |
+| `.summary.tsv` | graph sizes, component counts, candidate work, and stage timings |
+| `.edges.tsv` | all retained directed edges, written only with `--write-edges` |
+
+The strict SCC output is the primary result. The flat, reciprocal, mutual, and
+weak projections are diagnostic views and should be selected according to the
+downstream task rather than treated as interchangeable clusterings.
+
 ```bash
 # clust-mst, minimum-spanning-tree-based module for RabbitTClust
 Usage: ./clust-mst [OPTIONS]
@@ -131,6 +176,8 @@ Options:
   --sketch TEXT               sketch algorithm: minhash, kssd, fastkmv, probminhash, bindash, hll, or setsketch (default: minhash)
   --premsted TEXT             clustering by the pre-generated mst files rather than genomes for clust-mst
   --newick-tree               output the newick tree format file for clust-mst
+  --phylip-tree               output a PHYLIP-compatible tree file: tree count followed by the Newick-formatted MST
+  --nexus-tree                output the NEXUS tree format file for clust-mst
   --fast                      deprecated alias for --sketch kssd
   --dense                     optional: enable density/ANI stats and MST noise-removal pass (high memory; default is off)
   --dedup-dist FLOAT          within each cluster, collapse near-duplicate nodes connected by forest edges with dist <= dedup-dist; output to <output>.dedup
@@ -297,6 +344,20 @@ the cluster 2 is:
 
 #### Output the newick tree format (v.2.2.1 or latter)
 When the `--newick-tree` option is used, an additional output file will be generated in the Newick tree format with a suffix name of ".newick.tree".
+
+#### Output the PHYLIP-compatible tree format
+RabbitTClust2 also provides a PHYLIP-compatible tree file with the
+`--phylip-tree` option. The first line specifies the number of trees (`1`),
+and the following line contains the same Newick-formatted MST topology and
+branch lengths. Every genome is represented as a terminal taxon; a genome at
+an internal MST vertex is attached there by a zero-length leaf edge so that
+the original pairwise MST path lengths are preserved.
+
+The output suffix is `.phylip.tree`. PHYLIP-safe taxon labels and their
+original names are recorded in `.phylip.tree.labels.tsv`; names that exceed
+PHYLIP's label limit or contain unsupported characters receive deterministic
+unique aliases. Tree output requires a connected MST and fails explicitly
+instead of silently omitting disconnected components.
 
 
 # Bug Report

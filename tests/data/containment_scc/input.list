@@ -1,0 +1,4 @@
+tests/data/containment_scc/full_a.fa
+tests/data/containment_scc/full_b.fa
+tests/data/containment_scc/fragment.fa
+tests/data/containment_scc/unrelated.fa

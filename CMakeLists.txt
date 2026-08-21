@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.0)
 
 project(rabbitTClust)
 
+include(CTest)
+
 set(CMAKE_INSTALL_PREFIX ..)
 option(USE_RABBITFX "parse input fasta file with RabbitFX" OFF)
 option(USE_DEBUG "print the debug information" ON)
@@ -9,6 +11,7 @@ option(USE_Timer "print the time information" ON)
 option(USE_GREEDY "use greedy incremental cluster" ON)
 # option(USE_LEIDEN "use Leiden community detection cluster" OFF)  # DISABLED
 option(USE_DBSCAN "use DBSCAN density-based clustering" OFF)
+option(BUILD_CONTAINMENT_SCC "build directed FracMinHash containment-SCC module" ON)
 
 
 
@@ -81,11 +84,13 @@ set(RABBIT_SKETCH_SOURCES
 	RabbitSketch/src/WeightedMinHash.cpp
 	RabbitSketch/src/common.cpp
 	RabbitSketch/src/fastkmv.cpp
+	RabbitSketch/src/fracminhash.cpp
 	RabbitSketch/src/histoSketch.cpp
 	RabbitSketch/src/probmh.cpp
 	RabbitSketch/src/probmh_op.cpp
 	RabbitSketch/src/shuffle.cpp
 	RabbitSketch/src/xxhash.c
+	RabbitSketch/src/api/RuntimeInfo.cpp
 )
 add_library(rabbitsketch_embedded STATIC ${RABBIT_SKETCH_SOURCES})
 target_include_directories(rabbitsketch_embedded PUBLIC RabbitSketch/src)
@@ -111,6 +116,13 @@ set_target_properties(rabbitsketch_embedded PROPERTIES
 #link_directories(RabbitSketch/build/lib)
 
 aux_source_directory(src DIR_SRCS)
+
+# The containment-SCC module has its own focused CLI and does not participate
+# in the legacy GREEDY/MST/DBSCAN compile-time switch below.
+list(REMOVE_ITEM DIR_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/containment_scc.cpp")
+list(REMOVE_ITEM DIR_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/containment_scc_main.cpp")
+list(REMOVE_ITEM DIR_SRCS "src/containment_scc.cpp")
+list(REMOVE_ITEM DIR_SRCS "src/containment_scc_main.cpp")
 
 # Exclude leiden.cpp from compilation (always exclude since Leiden is disabled)
 list(REMOVE_ITEM DIR_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/leiden.cpp")
@@ -148,6 +160,31 @@ if(USE_RABBITFX)
 else()
 	target_link_libraries(clust-mst rabbitsketch_embedded z)
 endif()
+endif()
+
+if(BUILD_CONTAINMENT_SCC)
+	add_executable(clust-containment
+		src/containment_scc_main.cpp
+		src/containment_scc.cpp)
+	target_link_libraries(clust-containment rabbitsketch_embedded z)
+	install(TARGETS clust-containment DESTINATION ./)
+
+	if(BUILD_TESTING)
+		add_executable(containment-scc-test
+			tests/containment_scc_test.cpp
+			src/containment_scc.cpp)
+		target_link_libraries(containment-scc-test rabbitsketch_embedded z)
+		target_compile_definitions(containment-scc-test PRIVATE
+			RABBITTCLUST_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data/containment_scc")
+		add_test(NAME containment-scc-test COMMAND containment-scc-test)
+	endif()
+endif()
+
+if(BUILD_TESTING)
+	add_executable(mst-tree-format-test
+		tests/mst_tree_format_test.cpp
+		src/TreeFormat.cpp)
+	add_test(NAME mst-tree-format-test COMMAND mst-tree-format-test)
 endif()
 
 

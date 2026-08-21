@@ -1,6 +1,8 @@
 **/*
 !src/
 !src/*
+!tests/
+!tests/**
 !.gitignore
 !.gitmodules
 !CMakeLists.txt
@@ -40,6 +42,14 @@
 *.pdf
 !benchmark/analysis/
 !benchmark/analysis/*
+
+# Keep the reproducible Release 233 containment report, but not its large
+# generated cluster, label, cache, and timing artifacts.
+!benchmark/results/
+benchmark/results/*
+!benchmark/results/containment_scc_233_20260815/
+benchmark/results/containment_scc_233_20260815/*
+!benchmark/results/containment_scc_233_20260815/README.md
 
 !discovery/
 !discovery/**

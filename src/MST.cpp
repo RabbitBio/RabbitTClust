@@ -12,6 +12,7 @@
 #include <numeric>
 #include <vector>
 #include "phmap.h"  // Google's Swiss Tables for faster hash maps
+#include "TreeFormat.h"
 using namespace std;
 
 bool cmpEdge(EdgeInfo e1, EdgeInfo e2){
@@ -973,52 +974,19 @@ vector<EdgeInfo> modifyMST(vector<SketchInfo>& sketches, int start_index, int sk
 }
 
 template <typename SketchType>
-static string build_mst_newick_tree_recursive(
-    int node,
-    int parent,
-    const vector<vector<pair<int,double>>>& adjacency,
-    const vector<SketchType>& sketches,
-    bool sketch_by_file)
-{
-  const string name = sketch_by_file ? sketches[node].fileName
-    : sketches[node].seqInfo.name;
-
-  string children;
-  for (const auto& neighbor : adjacency[node]) {
-    const int child = neighbor.first;
-    if (child == parent) continue;
-
-    if (!children.empty()) children += ",";
-    children += build_mst_newick_tree_recursive(
-        child, node, adjacency, sketches, sketch_by_file);
-    // This branch is the corresponding MST edge, so retain its distance.
-    children += ":" + to_string(neighbor.second);
-  }
-
-  if (children.empty()) return name;
-
-  // Internal vertices are genomes too; keep their names as internal labels.
-  return "(" + children + ")" + name;
-}
-
-template <typename SketchType>
 static string get_mst_newick_tree(
     const vector<SketchType>& sketches,
     const vector<EdgeInfo>& mst,
     bool sketch_by_file)
 {
-  const int N = sketches.size();
-  if (N == 0) return ";";
-
-  vector<vector<pair<int,double>>> adjacency(N);
-  for (const auto& edge : mst) {
-    adjacency[edge.preNode].push_back({edge.sufNode, edge.dist});
-    adjacency[edge.sufNode].push_back({edge.preNode, edge.dist});
+  vector<string> labels;
+  labels.reserve(sketches.size());
+  for (const SketchType& sketch : sketches) {
+    const string& original = sketch_by_file
+      ? sketch.fileName : sketch.seqInfo.name;
+    labels.push_back(tree_format::quote_newick_label(original));
   }
-
-  // Rooting changes only the Newick orientation, not the MST topology or lengths.
-  return build_mst_newick_tree_recursive(
-      0, -1, adjacency, sketches, sketch_by_file) + ";";
+  return tree_format::build_mst_newick(labels, mst);
 }
 
 

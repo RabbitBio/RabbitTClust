@@ -1,6 +1,9 @@
 #include "MST_IO.h"
 #include "Sketch_IO.h"
+#include "TreeFormat.h"
 #include <ctime>
+#include <cstdlib>
+#include <exception>
 #include <unordered_map>
 using namespace std;
 
@@ -249,49 +252,141 @@ void saveANI(string folderPath, uint64_t* aniArr, int sketch_func_id){
 	cerr << "-----save the ani file into: " << file_ani << endl;
 }
 
-void print_kssd_newick_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
-	string res_newick_tree = get_kssd_newick_tree(sketches, mst, sketch_by_file);
+[[noreturn]] static void tree_output_error(
+		const char* function_name,
+		const string& output,
+		const string& detail){
+	cerr << "ERROR: " << function_name << "(), cannot write a valid tree to: "
+	     << output << endl;
+	cerr << "       " << detail << endl;
+	exit(EXIT_FAILURE);
+}
+
+static void write_newick_file(
+		const string& newick_tree,
+		const string& output,
+		const char* function_name){
 	FILE* fp_tree = fopen(output.c_str(), "w");
 	if(!fp_tree){
-		cerr << "ERROR: print_newick_tree(), cannot write file: " << output << endl;
-		exit(1);
+		tree_output_error(function_name, output, "cannot open the output file");
 	}
-	fprintf(fp_tree, "%s\n", res_newick_tree.c_str());
+	fprintf(fp_tree, "%s\n", newick_tree.c_str());
 	fclose(fp_tree);
+}
+
+void print_kssd_newick_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
+	try {
+		write_newick_file(
+			get_kssd_newick_tree(sketches, mst, sketch_by_file),
+			output,
+			"print_kssd_newick_tree");
+	} catch(const exception& error) {
+		tree_output_error("print_kssd_newick_tree", output, error.what());
+	}
 }
 
 void print_newick_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
-	string res_newick_tree = get_newick_tree(sketches, mst, sketch_by_file);
-	FILE* fp_tree = fopen(output.c_str(), "w");
-	if(!fp_tree){
-		cerr << "ERROR: print_newick_tree(), cannot write file: " << output << endl;
-		exit(1);
+	try {
+		write_newick_file(
+			get_newick_tree(sketches, mst, sketch_by_file),
+			output,
+			"print_newick_tree");
+	} catch(const exception& error) {
+		tree_output_error("print_newick_tree", output, error.what());
 	}
-	fprintf(fp_tree, "%s\n", res_newick_tree.c_str());
-	fclose(fp_tree);
 }
 
-// PHYLIP tree format: first line = number of trees (1), second line = Newick tree
-void print_phylip_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
-	string res_newick_tree = get_newick_tree(sketches, mst, sketch_by_file);
+template <typename SketchType>
+static vector<string> get_tree_labels(
+		const vector<SketchType>& sketches,
+		bool sketch_by_file){
+	vector<string> labels;
+	labels.reserve(sketches.size());
+	for(const SketchType& sketch : sketches){
+		labels.push_back(sketch_by_file ? sketch.fileName : sketch.seqInfo.name);
+	}
+	return labels;
+}
+
+static string escape_tsv_field(const string& value){
+	string escaped;
+	escaped.reserve(value.size());
+	for(char c : value){
+		switch(c){
+			case '\\': escaped += "\\\\"; break;
+			case '\t': escaped += "\\t"; break;
+			case '\n': escaped += "\\n"; break;
+			case '\r': escaped += "\\r"; break;
+			default: escaped += c; break;
+		}
+	}
+	return escaped;
+}
+
+template <typename SketchType>
+static void print_phylip_tree_impl(
+		const vector<SketchType>& sketches,
+		const vector<EdgeInfo>& mst,
+		bool sketch_by_file,
+		const string& output,
+		const char* function_name){
+	if(sketches.size() < 2){
+		tree_output_error(
+			function_name,
+			output,
+			"PHYLIP tree output requires at least two taxa");
+	}
+
+	const vector<string> original_labels =
+		get_tree_labels(sketches, sketch_by_file);
+	tree_format::PhylipLabelSet phylip_labels;
+	string newick_tree;
+	try {
+		phylip_labels = tree_format::make_phylip_labels(original_labels);
+		newick_tree = tree_format::build_mst_newick(phylip_labels.encoded, mst);
+	} catch(const exception& error) {
+		tree_output_error(function_name, output, error.what());
+	}
+
 	FILE* fp_tree = fopen(output.c_str(), "w");
 	if(!fp_tree){
-		cerr << "ERROR: print_phylip_tree(), cannot write file: " << output << endl;
-		exit(1);
+		tree_output_error(function_name, output, "cannot open the output file");
 	}
-	fprintf(fp_tree, "1\n%s\n", res_newick_tree.c_str());
+
+	const string label_map_path = output + ".labels.tsv";
+	FILE* fp_labels = fopen(label_map_path.c_str(), "w");
+	if(!fp_labels){
+		fclose(fp_tree);
+		tree_output_error(
+			function_name, label_map_path, "cannot open the taxon-label mapping file");
+	}
+
+	// PHYLIP accepts the historical tree-count prefix.  There is one connected
+	// MST, followed by the same topology and branch lengths in Newick notation.
+	fprintf(fp_tree, "1\n%s\n", newick_tree.c_str());
 	fclose(fp_tree);
+
+	fprintf(fp_labels, "phylip_label\toriginal_label\n");
+	for(size_t index = 0; index < original_labels.size(); ++index){
+		const string escaped_original = escape_tsv_field(original_labels[index]);
+		fprintf(fp_labels, "%s\t%s\n",
+			phylip_labels.encoded[index].c_str(), escaped_original.c_str());
+	}
+	fclose(fp_labels);
+	cerr << "-----write the PHYLIP taxon-label mapping into: "
+	     << label_map_path << endl;
+}
+
+// PHYLIP-compatible tree file: first line = number of trees (1),
+// second line = the Newick-formatted MST.
+void print_phylip_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
+	print_phylip_tree_impl(
+		sketches, mst, sketch_by_file, output, "print_phylip_tree");
 }
 
 void print_kssd_phylip_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
-	string res_newick_tree = get_kssd_newick_tree(sketches, mst, sketch_by_file);
-	FILE* fp_tree = fopen(output.c_str(), "w");
-	if(!fp_tree){
-		cerr << "ERROR: print_kssd_phylip_tree(), cannot write file: " << output << endl;
-		exit(1);
-	}
-	fprintf(fp_tree, "1\n%s\n", res_newick_tree.c_str());
-	fclose(fp_tree);
+	print_phylip_tree_impl(
+		sketches, mst, sketch_by_file, output, "print_kssd_phylip_tree");
 }
 
 // NEXUS format: TAXA block with TAXLABELS + TREES block with one Newick tree
@@ -324,23 +419,31 @@ static void write_nexus_tree(const string& newick_tree, const vector<string>& ta
 }
 
 void print_nexus_tree(const vector<SketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
-	string res_newick_tree = get_newick_tree(sketches, mst, sketch_by_file);
-	vector<string> taxlabels;
-	taxlabels.reserve(sketches.size());
-	for(size_t i = 0; i < sketches.size(); ++i){
-		taxlabels.push_back(sketch_by_file ? sketches[i].fileName : sketches[i].seqInfo.name);
+	try {
+		string res_newick_tree = get_newick_tree(sketches, mst, sketch_by_file);
+		vector<string> taxlabels;
+		taxlabels.reserve(sketches.size());
+		for(size_t i = 0; i < sketches.size(); ++i){
+			taxlabels.push_back(sketch_by_file ? sketches[i].fileName : sketches[i].seqInfo.name);
+		}
+		write_nexus_tree(res_newick_tree, taxlabels, output);
+	} catch(const exception& error) {
+		tree_output_error("print_nexus_tree", output, error.what());
 	}
-	write_nexus_tree(res_newick_tree, taxlabels, output);
 }
 
 void print_kssd_nexus_tree(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, bool sketch_by_file, string output){
-	string res_newick_tree = get_kssd_newick_tree(sketches, mst, sketch_by_file);
-	vector<string> taxlabels;
-	taxlabels.reserve(sketches.size());
-	for(size_t i = 0; i < sketches.size(); ++i){
-		taxlabels.push_back(sketch_by_file ? sketches[i].fileName : sketches[i].seqInfo.name);
+	try {
+		string res_newick_tree = get_kssd_newick_tree(sketches, mst, sketch_by_file);
+		vector<string> taxlabels;
+		taxlabels.reserve(sketches.size());
+		for(size_t i = 0; i < sketches.size(); ++i){
+			taxlabels.push_back(sketch_by_file ? sketches[i].fileName : sketches[i].seqInfo.name);
+		}
+		write_nexus_tree(res_newick_tree, taxlabels, output);
+	} catch(const exception& error) {
+		tree_output_error("print_kssd_nexus_tree", output, error.what());
 	}
-	write_nexus_tree(res_newick_tree, taxlabels, output);
 }
 
 void print_kssd_linkage_matrix(const vector<KssdSketchInfo>& sketches, const vector<EdgeInfo>& mst, string output){
@@ -373,6 +476,3 @@ void print_linkage_matrix(const vector<SketchInfo>& sketches, const vector<EdgeI
 	}
 	fclose(fp);
 }
-
-
-

@@ -202,7 +202,7 @@ int main(int argc, char * argv[]){
 #elif !defined(GREEDY_CLUST)
 	auto option_premsted = app.add_option("--premsted", folder_path, "clustering by the pre-generated mst files rather than genomes for clust-mst");
 	auto flag_newick_tree = app.add_flag("--newick-tree", is_newick_tree, "output the newick tree format file for clust-mst");
-	auto flag_phylip_tree = app.add_flag("--phylip-tree", is_phylip_tree, "output the PHYLIP tree format file for clust-mst");
+	auto flag_phylip_tree = app.add_flag("--phylip-tree", is_phylip_tree, "output a PHYLIP-compatible tree file: tree count followed by the Newick-formatted MST");
 	auto flag_nexus_tree = app.add_flag("--nexus-tree", is_nexus_tree, "output the NEXUS tree format file for clust-mst");
 	auto flag_linkage_matrix = app.add_flag("--linkage-matrix", is_linkage_matrix, "output the single-linkage linkage matrix for clust-mst");
 	auto flag_auto_threshold = app.add_flag("--auto-threshold", is_auto_threshold, "automatically select optimal threshold based on MST edge length distribution");

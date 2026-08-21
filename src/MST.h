@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_set>
 #include "SketchInfo.h"
+#include "MSTTypes.h"
 struct NeighborNode{
 	int id;
 	double distance;
@@ -13,13 +14,6 @@ struct NeighborNode{
 		distance = d;
 	}
 };
-
-struct EdgeInfo{
-	int preNode;
-	int sufNode;
-	double dist;
-};
-
 
 struct Graph{
 	int node;
